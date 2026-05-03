@@ -1,0 +1,117 @@
+/** Aggregates individual African country OSM data downloads. */
+namespace osm.Africa.cache {
+  use osm.types
+  use osm.cache.Africa
+
+  /** Caches each African country individually in parallel. */
+  facet AfricaIndividually() => (cache: [OSMCache]) andThen {
+    algeria = osm.cache.Africa.Algeria()
+    angola = osm.cache.Africa.Angola()
+    benin = osm.cache.Africa.Benin()
+    botswana = osm.cache.Africa.Botswana()
+    burkinaFaso = osm.cache.Africa.BurkinaFaso()
+    burundi = osm.cache.Africa.Burundi()
+    capeVerde = osm.cache.Africa.CapeVerde()
+    cameroon = osm.cache.Africa.Cameroon()
+    centralAfricanRepublic = osm.cache.Africa.CentralAfricanRepublic()
+    chad = osm.cache.Africa.Chad()
+    comores = osm.cache.Africa.Comores()
+    congo_Brazzaville = osm.cache.Africa.Congo_Brazzaville()
+    congo_Kinshasa = osm.cache.Africa.Congo_Kinshasa()
+    djibouti = osm.cache.Africa.Djibouti()
+    egypt = osm.cache.Africa.Egypt()
+    equatorialGuinea = osm.cache.Africa.EquatorialGuinea()
+    eritrea = osm.cache.Africa.Eritrea()
+    eswatini = osm.cache.Africa.Eswatini()
+    ethiopia = osm.cache.Africa.Ethiopia()
+    gabon = osm.cache.Africa.Gabon()
+    gambia = osm.cache.Africa.Gambia()
+    ghana = osm.cache.Africa.Ghana()
+    guinea = osm.cache.Africa.Guinea()
+    guineaBissau = osm.cache.Africa.GuineaBissau()
+    kenya = osm.cache.Africa.Kenya()
+    lesotho = osm.cache.Africa.Lesotho()
+    liberia = osm.cache.Africa.Liberia()
+    libya = osm.cache.Africa.Libya()
+    madagascar = osm.cache.Africa.Madagascar()
+    malawi = osm.cache.Africa.Malawi()
+    mali = osm.cache.Africa.Mali()
+    mauritania = osm.cache.Africa.Mauritania()
+    mauritius = osm.cache.Africa.Mauritius()
+    morocco = osm.cache.Africa.Morocco()
+    mozambique = osm.cache.Africa.Mozambique()
+    namibia = osm.cache.Africa.Namibia()
+    niger = osm.cache.Africa.Niger()
+    nigeria = osm.cache.Africa.Nigeria()
+    rwanda = osm.cache.Africa.Rwanda()
+    saoTomeAndPrincipe = osm.cache.Africa.SaoTomeAndPrincipe()
+    senegal = osm.cache.Africa.Senegal()
+    seychelles = osm.cache.Africa.Seychelles()
+    sierraLeone = osm.cache.Africa.SierraLeone()
+    somalia = osm.cache.Africa.Somalia()
+    southAfrica = osm.cache.Africa.SouthAfrica()
+    southSudan = osm.cache.Africa.SouthSudan()
+    sudan = osm.cache.Africa.Sudan()
+    tanzania = osm.cache.Africa.Tanzania()
+    togo = osm.cache.Africa.Togo()
+    tunisia = osm.cache.Africa.Tunisia()
+    uganda = osm.cache.Africa.Uganda()
+    zambia = osm.cache.Africa.Zambia()
+    zimbabwe = osm.cache.Africa.Zimbabwe()
+
+    yield AfricaIndividually(cache =
+      algeria.cache ++
+      angola.cache ++
+      benin.cache ++
+      botswana.cache ++
+      burkinaFaso.cache ++
+      burundi.cache ++
+      capeVerde.cache ++
+      cameroon.cache ++
+      centralAfricanRepublic.cache ++
+      chad.cache ++
+      comores.cache ++
+      congo_Brazzaville.cache ++
+      congo_Kinshasa.cache ++
+      djibouti.cache ++
+      egypt.cache ++
+      equatorialGuinea.cache ++
+      eritrea.cache ++
+      eswatini.cache ++
+      ethiopia.cache ++
+      gabon.cache ++
+      gambia.cache ++
+      ghana.cache ++
+      guinea.cache ++
+      guineaBissau.cache ++
+      kenya.cache ++
+      lesotho.cache ++
+      liberia.cache ++
+      libya.cache ++
+      madagascar.cache ++
+      malawi.cache ++
+      mali.cache ++
+      mauritania.cache ++
+      mauritius.cache ++
+      morocco.cache ++
+      mozambique.cache ++
+      namibia.cache ++
+      niger.cache ++
+      nigeria.cache ++
+      rwanda.cache ++
+      saoTomeAndPrincipe.cache ++
+      senegal.cache ++
+      seychelles.cache ++
+      sierraLeone.cache ++
+      somalia.cache ++
+      southAfrica.cache ++
+      southSudan.cache ++
+      sudan.cache ++
+      tanzania.cache ++
+      togo.cache ++
+      tunisia.cache ++
+      uganda.cache ++
+      zambia.cache ++
+      zimbabwe.cache)
+  }
+}

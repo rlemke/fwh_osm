@@ -1,0 +1,35 @@
+/** Runs composed analysis workflows for 25 US states in parallel. */
+namespace osm.UnitedStates.analysis {
+  use osm.types
+
+  /** Runs AnalyzeRegion for 25 US states. */
+  workflow AnalyzeStates_25() => (states_completed: Long) andThen {
+    alabama = AnalyzeRegion(region = "Alabama")
+    alaska = AnalyzeRegion(region = "Alaska")
+    arizona = AnalyzeRegion(region = "Arizona")
+    arkansas = AnalyzeRegion(region = "Arkansas")
+    california = AnalyzeRegion(region = "California")
+    colorado = AnalyzeRegion(region = "Colorado")
+    connecticut = AnalyzeRegion(region = "Connecticut")
+    delaware = AnalyzeRegion(region = "Delaware")
+    districtOfColumbia = AnalyzeRegion(region = "DistrictOfColumbia")
+    florida = AnalyzeRegion(region = "Florida")
+    georgia = AnalyzeRegion(region = "GeorgiaUS")
+    hawaii = AnalyzeRegion(region = "Hawaii")
+    idaho = AnalyzeRegion(region = "Idaho")
+    illinois = AnalyzeRegion(region = "Illinois")
+    indiana = AnalyzeRegion(region = "Indiana")
+    iowa = AnalyzeRegion(region = "Iowa")
+    kansas = AnalyzeRegion(region = "Kansas")
+    kentucky = AnalyzeRegion(region = "Kentucky")
+    louisiana = AnalyzeRegion(region = "Louisiana")
+    maine = AnalyzeRegion(region = "Maine")
+    maryland = AnalyzeRegion(region = "Maryland")
+    massachusetts = AnalyzeRegion(region = "Massachusetts")
+    michigan = AnalyzeRegion(region = "Michigan")
+    minnesota = AnalyzeRegion(region = "Minnesota")
+    mississippi = AnalyzeRegion(region = "Mississippi")
+    yield AnalyzeStates_25(states_completed = 25)
+  }
+
+}

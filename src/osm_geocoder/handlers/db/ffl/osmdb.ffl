@@ -1,0 +1,25 @@
+// OSM MongoDB import facets — import GeoJSON extractor output into MongoDB
+// with 2dsphere spatial indexing for geospatial queries.
+
+/** MongoDB geospatial import for OSM GeoJSON extractor output. */
+namespace osm.db {
+
+    /** Result of importing a GeoJSON dataset into MongoDB. */
+    schema ImportResult {
+        imported_count: Long,
+        dataset_key: String,
+        collection: String
+    }
+
+    /** Import a GeoJSON FeatureCollection into MongoDB osm_features collection. */
+    event facet ImportGeoJSON(
+        output_path: String,
+        category: String,
+        region: String,
+        feature_count: Long
+    ) => (
+        imported_count: Long,
+        dataset_key: String,
+        collection: String
+    )
+}

@@ -1,0 +1,36 @@
+/** Aggregates individual Central American and Caribbean country OSM data downloads. */
+namespace osm.CentralAmerica.cache {
+  use osm.types
+  use osm.cache.CentralAmerica
+
+  /** Caches each Central American and Caribbean country individually in parallel. */
+  facet CentralAmericaIndividually () => (cache: [OSMCache]) andThen {
+
+    bahamas = osm.cache.CentralAmerica.Bahamas()
+    belize = osm.cache.CentralAmerica.Belize()
+    costaRica = osm.cache.CentralAmerica.CostaRica()
+    cuba = osm.cache.CentralAmerica.Cuba()
+    elSalvador = osm.cache.CentralAmerica.ElSalvador()
+    dominicanRepublic = osm.cache.CentralAmerica.DominicanRepublic()
+    guatemala = osm.cache.CentralAmerica.Guatemala()
+    haiti = osm.cache.CentralAmerica.Haiti()
+    honduras = osm.cache.CentralAmerica.Honduras()
+    jamaica = osm.cache.CentralAmerica.Jamaica()
+    nicaragua = osm.cache.CentralAmerica.Nicaragua()
+    panama = osm.cache.CentralAmerica.Panama()
+
+    yield CentralAmericaIndividually( cache =
+      bahamas.cache ++
+      belize.cache ++
+      costaRica.cache ++
+      cuba.cache ++
+      elSalvador.cache ++
+      dominicanRepublic.cache ++
+      guatemala.cache ++
+      haiti.cache ++
+      honduras.cache ++
+      jamaica.cache ++
+      nicaragua.cache ++
+      panama.cache)
+   }
+}

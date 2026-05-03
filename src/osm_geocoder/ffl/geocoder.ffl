@@ -1,0 +1,32 @@
+// OSM Geocoder — resolve addresses to geographic coordinates
+//
+// This workflow accepts an address string, dispatches it to the
+// Geocode event facet (handled by an external agent), and returns
+// the latitude/longitude result.
+
+/** Address-to-coordinate geocoding using OSM Nominatim. */
+namespace osm.geocode {
+
+    /** Geographic coordinate with human-readable display name. */
+    schema GeoCoordinate {
+        lat: String,
+        lon: String,
+        display_name: String
+    }
+
+    /** Resolves a street address to geographic coordinates via an external geocoding agent. */
+    event facet Geocode(address: String) => (result: GeoCoordinate)
+
+    /** Geocodes a single address and returns its coordinates. */
+    workflow GeocodeAddress(address: String) => (location: GeoCoordinate) andThen {
+        geo = Geocode(address = $.address)
+        yield GeocodeAddress(location = geo.result)
+    }
+
+    /** Geocodes multiple addresses in parallel using foreach iteration. */
+    workflow GeocodeAll(addresses: Json) => (locations: Json) andThen foreach addr in $.addresses {
+        geo = Geocode(address = addr.value)
+        yield GeocodeAll(locations = geo.result)
+    }
+
+}

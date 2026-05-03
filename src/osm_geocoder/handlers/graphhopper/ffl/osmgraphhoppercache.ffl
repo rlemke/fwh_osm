@@ -1,0 +1,1372 @@
+/** GraphHopper routing graph cache facets for African countries. */
+namespace osm.cache.GraphHopper.Africa {
+    use osm.types
+    use osm.ops.GraphHopper
+
+    /** Builds a routing graph for all African countries combined. */
+    facet AllAfrica(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        allAfrica = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield AllAfrica(graph = allAfrica.graph)
+    }
+    /** Builds a routing graph for Africa. */
+    facet Africa(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        africa = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Africa(graph = africa.graph)
+    }
+    /** Builds a routing graph for Algeria. */
+    facet Algeria(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        algeria = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Algeria(graph = algeria.graph)
+    }
+    /** Builds a routing graph for Angola. */
+    facet Angola(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        angola = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Angola(graph = angola.graph)
+    }
+    /** Builds a routing graph for Benin. */
+    facet Benin(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        benin = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Benin(graph = benin.graph)
+    }
+    /** Builds a routing graph for Botswana. */
+    facet Botswana(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        botswana = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Botswana(graph = botswana.graph)
+    }
+    /** Builds a routing graph for Burkina Faso. */
+    facet BurkinaFaso(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        burkinaFaso = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield BurkinaFaso(graph = burkinaFaso.graph)
+    }
+    /** Builds a routing graph for Burundi. */
+    facet Burundi(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        burundi = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Burundi(graph = burundi.graph)
+    }
+    /** Builds a routing graph for Cape Verde. */
+    facet CapeVerde(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        capeVerde = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield CapeVerde(graph = capeVerde.graph)
+    }
+    /** Builds a routing graph for Cameroon. */
+    facet Cameroon(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        cameroon = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Cameroon(graph = cameroon.graph)
+    }
+    /** Builds a routing graph for Central African Republic. */
+    facet CentralAfricanRepublic(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        centralAfricanRepublic = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield CentralAfricanRepublic(graph = centralAfricanRepublic.graph)
+    }
+    /** Builds a routing graph for Chad. */
+    facet Chad(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        chad = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Chad(graph = chad.graph)
+    }
+    /** Builds a routing graph for Comores. */
+    facet Comores(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        comores = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Comores(graph = comores.graph)
+    }
+    /** Builds a routing graph for Congo_Brazzaville. */
+    facet Congo_Brazzaville(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        congo_Brazzaville = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Congo_Brazzaville(graph = congo_Brazzaville.graph)
+    }
+    /** Builds a routing graph for Congo_Kinshasa. */
+    facet Congo_Kinshasa(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        congo_Kinshasa = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Congo_Kinshasa(graph = congo_Kinshasa.graph)
+    }
+    /** Builds a routing graph for Djibouti. */
+    facet Djibouti(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        djibouti = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Djibouti(graph = djibouti.graph)
+    }
+    /** Builds a routing graph for Egypt. */
+    facet Egypt(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        egypt = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Egypt(graph = egypt.graph)
+    }
+    /** Builds a routing graph for Equatorial Guinea. */
+    facet EquatorialGuinea(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        equatorialGuinea = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield EquatorialGuinea(graph = equatorialGuinea.graph)
+    }
+    /** Builds a routing graph for Eritrea. */
+    facet Eritrea(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        eritrea = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Eritrea(graph = eritrea.graph)
+    }
+    /** Builds a routing graph for Eswatini. */
+    facet Eswatini(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        eswatini = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Eswatini(graph = eswatini.graph)
+    }
+    /** Builds a routing graph for Ethiopia. */
+    facet Ethiopia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        ethiopia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Ethiopia(graph = ethiopia.graph)
+    }
+    /** Builds a routing graph for Gabon. */
+    facet Gabon(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        gabon = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Gabon(graph = gabon.graph)
+    }
+    /** Builds a routing graph for Gambia. */
+    facet Gambia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        gambia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Gambia(graph = gambia.graph)
+    }
+    /** Builds a routing graph for Ghana. */
+    facet Ghana(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        ghana = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Ghana(graph = ghana.graph)
+    }
+    /** Builds a routing graph for Guinea. */
+    facet Guinea(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        guinea = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Guinea(graph = guinea.graph)
+    }
+    /** Builds a routing graph for Guinea Bissau. */
+    facet GuineaBissau(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        guineaBissau = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield GuineaBissau(graph = guineaBissau.graph)
+    }
+    /** Builds a routing graph for Kenya. */
+    facet Kenya(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        kenya = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Kenya(graph = kenya.graph)
+    }
+    /** Builds a routing graph for Lesotho. */
+    facet Lesotho(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        lesotho = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Lesotho(graph = lesotho.graph)
+    }
+    /** Builds a routing graph for Liberia. */
+    facet Liberia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        liberia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Liberia(graph = liberia.graph)
+    }
+    /** Builds a routing graph for Libya. */
+    facet Libya(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        libya = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Libya(graph = libya.graph)
+    }
+    /** Builds a routing graph for Madagascar. */
+    facet Madagascar(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        madagascar = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Madagascar(graph = madagascar.graph)
+    }
+    /** Builds a routing graph for Malawi. */
+    facet Malawi(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        malawi = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Malawi(graph = malawi.graph)
+    }
+    /** Builds a routing graph for Mali. */
+    facet Mali(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        mali = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Mali(graph = mali.graph)
+    }
+    /** Builds a routing graph for Mauritania. */
+    facet Mauritania(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        mauritania = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Mauritania(graph = mauritania.graph)
+    }
+    /** Builds a routing graph for Mauritius. */
+    facet Mauritius(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        mauritius = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Mauritius(graph = mauritius.graph)
+    }
+    /** Builds a routing graph for Morocco. */
+    facet Morocco(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        morocco = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Morocco(graph = morocco.graph)
+    }
+    /** Builds a routing graph for Mozambique. */
+    facet Mozambique(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        mozambique = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Mozambique(graph = mozambique.graph)
+    }
+    /** Builds a routing graph for Namibia. */
+    facet Namibia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        namibia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Namibia(graph = namibia.graph)
+    }
+    /** Builds a routing graph for Niger. */
+    facet Niger(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        niger = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Niger(graph = niger.graph)
+    }
+    /** Builds a routing graph for Nigeria. */
+    facet Nigeria(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        nigeria = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Nigeria(graph = nigeria.graph)
+    }
+    /** Builds a routing graph for Rwanda. */
+    facet Rwanda(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        rwanda = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Rwanda(graph = rwanda.graph)
+    }
+    /** Builds a routing graph for Sao Tome And Principe. */
+    facet SaoTomeAndPrincipe(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        saoTomeAndPrincipe = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield SaoTomeAndPrincipe(graph = saoTomeAndPrincipe.graph)
+    }
+    /** Builds a routing graph for Senegal. */
+    facet Senegal(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        senegal = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Senegal(graph = senegal.graph)
+    }
+    /** Builds a routing graph for Seychelles. */
+    facet Seychelles(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        seychelles = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Seychelles(graph = seychelles.graph)
+    }
+    /** Builds a routing graph for Sierra Leone. */
+    facet SierraLeone(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        sierraLeone = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield SierraLeone(graph = sierraLeone.graph)
+    }
+    /** Builds a routing graph for Somalia. */
+    facet Somalia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        somalia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Somalia(graph = somalia.graph)
+    }
+    /** Builds a routing graph for South Africa. */
+    facet SouthAfrica(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        southAfrica = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield SouthAfrica(graph = southAfrica.graph)
+    }
+    /** Builds a routing graph for South Sudan. */
+    facet SouthSudan(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        southSudan = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield SouthSudan(graph = southSudan.graph)
+    }
+    /** Builds a routing graph for Sudan. */
+    facet Sudan(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        sudan = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Sudan(graph = sudan.graph)
+    }
+    /** Builds a routing graph for Tanzania. */
+    facet Tanzania(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        tanzania = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Tanzania(graph = tanzania.graph)
+    }
+    /** Builds a routing graph for Togo. */
+    facet Togo(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        togo = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Togo(graph = togo.graph)
+    }
+    /** Builds a routing graph for Tunisia. */
+    facet Tunisia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        tunisia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Tunisia(graph = tunisia.graph)
+    }
+    /** Builds a routing graph for Uganda. */
+    facet Uganda(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        uganda = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Uganda(graph = uganda.graph)
+    }
+    /** Builds a routing graph for Zambia. */
+    facet Zambia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        zambia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Zambia(graph = zambia.graph)
+    }
+    /** Builds a routing graph for Zimbabwe. */
+    facet Zimbabwe(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        zimbabwe = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Zimbabwe(graph = zimbabwe.graph)
+    }
+}
+
+/** GraphHopper routing graph cache facets for Asian countries. */
+namespace osm.cache.GraphHopper.Asia {
+    use osm.types
+    use osm.ops.GraphHopper
+
+    /** Builds a routing graph for all Asian countries combined. */
+    facet AllAsia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        allAsia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield AllAsia(graph = allAsia.graph)
+    }
+    /** Builds a routing graph for Asia. */
+    facet Asia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        asia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Asia(graph = asia.graph)
+    }
+    /** Builds a routing graph for Afghanistan. */
+    facet Afghanistan(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        afghanistan = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Afghanistan(graph = afghanistan.graph)
+    }
+    /** Builds a routing graph for Armenia. */
+    facet Armenia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        armenia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Armenia(graph = armenia.graph)
+    }
+    /** Builds a routing graph for Azerbaijan. */
+    facet Azerbaijan(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        azerbaijan = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Azerbaijan(graph = azerbaijan.graph)
+    }
+    /** Builds a routing graph for Bangladesh. */
+    facet Bangladesh(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        bangladesh = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Bangladesh(graph = bangladesh.graph)
+    }
+    /** Builds a routing graph for Bhutan. */
+    facet Bhutan(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        bhutan = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Bhutan(graph = bhutan.graph)
+    }
+    /** Builds a routing graph for Brunei. */
+    facet Brunei(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        brunei = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Brunei(graph = brunei.graph)
+    }
+    /** Builds a routing graph for Cambodia. */
+    facet Cambodia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        cambodia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Cambodia(graph = cambodia.graph)
+    }
+    /** Builds a routing graph for China. */
+    facet China(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        china = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield China(graph = china.graph)
+    }
+    /** Builds a routing graph for East Timor. */
+    facet EastTimor(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        eastTimor = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield EastTimor(graph = eastTimor.graph)
+    }
+    /** Builds a routing graph for GCC States. */
+    facet GCCStates(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        gCCStates = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield GCCStates(graph = gCCStates.graph)
+    }
+    /** Builds a routing graph for India. */
+    facet India(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        india = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield India(graph = india.graph)
+    }
+    /** Builds a routing graph for Indonesia. */
+    facet Indonesia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        indonesia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Indonesia(graph = indonesia.graph)
+    }
+    /** Builds a routing graph for Iran. */
+    facet Iran(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        iran = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Iran(graph = iran.graph)
+    }
+    /** Builds a routing graph for Iraq. */
+    facet Iraq(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        iraq = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Iraq(graph = iraq.graph)
+    }
+    /** Builds a routing graph for Japan. */
+    facet Japan(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        japan = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Japan(graph = japan.graph)
+    }
+    /** Builds a routing graph for Jordan. */
+    facet Jordan(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        jordan = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Jordan(graph = jordan.graph)
+    }
+    /** Builds a routing graph for Kazakhstan. */
+    facet Kazakhstan(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        kazakhstan = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Kazakhstan(graph = kazakhstan.graph)
+    }
+    /** Builds a routing graph for Kyrgyzstan. */
+    facet Kyrgyzstan(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        kyrgyzstan = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Kyrgyzstan(graph = kyrgyzstan.graph)
+    }
+    /** Builds a routing graph for Laos. */
+    facet Laos(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        laos = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Laos(graph = laos.graph)
+    }
+    /** Builds a routing graph for Lebanon. */
+    facet Lebanon(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        lebanon = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Lebanon(graph = lebanon.graph)
+    }
+    /** Builds a routing graph for Malaysia. */
+    facet Malaysia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        malaysia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Malaysia(graph = malaysia.graph)
+    }
+    /** Builds a routing graph for Maldives. */
+    facet Maldives(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        maldives = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Maldives(graph = maldives.graph)
+    }
+    /** Builds a routing graph for Mongolia. */
+    facet Mongolia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        mongolia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Mongolia(graph = mongolia.graph)
+    }
+    /** Builds a routing graph for Myanmar. */
+    facet Myanmar(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        myanmar = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Myanmar(graph = myanmar.graph)
+    }
+    /** Builds a routing graph for Nepal. */
+    facet Nepal(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        nepal = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Nepal(graph = nepal.graph)
+    }
+    /** Builds a routing graph for North Korea. */
+    facet NorthKorea(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        northKorea = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield NorthKorea(graph = northKorea.graph)
+    }
+    /** Builds a routing graph for Pakistan. */
+    facet Pakistan(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        pakistan = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Pakistan(graph = pakistan.graph)
+    }
+    /** Builds a routing graph for Israel And Palestine. */
+    facet IsraelAndPalestine(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        israelAndPalestine = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield IsraelAndPalestine(graph = israelAndPalestine.graph)
+    }
+    /** Builds a routing graph for Philippines. */
+    facet Philippines(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        philippines = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Philippines(graph = philippines.graph)
+    }
+    /** Builds a routing graph for Saudi Arabia. */
+    facet SaudiArabia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        saudiArabia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield SaudiArabia(graph = saudiArabia.graph)
+    }
+    /** Builds a routing graph for Singapore. */
+    facet Singapore(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        singapore = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Singapore(graph = singapore.graph)
+    }
+    /** Builds a routing graph for South Korea. */
+    facet SouthKorea(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        southKorea = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield SouthKorea(graph = southKorea.graph)
+    }
+    /** Builds a routing graph for Sri Lanka. */
+    facet SriLanka(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        sriLanka = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield SriLanka(graph = sriLanka.graph)
+    }
+    /** Builds a routing graph for Syria. */
+    facet Syria(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        syria = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Syria(graph = syria.graph)
+    }
+    /** Builds a routing graph for Tajikistan. */
+    facet Tajikistan(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        tajikistan = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Tajikistan(graph = tajikistan.graph)
+    }
+    /** Builds a routing graph for Taiwan. */
+    facet Taiwan(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        taiwan = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Taiwan(graph = taiwan.graph)
+    }
+    /** Builds a routing graph for Thailand. */
+    facet Thailand(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        thailand = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Thailand(graph = thailand.graph)
+    }
+    /** Builds a routing graph for Turkmenistan. */
+    facet Turkmenistan(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        turkmenistan = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Turkmenistan(graph = turkmenistan.graph)
+    }
+    /** Builds a routing graph for Uzbekistan. */
+    facet Uzbekistan(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        uzbekistan = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Uzbekistan(graph = uzbekistan.graph)
+    }
+    /** Builds a routing graph for Vietnam. */
+    facet Vietnam(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        vietnam = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Vietnam(graph = vietnam.graph)
+    }
+    /** Builds a routing graph for Yemen. */
+    facet Yemen(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        yemen = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Yemen(graph = yemen.graph)
+    }
+}
+
+/** GraphHopper routing graph cache facets for Australia and Oceania. */
+namespace osm.cache.GraphHopper.Australia {
+    use osm.types
+    use osm.ops.GraphHopper
+
+    /** Builds a routing graph for all Australia/Oceania regions combined. */
+    facet AllAustralia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        allAustralia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield AllAustralia(graph = allAustralia.graph)
+    }
+    /** Builds a routing graph for Australia. */
+    facet Australia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        australia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Australia(graph = australia.graph)
+    }
+    /** Builds a routing graph for Fiji. */
+    facet Fiji(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        fiji = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Fiji(graph = fiji.graph)
+    }
+    /** Builds a routing graph for Kiribati. */
+    facet Kiribati(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        kiribati = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Kiribati(graph = kiribati.graph)
+    }
+    /** Builds a routing graph for Marshall Islands. */
+    facet MarshallIslands(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        marshallIslands = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield MarshallIslands(graph = marshallIslands.graph)
+    }
+    /** Builds a routing graph for Micronesia. */
+    facet Micronesia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        micronesia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Micronesia(graph = micronesia.graph)
+    }
+    /** Builds a routing graph for Nauru. */
+    facet Nauru(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        nauru = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Nauru(graph = nauru.graph)
+    }
+    /** Builds a routing graph for New Caledonia. */
+    facet NewCaledonia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        newCaledonia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield NewCaledonia(graph = newCaledonia.graph)
+    }
+    /** Builds a routing graph for New Zealand. */
+    facet NewZealand(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        newZealand = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield NewZealand(graph = newZealand.graph)
+    }
+    /** Builds a routing graph for Palau. */
+    facet Palau(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        palau = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Palau(graph = palau.graph)
+    }
+    /** Builds a routing graph for Papua New Guinea. */
+    facet PapuaNewGuinea(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        papuaNewGuinea = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield PapuaNewGuinea(graph = papuaNewGuinea.graph)
+    }
+    /** Builds a routing graph for Samoa. */
+    facet Samoa(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        samoa = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Samoa(graph = samoa.graph)
+    }
+    /** Builds a routing graph for Solomon Islands. */
+    facet SolomonIslands(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        solomonIslands = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield SolomonIslands(graph = solomonIslands.graph)
+    }
+    /** Builds a routing graph for Tonga. */
+    facet Tonga(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        tonga = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Tonga(graph = tonga.graph)
+    }
+    /** Builds a routing graph for Tuvalu. */
+    facet Tuvalu(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        tuvalu = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Tuvalu(graph = tuvalu.graph)
+    }
+    /** Builds a routing graph for Vanuatu. */
+    facet Vanuatu(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        vanuatu = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Vanuatu(graph = vanuatu.graph)
+    }
+}
+
+/** GraphHopper routing graph cache facets for European countries. */
+namespace osm.cache.GraphHopper.Europe {
+    use osm.types
+    use osm.ops.GraphHopper
+
+    /** Builds a routing graph for all European countries combined. */
+    facet AllEurope(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        allEurope = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield AllEurope(graph = allEurope.graph)
+    }
+    /** Builds a routing graph for Europe. */
+    facet Europe(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        europe = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Europe(graph = europe.graph)
+    }
+    /** Builds a routing graph for Albania. */
+    facet Albania(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        albania = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Albania(graph = albania.graph)
+    }
+    /** Builds a routing graph for Andorra. */
+    facet Andorra(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        andorra = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Andorra(graph = andorra.graph)
+    }
+    /** Builds a routing graph for Austria. */
+    facet Austria(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        austria = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Austria(graph = austria.graph)
+    }
+    /** Builds a routing graph for Belarus. */
+    facet Belarus(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        belarus = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Belarus(graph = belarus.graph)
+    }
+    /** Builds a routing graph for Belgium. */
+    facet Belgium(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        belgium = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Belgium(graph = belgium.graph)
+    }
+    /** Builds a routing graph for Bosnia Herzegovina. */
+    facet BosniaHerzegovina(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        bosniaHerzegovina = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield BosniaHerzegovina(graph = bosniaHerzegovina.graph)
+    }
+    /** Builds a routing graph for Bulgaria. */
+    facet Bulgaria(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        bulgaria = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Bulgaria(graph = bulgaria.graph)
+    }
+    /** Builds a routing graph for Croatia. */
+    facet Croatia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        croatia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Croatia(graph = croatia.graph)
+    }
+    /** Builds a routing graph for Cyprus. */
+    facet Cyprus(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        cyprus = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Cyprus(graph = cyprus.graph)
+    }
+    /** Builds a routing graph for Czech Republic. */
+    facet CzechRepublic(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        czechRepublic = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield CzechRepublic(graph = czechRepublic.graph)
+    }
+    /** Builds a routing graph for Denmark. */
+    facet Denmark(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        denmark = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Denmark(graph = denmark.graph)
+    }
+    /** Builds a routing graph for Estonia. */
+    facet Estonia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        estonia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Estonia(graph = estonia.graph)
+    }
+    /** Builds a routing graph for Faroe Islands. */
+    facet FaroeIslands(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        faroeIslands = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield FaroeIslands(graph = faroeIslands.graph)
+    }
+    /** Builds a routing graph for Finland. */
+    facet Finland(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        finland = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Finland(graph = finland.graph)
+    }
+    /** Builds a routing graph for France. */
+    facet France(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        france = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield France(graph = france.graph)
+    }
+    /** Builds a routing graph for Georgia. */
+    facet Georgia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        georgia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Georgia(graph = georgia.graph)
+    }
+    /** Builds a routing graph for Germany. */
+    facet Germany(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        germany = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Germany(graph = germany.graph)
+    }
+    /** Builds a routing graph for Greece. */
+    facet Greece(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        greece = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Greece(graph = greece.graph)
+    }
+    /** Builds a routing graph for Hungary. */
+    facet Hungary(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        hungary = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Hungary(graph = hungary.graph)
+    }
+    /** Builds a routing graph for Iceland. */
+    facet Iceland(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        iceland = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Iceland(graph = iceland.graph)
+    }
+    /** Builds a routing graph for Ireland. */
+    facet Ireland(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        ireland = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Ireland(graph = ireland.graph)
+    }
+    /** Builds a routing graph for Isle Of Man. */
+    facet IsleOfMan(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        isleOfMan = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield IsleOfMan(graph = isleOfMan.graph)
+    }
+    /** Builds a routing graph for Italy. */
+    facet Italy(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        italy = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Italy(graph = italy.graph)
+    }
+    /** Builds a routing graph for Kosovo. */
+    facet Kosovo(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        kosovo = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Kosovo(graph = kosovo.graph)
+    }
+    /** Builds a routing graph for Latvia. */
+    facet Latvia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        latvia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Latvia(graph = latvia.graph)
+    }
+    /** Builds a routing graph for Liechtenstein. */
+    facet Liechtenstein(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        liechtenstein = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Liechtenstein(graph = liechtenstein.graph)
+    }
+    /** Builds a routing graph for Lithuania. */
+    facet Lithuania(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        lithuania = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Lithuania(graph = lithuania.graph)
+    }
+    /** Builds a routing graph for Luxembourg. */
+    facet Luxembourg(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        luxembourg = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Luxembourg(graph = luxembourg.graph)
+    }
+    /** Builds a routing graph for Malta. */
+    facet Malta(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        malta = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Malta(graph = malta.graph)
+    }
+    /** Builds a routing graph for Moldova. */
+    facet Moldova(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        moldova = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Moldova(graph = moldova.graph)
+    }
+    /** Builds a routing graph for Monaco. */
+    facet Monaco(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        monaco = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Monaco(graph = monaco.graph)
+    }
+    /** Builds a routing graph for Montenegro. */
+    facet Montenegro(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        montenegro = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Montenegro(graph = montenegro.graph)
+    }
+    /** Builds a routing graph for Netherlands. */
+    facet Netherlands(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        netherlands = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Netherlands(graph = netherlands.graph)
+    }
+    /** Builds a routing graph for North Macedonia. */
+    facet NorthMacedonia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        northMacedonia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield NorthMacedonia(graph = northMacedonia.graph)
+    }
+    /** Builds a routing graph for Norway. */
+    facet Norway(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        norway = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Norway(graph = norway.graph)
+    }
+    /** Builds a routing graph for Poland. */
+    facet Poland(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        poland = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Poland(graph = poland.graph)
+    }
+    /** Builds a routing graph for Portugal. */
+    facet Portugal(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        portugal = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Portugal(graph = portugal.graph)
+    }
+    /** Builds a routing graph for Romania. */
+    facet Romania(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        romania = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Romania(graph = romania.graph)
+    }
+    /** Builds a routing graph for Russia. */
+    facet Russia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        russia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Russia(graph = russia.graph)
+    }
+    /** Builds a routing graph for Serbia. */
+    facet Serbia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        serbia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Serbia(graph = serbia.graph)
+    }
+    /** Builds a routing graph for Slovakia. */
+    facet Slovakia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        slovakia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Slovakia(graph = slovakia.graph)
+    }
+    /** Builds a routing graph for Slovenia. */
+    facet Slovenia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        slovenia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Slovenia(graph = slovenia.graph)
+    }
+    /** Builds a routing graph for Spain. */
+    facet Spain(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        spain = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Spain(graph = spain.graph)
+    }
+    /** Builds a routing graph for Sweden. */
+    facet Sweden(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        sweden = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Sweden(graph = sweden.graph)
+    }
+    /** Builds a routing graph for Switzerland. */
+    facet Switzerland(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        switzerland = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Switzerland(graph = switzerland.graph)
+    }
+    /** Builds a routing graph for Turkey. */
+    facet Turkey(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        turkey = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Turkey(graph = turkey.graph)
+    }
+    /** Builds a routing graph for Ukraine. */
+    facet Ukraine(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        ukraine = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Ukraine(graph = ukraine.graph)
+    }
+    /** Builds a routing graph for United Kingdom. */
+    facet UnitedKingdom(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        unitedKingdom = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield UnitedKingdom(graph = unitedKingdom.graph)
+    }
+}
+
+/** GraphHopper routing graph cache facets for North American countries. */
+namespace osm.cache.GraphHopper.NorthAmerica {
+    use osm.types
+    use osm.ops.GraphHopper
+
+    /** Builds a routing graph for all North American countries combined. */
+    facet AllNorthAmerica(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        allNorthAmerica = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield AllNorthAmerica(graph = allNorthAmerica.graph)
+    }
+    /** Builds a routing graph for North America. */
+    facet NorthAmerica(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        northAmerica = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield NorthAmerica(graph = northAmerica.graph)
+    }
+    /** Builds a routing graph for Canada. */
+    facet Canada(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        canada = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Canada(graph = canada.graph)
+    }
+    /** Builds a routing graph for Greenland. */
+    facet Greenland(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        greenland = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Greenland(graph = greenland.graph)
+    }
+    /** Builds a routing graph for Mexico. */
+    facet Mexico(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        mexico = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Mexico(graph = mexico.graph)
+    }
+    /** Builds a routing graph for United States. */
+    facet UnitedStates(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        unitedStates = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield UnitedStates(graph = unitedStates.graph)
+    }
+}
+
+/** GraphHopper routing graph cache facets for South American countries. */
+namespace osm.cache.GraphHopper.SouthAmerica {
+    use osm.types
+    use osm.ops.GraphHopper
+
+    /** Builds a routing graph for all South American countries combined. */
+    facet AllSouthAmerica(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        allSouthAmerica = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield AllSouthAmerica(graph = allSouthAmerica.graph)
+    }
+    /** Builds a routing graph for South America. */
+    facet SouthAmerica(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        southAmerica = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield SouthAmerica(graph = southAmerica.graph)
+    }
+    /** Builds a routing graph for Argentina. */
+    facet Argentina(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        argentina = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Argentina(graph = argentina.graph)
+    }
+    /** Builds a routing graph for Bolivia. */
+    facet Bolivia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        bolivia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Bolivia(graph = bolivia.graph)
+    }
+    /** Builds a routing graph for Brazil. */
+    facet Brazil(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        brazil = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Brazil(graph = brazil.graph)
+    }
+    /** Builds a routing graph for Chile. */
+    facet Chile(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        chile = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Chile(graph = chile.graph)
+    }
+    /** Builds a routing graph for Colombia. */
+    facet Colombia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        colombia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Colombia(graph = colombia.graph)
+    }
+    /** Builds a routing graph for Ecuador. */
+    facet Ecuador(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        ecuador = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Ecuador(graph = ecuador.graph)
+    }
+    /** Builds a routing graph for Guyana. */
+    facet Guyana(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        guyana = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Guyana(graph = guyana.graph)
+    }
+    /** Builds a routing graph for Paraguay. */
+    facet Paraguay(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        paraguay = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Paraguay(graph = paraguay.graph)
+    }
+    /** Builds a routing graph for Peru. */
+    facet Peru(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        peru = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Peru(graph = peru.graph)
+    }
+    /** Builds a routing graph for Suriname. */
+    facet Suriname(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        suriname = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Suriname(graph = suriname.graph)
+    }
+    /** Builds a routing graph for Uruguay. */
+    facet Uruguay(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        uruguay = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Uruguay(graph = uruguay.graph)
+    }
+    /** Builds a routing graph for Venezuela. */
+    facet Venezuela(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        venezuela = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Venezuela(graph = venezuela.graph)
+    }
+}
+
+/** GraphHopper routing graph cache facets for Central American and Caribbean countries. */
+namespace osm.cache.GraphHopper.CentralAmerica {
+    use osm.types
+    use osm.ops.GraphHopper
+
+    /** Builds a routing graph for all Central American and Caribbean countries combined. */
+    facet AllCentralAmerica(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        allCentralAmerica = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield AllCentralAmerica(graph = allCentralAmerica.graph)
+    }
+    /** Builds a routing graph for Central America. */
+    facet CentralAmerica(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        centralAmerica = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield CentralAmerica(graph = centralAmerica.graph)
+    }
+    /** Builds a routing graph for Belize. */
+    facet Belize(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        belize = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Belize(graph = belize.graph)
+    }
+    /** Builds a routing graph for Costa Rica. */
+    facet CostaRica(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        costaRica = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield CostaRica(graph = costaRica.graph)
+    }
+    /** Builds a routing graph for Cuba. */
+    facet Cuba(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        cuba = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Cuba(graph = cuba.graph)
+    }
+    /** Builds a routing graph for El Salvador. */
+    facet ElSalvador(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        elSalvador = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield ElSalvador(graph = elSalvador.graph)
+    }
+    /** Builds a routing graph for Guatemala. */
+    facet Guatemala(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        guatemala = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Guatemala(graph = guatemala.graph)
+    }
+    /** Builds a routing graph for Haiti. */
+    facet Haiti(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        haiti = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Haiti(graph = haiti.graph)
+    }
+    /** Builds a routing graph for Honduras. */
+    facet Honduras(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        honduras = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Honduras(graph = honduras.graph)
+    }
+    /** Builds a routing graph for Jamaica. */
+    facet Jamaica(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        jamaica = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Jamaica(graph = jamaica.graph)
+    }
+    /** Builds a routing graph for Nicaragua. */
+    facet Nicaragua(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        nicaragua = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Nicaragua(graph = nicaragua.graph)
+    }
+    /** Builds a routing graph for Panama. */
+    facet Panama(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        panama = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Panama(graph = panama.graph)
+    }
+}
+
+/** GraphHopper routing graph cache facets for US states. */
+namespace osm.cache.GraphHopper.UnitedStates {
+    use osm.types
+    use osm.ops.GraphHopper
+
+    /** Builds a routing graph for all US states combined. */
+    facet AllUnitedStates(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        allUnitedStates = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield AllUnitedStates(graph = allUnitedStates.graph)
+    }
+    /** Builds a routing graph for Alabama. */
+    facet Alabama(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        alabama = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Alabama(graph = alabama.graph)
+    }
+    /** Builds a routing graph for Alaska. */
+    facet Alaska(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        alaska = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Alaska(graph = alaska.graph)
+    }
+    /** Builds a routing graph for Arizona. */
+    facet Arizona(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        arizona = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Arizona(graph = arizona.graph)
+    }
+    /** Builds a routing graph for Arkansas. */
+    facet Arkansas(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        arkansas = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Arkansas(graph = arkansas.graph)
+    }
+    /** Builds a routing graph for California. */
+    facet California(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        california = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield California(graph = california.graph)
+    }
+    /** Builds a routing graph for Colorado. */
+    facet Colorado(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        colorado = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Colorado(graph = colorado.graph)
+    }
+    /** Builds a routing graph for Connecticut. */
+    facet Connecticut(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        connecticut = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Connecticut(graph = connecticut.graph)
+    }
+    /** Builds a routing graph for Delaware. */
+    facet Delaware(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        delaware = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Delaware(graph = delaware.graph)
+    }
+    /** Builds a routing graph for District Of Columbia. */
+    facet DistrictOfColumbia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        districtOfColumbia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield DistrictOfColumbia(graph = districtOfColumbia.graph)
+    }
+    /** Builds a routing graph for Florida. */
+    facet Florida(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        florida = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Florida(graph = florida.graph)
+    }
+    /** Builds a routing graph for Georgia. */
+    facet Georgia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        georgia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Georgia(graph = georgia.graph)
+    }
+    /** Builds a routing graph for Hawaii. */
+    facet Hawaii(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        hawaii = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Hawaii(graph = hawaii.graph)
+    }
+    /** Builds a routing graph for Idaho. */
+    facet Idaho(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        idaho = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Idaho(graph = idaho.graph)
+    }
+    /** Builds a routing graph for Illinois. */
+    facet Illinois(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        illinois = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Illinois(graph = illinois.graph)
+    }
+    /** Builds a routing graph for Indiana. */
+    facet Indiana(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        indiana = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Indiana(graph = indiana.graph)
+    }
+    /** Builds a routing graph for Iowa. */
+    facet Iowa(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        iowa = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Iowa(graph = iowa.graph)
+    }
+    /** Builds a routing graph for Kansas. */
+    facet Kansas(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        kansas = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Kansas(graph = kansas.graph)
+    }
+    /** Builds a routing graph for Kentucky. */
+    facet Kentucky(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        kentucky = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Kentucky(graph = kentucky.graph)
+    }
+    /** Builds a routing graph for Louisiana. */
+    facet Louisiana(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        louisiana = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Louisiana(graph = louisiana.graph)
+    }
+    /** Builds a routing graph for Maine. */
+    facet Maine(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        maine = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Maine(graph = maine.graph)
+    }
+    /** Builds a routing graph for Maryland. */
+    facet Maryland(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        maryland = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Maryland(graph = maryland.graph)
+    }
+    /** Builds a routing graph for Massachusetts. */
+    facet Massachusetts(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        massachusetts = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Massachusetts(graph = massachusetts.graph)
+    }
+    /** Builds a routing graph for Michigan. */
+    facet Michigan(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        michigan = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Michigan(graph = michigan.graph)
+    }
+    /** Builds a routing graph for Minnesota. */
+    facet Minnesota(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        minnesota = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Minnesota(graph = minnesota.graph)
+    }
+    /** Builds a routing graph for Mississippi. */
+    facet Mississippi(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        mississippi = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Mississippi(graph = mississippi.graph)
+    }
+    /** Builds a routing graph for Missouri. */
+    facet Missouri(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        missouri = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Missouri(graph = missouri.graph)
+    }
+    /** Builds a routing graph for Montana. */
+    facet Montana(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        montana = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Montana(graph = montana.graph)
+    }
+    /** Builds a routing graph for Nebraska. */
+    facet Nebraska(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        nebraska = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Nebraska(graph = nebraska.graph)
+    }
+    /** Builds a routing graph for Nevada. */
+    facet Nevada(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        nevada = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Nevada(graph = nevada.graph)
+    }
+    /** Builds a routing graph for New Hampshire. */
+    facet NewHampshire(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        newHampshire = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield NewHampshire(graph = newHampshire.graph)
+    }
+    /** Builds a routing graph for New Jersey. */
+    facet NewJersey(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        newJersey = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield NewJersey(graph = newJersey.graph)
+    }
+    /** Builds a routing graph for New Mexico. */
+    facet NewMexico(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        newMexico = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield NewMexico(graph = newMexico.graph)
+    }
+    /** Builds a routing graph for New York. */
+    facet NewYork(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        newYork = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield NewYork(graph = newYork.graph)
+    }
+    /** Builds a routing graph for North Carolina. */
+    facet NorthCarolina(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        northCarolina = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield NorthCarolina(graph = northCarolina.graph)
+    }
+    /** Builds a routing graph for North Dakota. */
+    facet NorthDakota(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        northDakota = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield NorthDakota(graph = northDakota.graph)
+    }
+    /** Builds a routing graph for Ohio. */
+    facet Ohio(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        ohio = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Ohio(graph = ohio.graph)
+    }
+    /** Builds a routing graph for Oklahoma. */
+    facet Oklahoma(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        oklahoma = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Oklahoma(graph = oklahoma.graph)
+    }
+    /** Builds a routing graph for Oregon. */
+    facet Oregon(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        oregon = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Oregon(graph = oregon.graph)
+    }
+    /** Builds a routing graph for Pennsylvania. */
+    facet Pennsylvania(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        pennsylvania = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Pennsylvania(graph = pennsylvania.graph)
+    }
+    /** Builds a routing graph for Rhode Island. */
+    facet RhodeIsland(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        rhodeIsland = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield RhodeIsland(graph = rhodeIsland.graph)
+    }
+    /** Builds a routing graph for South Carolina. */
+    facet SouthCarolina(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        southCarolina = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield SouthCarolina(graph = southCarolina.graph)
+    }
+    /** Builds a routing graph for South Dakota. */
+    facet SouthDakota(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        southDakota = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield SouthDakota(graph = southDakota.graph)
+    }
+    /** Builds a routing graph for Tennessee. */
+    facet Tennessee(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        tennessee = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Tennessee(graph = tennessee.graph)
+    }
+    /** Builds a routing graph for Texas. */
+    facet Texas(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        texas = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Texas(graph = texas.graph)
+    }
+    /** Builds a routing graph for Utah. */
+    facet Utah(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        utah = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Utah(graph = utah.graph)
+    }
+    /** Builds a routing graph for Vermont. */
+    facet Vermont(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        vermont = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Vermont(graph = vermont.graph)
+    }
+    /** Builds a routing graph for Virginia. */
+    facet Virginia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        virginia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Virginia(graph = virginia.graph)
+    }
+    /** Builds a routing graph for Washington. */
+    facet Washington(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        washington = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Washington(graph = washington.graph)
+    }
+    /** Builds a routing graph for West Virginia. */
+    facet WestVirginia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        westVirginia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield WestVirginia(graph = westVirginia.graph)
+    }
+    /** Builds a routing graph for Wisconsin. */
+    facet Wisconsin(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        wisconsin = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Wisconsin(graph = wisconsin.graph)
+    }
+    /** Builds a routing graph for Wyoming. */
+    facet Wyoming(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        wyoming = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Wyoming(graph = wyoming.graph)
+    }
+}
+
+/** GraphHopper routing graph cache facets for Canadian provinces and territories. */
+namespace osm.cache.GraphHopper.Canada {
+    use osm.types
+    use osm.ops.GraphHopper
+
+    /** Builds a routing graph for all Canadian provinces and territories combined. */
+    facet AllCanada(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        allCanada = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield AllCanada(graph = allCanada.graph)
+    }
+    /** Builds a routing graph for Alberta. */
+    facet Alberta(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        alberta = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Alberta(graph = alberta.graph)
+    }
+    /** Builds a routing graph for British Columbia. */
+    facet BritishColumbia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        britishColumbia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield BritishColumbia(graph = britishColumbia.graph)
+    }
+    /** Builds a routing graph for Manitoba. */
+    facet Manitoba(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        manitoba = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Manitoba(graph = manitoba.graph)
+    }
+    /** Builds a routing graph for New Brunswick. */
+    facet NewBrunswick(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        newBrunswick = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield NewBrunswick(graph = newBrunswick.graph)
+    }
+    /** Builds a routing graph for Newfoundland And Labrador. */
+    facet NewfoundlandAndLabrador(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        newfoundlandAndLabrador = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield NewfoundlandAndLabrador(graph = newfoundlandAndLabrador.graph)
+    }
+    /** Builds a routing graph for Northwest Territories. */
+    facet NorthwestTerritories(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        northwestTerritories = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield NorthwestTerritories(graph = northwestTerritories.graph)
+    }
+    /** Builds a routing graph for Nova Scotia. */
+    facet NovaScotia(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        novaScotia = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield NovaScotia(graph = novaScotia.graph)
+    }
+    /** Builds a routing graph for Nunavut. */
+    facet Nunavut(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        nunavut = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Nunavut(graph = nunavut.graph)
+    }
+    /** Builds a routing graph for Ontario. */
+    facet Ontario(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        ontario = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Ontario(graph = ontario.graph)
+    }
+    /** Builds a routing graph for Prince Edward Island. */
+    facet PrinceEdwardIsland(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        princeEdwardIsland = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield PrinceEdwardIsland(graph = princeEdwardIsland.graph)
+    }
+    /** Builds a routing graph for Quebec. */
+    facet Quebec(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        quebec = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Quebec(graph = quebec.graph)
+    }
+    /** Builds a routing graph for Saskatchewan. */
+    facet Saskatchewan(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        saskatchewan = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Saskatchewan(graph = saskatchewan.graph)
+    }
+    /** Builds a routing graph for Yukon. */
+    facet Yukon(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        yukon = BuildGraph(cache = $.cache, profile = $.profile, recreate = $.recreate)
+        yield Yukon(graph = yukon.graph)
+    }
+}

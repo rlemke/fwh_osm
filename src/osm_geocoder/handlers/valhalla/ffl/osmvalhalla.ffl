@@ -1,0 +1,19 @@
+// Valhalla routing tileset operations.
+// Takes an OSM cache as input, builds tile pyramids.
+
+/** Valhalla routing tileset construction and management. */
+namespace osm.ops.Valhalla {
+    use osm.types
+
+    /** Builds (or returns cached) Valhalla tileset for a region. Valhalla tiles are profile-agnostic — one build serves auto/bicycle/pedestrian/truck/etc. at query time. */
+    event facet BuildTiles(cache: OSMCache, recreate: Boolean = false) => (tiles: ValhallaCache)
+
+    /** Bulk-mode equivalent of BuildTiles for FFL batch loops. */
+    event facet BuildTilesBatch(cache: OSMCache, recreate: Boolean = false) => (tiles: ValhallaCache)
+
+    /** Validates an existing tileset: confirms it exists and returns tile count. */
+    event facet ValidateTiles(tiles: ValhallaCache) => (valid: Boolean, tileCount: Long)
+
+    /** Deletes a built tileset directory. */
+    event facet CleanTiles(tiles: ValhallaCache) => (deleted: Boolean)
+}

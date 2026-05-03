@@ -1,0 +1,82 @@
+// Road network extraction from OSM data
+//
+// Extracts road network with attributes:
+// - Classification (motorway, primary, secondary, residential)
+// - Speed limits, surface type, lane count
+// - One-way status, access restrictions
+
+/** Road network extraction with classification, speed limits, and surface attributes. */
+namespace osm.Roads {
+    use osm.types
+
+    /** Extracted road data with classification, length, and attribute counts. */
+    schema RoadFeatures {
+        output_path: String,
+        feature_count: Long,
+        road_class: String,
+        total_length_km: Double,
+        with_speed_limit: Long,
+        format: String,
+        extraction_date: String
+    }
+
+    /** Aggregate road network statistics broken down by classification. */
+    schema RoadStats {
+        total_roads: Long,
+        total_length_km: Double,
+        motorway_km: Double,
+        primary_km: Double,
+        secondary_km: Double,
+        tertiary_km: Double,
+        residential_km: Double,
+        other_km: Double,
+        with_speed_limit: Long,
+        with_surface: Long,
+        with_lanes: Long,
+        one_way_count: Long
+    }
+
+    /** Extracts all roads from a region, optionally filtered by classification. */
+    event facet ExtractRoads(cache: OSMCache,
+        road_class: String = "all") => (result: RoadFeatures)
+
+    /** Extracts motorway/highway segments. */
+    event facet Motorways(cache: OSMCache) => (result: RoadFeatures)
+    /** Extracts primary roads. */
+    event facet PrimaryRoads(cache: OSMCache) => (result: RoadFeatures)
+    /** Extracts secondary roads. */
+    event facet SecondaryRoads(cache: OSMCache) => (result: RoadFeatures)
+    /** Extracts tertiary roads. */
+    event facet TertiaryRoads(cache: OSMCache) => (result: RoadFeatures)
+    /** Extracts residential streets. */
+    event facet ResidentialRoads(cache: OSMCache) => (result: RoadFeatures)
+
+    /** Extracts major roads only (motorway + primary + secondary). */
+    event facet MajorRoads(cache: OSMCache) => (result: RoadFeatures)
+
+    /** Extracts bridge segments. */
+    event facet Bridges(cache: OSMCache) => (result: RoadFeatures)
+    /** Extracts tunnel segments. */
+    event facet Tunnels(cache: OSMCache) => (result: RoadFeatures)
+    /** Extracts roundabout junctions. */
+    event facet Roundabouts(cache: OSMCache) => (result: RoadFeatures)
+
+    /** Extracts roads with paved surfaces. */
+    event facet PavedRoads(cache: OSMCache) => (result: RoadFeatures)
+    /** Extracts roads with unpaved surfaces. */
+    event facet UnpavedRoads(cache: OSMCache) => (result: RoadFeatures)
+
+    /** Extracts roads that have speed limit tags. */
+    event facet RoadsWithSpeedLimit(cache: OSMCache) => (result: RoadFeatures)
+
+    /** Computes aggregate road network statistics. */
+    event facet RoadStatistics(input_path: String) => (stats: RoadStats)
+
+    /** Filters pre-extracted roads by classification. */
+    event facet FilterRoadsByClass(input_path: String,
+        road_class: String) => (result: RoadFeatures)
+
+    /** Filters pre-extracted roads by speed limit range. */
+    event facet FilterBySpeedLimit(input_path: String,
+        min_speed: Long, max_speed: Long) => (result: RoadFeatures)
+}

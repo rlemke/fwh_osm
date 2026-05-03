@@ -1,0 +1,35 @@
+/** Aggregates individual Canadian province and territory OSM data downloads. */
+namespace osm.Canada.cache {
+  use osm.types
+  use osm.cache.Canada
+
+  /** Caches each Canadian province and territory individually in parallel. */
+  facet CanadaIndividually () => (cache: [OSMCache]) andThen {
+
+    alberta = osm.cache.Canada.Alberta()
+    britishColumbia = osm.cache.Canada.BritishColumbia()
+    manitoba = osm.cache.Canada.Manitoba()
+    newBrunswick = osm.cache.Canada.NewBrunswick()
+    newfoundlandAndLabrador = osm.cache.Canada.NewfoundlandAndLabrador()
+    novaScotia = osm.cache.Canada.NovaScotia()
+    ontario = osm.cache.Canada.Ontario()
+    princeEdwardIsland = osm.cache.Canada.PrinceEdwardIsland()
+    quebec = osm.cache.Canada.Quebec()
+    saskatchewan = osm.cache.Canada.Saskatchewan()
+    yukon = osm.cache.Canada.Yukon()
+
+    yield CanadaIndividually(cache = alberta.cache ++
+                             britishColumbia.cache ++
+                             manitoba.cache ++
+                             newBrunswick.cache ++
+                             newfoundlandAndLabrador.cache ++
+                             novaScotia.cache ++
+                             ontario.cache ++
+                             princeEdwardIsland.cache ++
+                             quebec.cache ++
+                             saskatchewan.cache ++
+                             yukon.cache)
+
+  }
+
+}

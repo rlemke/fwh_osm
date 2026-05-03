@@ -1,0 +1,21 @@
+// Simplest integration test workflow: AddOne
+//
+// Demonstrates the full pipeline: AFL source -> compile -> MongoStore ->
+// Evaluator -> AgentPoller -> handler -> completion.
+
+/** Provides a minimal event facet that increments an integer by one. */
+namespace handlers {
+    /** Accepts an integer and returns it incremented by one. */
+    event facet AddOne(input: Long) => (output: Long)
+}
+
+/** Integration test verifying the complete AFL compile-to-execution pipeline. */
+namespace test {
+    use handlers
+
+    /** Invokes AddOne and returns the incremented result. */
+    workflow TestAddOne(x: Long) => (result: Long) andThen {
+        step = AddOne(input = $.x)
+        yield TestAddOne(result = step.output)
+    }
+}

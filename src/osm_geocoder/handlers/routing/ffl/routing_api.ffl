@@ -1,0 +1,35 @@
+// Routing Adapter: Public API (OSRM demo / OpenRouteService)
+//
+// Zero-import routing via public HTTP APIs. No local graph build needed.
+// Uses OSRM demo server by default; set AFL_ORS_API_KEY for OpenRouteService.
+
+/** API routing adapter — routes via public HTTP APIs (OSRM demo or OpenRouteService). */
+namespace osm.Routing.API {
+    use osm.Routing.Types
+
+    /** Compute a point-to-point route between two waypoints via API. */
+    event facet Route(
+        from_lat: Double,
+        from_lon: Double,
+        from_name: String = "",
+        to_lat: Double,
+        to_lon: Double,
+        to_name: String = "",
+        profile: String = "car"
+    ) => (result: PointToPointResult)
+
+    /** Compute a multi-stop route through an ordered list of waypoints via API. */
+    event facet MultiStopRoute(
+        waypoints: String,
+        profile: String = "car"
+    ) => (result: MultiStopResult)
+
+    /** Compute an isochrone (reachability polygon) from a center point via API. */
+    event facet Isochrone(
+        center_lat: Double,
+        center_lon: Double,
+        center_name: String = "",
+        time_minutes: Long = 15,
+        profile: String = "car"
+    ) => (result: IsochroneResult)
+}

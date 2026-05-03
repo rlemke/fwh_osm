@@ -1,0 +1,32 @@
+/** Downloads OSM PBF caches for 20 US states in parallel. */
+namespace osm.UnitedStates.cache {
+  use osm.types
+  use osm.ops
+  use osm.cache.UnitedStates
+
+  /** Fetches and aggregates OSM cache data for 20 US states. */
+  workflow DownloadStates_20() => (cache: [OSMCache]) andThen {
+    alabama = Alabama()
+    alaska = Alaska()
+    arizona = Arizona()
+    arkansas = Arkansas()
+    california = California()
+    colorado = Colorado()
+    connecticut = Connecticut()
+    delaware = Delaware()
+    districtOfColumbia = DistrictOfColumbia()
+    florida = Florida()
+    georgia = osm.cache.UnitedStates.Georgia()
+    hawaii = Hawaii()
+    idaho = Idaho()
+    illinois = Illinois()
+    indiana = Indiana()
+    iowa = Iowa()
+    kansas = Kansas()
+    kentucky = Kentucky()
+    louisiana = Louisiana()
+    maine = Maine()
+    yield DownloadStates_20(cache = alabama.cache ++ alaska.cache ++ arizona.cache ++ arkansas.cache ++ california.cache ++ colorado.cache ++ connecticut.cache ++ delaware.cache ++ districtOfColumbia.cache ++ florida.cache ++ georgia.cache ++ hawaii.cache ++ idaho.cache ++ illinois.cache ++ indiana.cache ++ iowa.cache ++ kansas.cache ++ kentucky.cache ++ louisiana.cache ++ maine.cache)
+  }
+
+}

@@ -1,0 +1,57 @@
+/** Downloads OSM PBF caches for 45 US states in parallel. */
+namespace osm.UnitedStates.cache {
+  use osm.types
+  use osm.ops
+  use osm.cache.UnitedStates
+
+  /** Fetches and aggregates OSM cache data for 45 US states. */
+  workflow DownloadStates_45() => (cache: [OSMCache]) andThen {
+    alabama = Alabama()
+    alaska = Alaska()
+    arizona = Arizona()
+    arkansas = Arkansas()
+    california = California()
+    colorado = Colorado()
+    connecticut = Connecticut()
+    delaware = Delaware()
+    districtOfColumbia = DistrictOfColumbia()
+    florida = Florida()
+    georgia = osm.cache.UnitedStates.Georgia()
+    hawaii = Hawaii()
+    idaho = Idaho()
+    illinois = Illinois()
+    indiana = Indiana()
+    iowa = Iowa()
+    kansas = Kansas()
+    kentucky = Kentucky()
+    louisiana = Louisiana()
+    maine = Maine()
+    maryland = Maryland()
+    massachusetts = Massachusetts()
+    michigan = Michigan()
+    minnesota = Minnesota()
+    mississippi = Mississippi()
+    missouri = Missouri()
+    montana = Montana()
+    nebraska = Nebraska()
+    nevada = Nevada()
+    newHampshire = NewHampshire()
+    newJersey = NewJersey()
+    newMexico = NewMexico()
+    newYork = NewYork()
+    northCarolina = NorthCarolina()
+    northDakota = NorthDakota()
+    ohio = Ohio()
+    oklahoma = Oklahoma()
+    oregon = Oregon()
+    pennsylvania = Pennsylvania()
+    rhodeIsland = RhodeIsland()
+    southCarolina = SouthCarolina()
+    southDakota = SouthDakota()
+    tennessee = Tennessee()
+    texas = Texas()
+    utah = Utah()
+    yield DownloadStates_45(cache = alabama.cache ++ alaska.cache ++ arizona.cache ++ arkansas.cache ++ california.cache ++ colorado.cache ++ connecticut.cache ++ delaware.cache ++ districtOfColumbia.cache ++ florida.cache ++ georgia.cache ++ hawaii.cache ++ idaho.cache ++ illinois.cache ++ indiana.cache ++ iowa.cache ++ kansas.cache ++ kentucky.cache ++ louisiana.cache ++ maine.cache ++ maryland.cache ++ massachusetts.cache ++ michigan.cache ++ minnesota.cache ++ mississippi.cache ++ missouri.cache ++ montana.cache ++ nebraska.cache ++ nevada.cache ++ newHampshire.cache ++ newJersey.cache ++ newMexico.cache ++ newYork.cache ++ northCarolina.cache ++ northDakota.cache ++ ohio.cache ++ oklahoma.cache ++ oregon.cache ++ pennsylvania.cache ++ rhodeIsland.cache ++ southCarolina.cache ++ southDakota.cache ++ tennessee.cache ++ texas.cache ++ utah.cache)
+  }
+
+}

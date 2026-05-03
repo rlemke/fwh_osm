@@ -1,0 +1,10 @@
+{
+  "afl": {
+    "command": "python",
+    "args": ["-m", "facetwork.mcp"],
+    "cwd": "/Users/ralph_lemke/facetwork",
+    "env": {
+      "PYTHONPATH": "/Users/ralph_lemke/facetwork"
+    }
+  }
+}

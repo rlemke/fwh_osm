@@ -1,0 +1,49 @@
+// OSM region resolution — resolve human-friendly names to Geofabrik downloads
+//
+// Translates names like "Colorado", "UK", "the Alps" into OSMCache structures
+// suitable for downstream workflows (route extraction, elevation, mapping).
+//
+// Prerequisites: Compile with osmtypes.afl
+
+/** Resolves human-friendly region names to Geofabrik download URLs and OSMCache structures. */
+namespace osm.Region {
+    use osm.types
+
+    /** Single region match with continent and Geofabrik path info. */
+    schema RegionResolution {
+        query: String,
+        matched_name: String,
+        region_namespace: String,
+        continent: String,
+        geofabrik_path: String,
+        is_ambiguous: Boolean,
+        disambiguation: String
+    }
+
+    /** Multi-region match for geographic features spanning multiple downloads. */
+    schema MultiRegionResolution {
+        query: String,
+        match_count: Long,
+        is_geographic_feature: Boolean,
+        regions: Json
+    }
+
+    /** Listing of all available regions and geographic features. */
+    schema RegionListResult {
+        region_count: Long,
+        regions: Json,
+        feature_count: Long,
+        geographic_features: Json
+    }
+
+    /** Resolves a region name to a single best-match OSMCache download. */
+    event facet ResolveRegion(name: String,
+        prefer_continent: String = "") => (cache: OSMCache, resolution: RegionResolution)
+
+    /** Resolves a name that may span multiple regions (e.g. "Alps", "Scandinavia"). */
+    event facet ResolveRegions(name: String,
+        prefer_continent: String = "") => (caches: Json, resolution: MultiRegionResolution)
+
+    /** Lists all available regions and geographic features, optionally filtered by continent. */
+    event facet ListRegions(continent: String = "") => (result: RegionListResult)
+}

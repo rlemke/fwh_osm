@@ -1,0 +1,91 @@
+// Elevation-based route filtering workflows
+//
+// Example workflows demonstrating how to find routes based on elevation criteria.
+
+/** Workflows that filter routes by elevation criteria such as peak height, gain, and alpine zones. */
+namespace osm.Elevation.Workflows {
+    use osm.types
+    use osm.Routes
+    use osm.Elevation
+
+    /** Finds hiking trails whose maximum elevation exceeds a threshold (default 2000 ft). */
+    workflow FindHighElevationHikingTrails(
+        cache: OSMCache,
+        min_elevation_ft: Long = 2000
+    ) => (result: ElevatedRouteFeatures) andThen {
+        // Step 1: Extract hiking trails from OSM data
+        trails = HikingTrails(cache = $.cache)
+
+        // Step 2: Enrich with elevation data
+        enriched = EnrichWithElevation(input_path = trails.result.output_path)
+
+        // Step 3: Filter by elevation threshold
+        filtered = FilterByMaxElevation(
+            input_path = enriched.result.output_path,
+            min_max_elevation_ft = $.min_elevation_ft
+        )
+
+        yield FindHighElevationHikingTrails(result = filtered.result)
+    }
+
+    /** Finds cycling routes that reach above a given elevation threshold. */
+    workflow FindHighElevationCyclingRoutes(
+        cache: OSMCache,
+        min_elevation_ft: Long = 2000,
+        network: String = "*"
+    ) => (result: ElevatedRouteFeatures) andThen {
+        routes = BicycleRoutes(cache = $.cache, network = $.network)
+        enriched = EnrichWithElevation(input_path = routes.result.output_path)
+        filtered = FilterByMaxElevation(
+            input_path = enriched.result.output_path,
+            min_max_elevation_ft = $.min_elevation_ft
+        )
+        yield FindHighElevationCyclingRoutes(result = filtered.result)
+    }
+
+    /** Finds routes with significant total elevation gain (climbing). */
+    workflow FindClimbingRoutes(
+        cache: OSMCache,
+        route_type: String = "hiking",
+        min_gain_ft: Long = 1000
+    ) => (result: ElevatedRouteFeatures) andThen {
+        routes = osm.Routes.ExtractRoutes(cache = $.cache, route_type = $.route_type)
+        enriched = EnrichWithElevation(input_path = routes.result.output_path)
+        filtered = FilterByElevationGain(
+            input_path = enriched.result.output_path,
+            min_gain_ft = $.min_gain_ft
+        )
+        yield FindClimbingRoutes(result = filtered.result)
+    }
+
+    /** Finds routes that pass through an alpine elevation band (default 8000-14500 ft). */
+    workflow FindAlpineRoutes(
+        cache: OSMCache,
+        route_type: String = "hiking",
+        min_elevation_ft: Long = 8000,
+        max_elevation_ft: Long = 14500
+    ) => (result: ElevatedRouteFeatures) andThen {
+        routes = osm.Routes.ExtractRoutes(cache = $.cache, route_type = $.route_type)
+        enriched = EnrichWithElevation(input_path = routes.result.output_path)
+        filtered = FilterByElevationRange(
+            input_path = enriched.result.output_path,
+            min_elevation_ft = $.min_elevation_ft,
+            max_elevation_ft = $.max_elevation_ft
+        )
+        yield FindAlpineRoutes(result = filtered.result)
+    }
+
+    /** Finds low-elevation accessible trails that stay below a ceiling (default 500 ft). */
+    workflow FindLowElevationTrails(
+        cache: OSMCache,
+        max_elevation_ft: Long = 500
+    ) => (result: ElevatedRouteFeatures) andThen {
+        trails = HikingTrails(cache = $.cache)
+        enriched = EnrichWithElevation(input_path = trails.result.output_path)
+        filtered = FilterByMinElevation(
+            input_path = enriched.result.output_path,
+            max_min_elevation_ft = $.max_elevation_ft
+        )
+        yield FindLowElevationTrails(result = filtered.result)
+    }
+}

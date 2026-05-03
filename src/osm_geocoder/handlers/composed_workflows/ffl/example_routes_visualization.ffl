@@ -1,0 +1,182 @@
+// Example workflow: Download a region, extract routes, and visualize
+//
+// This workflow demonstrates combining cache, route extraction, and
+// visualization facets to create maps of bicycle and hiking routes.
+//
+// Prerequisites: Compile with osmtypes.afl, osmroutes.afl, osmvisualization.afl, osmcache.afl
+
+/** Example pipelines combining cache, route extraction, and map rendering. */
+namespace examples.routes {
+    use osm.types
+
+    /** Extracts bicycle routes from a cached region and renders them on a green interactive map. */
+    workflow BicycleRoutesMap(region_name: String = "Liechtenstein") => (map_path: String, feature_count: Long) andThen {
+        cache = CacheRegion(region = $.region_name)
+        f = BicycleRoutesMapFromCache(cache = cache.cache)
+        yield BicycleRoutesMap(map_path = f.map_path, feature_count = f.feature_count)
+    }
+
+    /** Cache-dependent logic for BicycleRoutesMap. */
+    facet BicycleRoutesMapFromCache(cache: OSMCache) => (map_path: String, feature_count: Long) andThen {
+        routes = osm.Routes.BicycleRoutes(cache = $.cache, include_infrastructure = true)
+        map = osm.viz.RenderMap(
+            geojson_path = routes.result.output_path,
+            title = "Bicycle Routes - Liechtenstein",
+            color = "#2ecc71"
+        )
+        yield BicycleRoutesMapFromCache(map_path = map.result.output_path, feature_count = routes.result.feature_count)
+    }
+
+    /** Extracts hiking trails from a cached region and renders them on an orange interactive map. */
+    workflow HikingTrailsMap(region_name: String = "Liechtenstein") => (map_path: String, feature_count: Long) andThen {
+        cache = CacheRegion(region = $.region_name)
+        f = HikingTrailsMapFromCache(cache = cache.cache)
+        yield HikingTrailsMap(map_path = f.map_path, feature_count = f.feature_count)
+    }
+
+    /** Cache-dependent logic for HikingTrailsMap. */
+    facet HikingTrailsMapFromCache(cache: OSMCache) => (map_path: String, feature_count: Long) andThen {
+        trails = osm.Routes.HikingTrails(cache = $.cache, include_infrastructure = true)
+        map = osm.viz.RenderMap(
+            geojson_path = trails.result.output_path,
+            title = "Hiking Trails - Liechtenstein",
+            color = "#e67e22"
+        )
+        yield HikingTrailsMapFromCache(map_path = map.result.output_path, feature_count = trails.result.feature_count)
+    }
+
+    /** Extracts train routes and stations from a cached region and renders them on a blue map. */
+    workflow TrainRoutesMap(region_name: String = "Liechtenstein") => (map_path: String, feature_count: Long) andThen {
+        cache = CacheRegion(region = $.region_name)
+        f = TrainRoutesMapFromCache(cache = cache.cache)
+        yield TrainRoutesMap(map_path = f.map_path, feature_count = f.feature_count)
+    }
+
+    /** Cache-dependent logic for TrainRoutesMap. */
+    facet TrainRoutesMapFromCache(cache: OSMCache) => (map_path: String, feature_count: Long) andThen {
+        routes = osm.Routes.TrainRoutes(cache = $.cache, include_infrastructure = true)
+        map = osm.viz.RenderMap(
+            geojson_path = routes.result.output_path,
+            title = "Train Routes - Liechtenstein",
+            color = "#3498db"
+        )
+        yield TrainRoutesMapFromCache(map_path = map.result.output_path, feature_count = routes.result.feature_count)
+    }
+
+    /** Extracts bus routes and stops from a cached region and renders them on a red map. */
+    workflow BusRoutesMap(region_name: String = "Liechtenstein") => (map_path: String, feature_count: Long) andThen {
+        cache = CacheRegion(region = $.region_name)
+        f = BusRoutesMapFromCache(cache = cache.cache)
+        yield BusRoutesMap(map_path = f.map_path, feature_count = f.feature_count)
+    }
+
+    /** Cache-dependent logic for BusRoutesMap. */
+    facet BusRoutesMapFromCache(cache: OSMCache) => (map_path: String, feature_count: Long) andThen {
+        routes = osm.Routes.BusRoutes(cache = $.cache, include_infrastructure = true)
+        map = osm.viz.RenderMap(
+            geojson_path = routes.result.output_path,
+            title = "Bus Routes - Liechtenstein",
+            color = "#e74c3c"
+        )
+        yield BusRoutesMapFromCache(map_path = map.result.output_path, feature_count = routes.result.feature_count)
+    }
+
+    /** Extracts all public transport modes (trains, buses, trams) and renders a unified purple map. */
+    workflow PublicTransportMap(region_name: String = "Liechtenstein") => (map_path: String, feature_count: Long) andThen {
+        cache = CacheRegion(region = $.region_name)
+        f = PublicTransportMapFromCache(cache = cache.cache)
+        yield PublicTransportMap(map_path = f.map_path, feature_count = f.feature_count)
+    }
+
+    /** Cache-dependent logic for PublicTransportMap. */
+    facet PublicTransportMapFromCache(cache: OSMCache) => (map_path: String, feature_count: Long) andThen {
+        routes = osm.Routes.PublicTransport(cache = $.cache)
+        map = osm.viz.RenderMap(
+            geojson_path = routes.result.output_path,
+            title = "Public Transport - Liechtenstein",
+            color = "#9b59b6"
+        )
+        yield PublicTransportMapFromCache(map_path = map.result.output_path, feature_count = routes.result.feature_count)
+    }
+
+    /** Extracts bicycle routes with infrastructure, computes length/count statistics, and renders a map. */
+    workflow BicycleRoutesWithStats(region_name: String = "Liechtenstein") => (map_path: String, route_count: Long, total_length_km: Double, infrastructure_count: Long) andThen {
+        cache = CacheRegion(region = $.region_name)
+        f = BicycleRoutesWithStatsFromCache(cache = cache.cache)
+        yield BicycleRoutesWithStats(
+            map_path = f.map_path,
+            route_count = f.route_count,
+            total_length_km = f.total_length_km,
+            infrastructure_count = f.infrastructure_count
+        )
+    }
+
+    /** Cache-dependent logic for BicycleRoutesWithStats. */
+    facet BicycleRoutesWithStatsFromCache(cache: OSMCache) => (map_path: String, route_count: Long, total_length_km: Double, infrastructure_count: Long) andThen {
+        routes = osm.Routes.BicycleRoutes(cache = $.cache, include_infrastructure = true)
+        stats = osm.Routes.RouteStatistics(input_path = routes.result.output_path)
+        map = osm.viz.RenderMap(
+            geojson_path = routes.result.output_path,
+            title = "Bicycle Routes with Stats",
+            color = "#2ecc71"
+        )
+        yield BicycleRoutesWithStatsFromCache(
+            map_path = map.result.output_path,
+            route_count = stats.stats.route_count,
+            total_length_km = stats.stats.total_length_km,
+            infrastructure_count = stats.stats.infrastructure_count
+        )
+    }
+
+    /** Extracts hiking trails with infrastructure, computes length/count statistics, and renders a map. */
+    workflow HikingTrailsWithStats(region_name: String = "Liechtenstein") => (map_path: String, route_count: Long, total_length_km: Double, infrastructure_count: Long) andThen {
+        cache = CacheRegion(region = $.region_name)
+        f = HikingTrailsWithStatsFromCache(cache = cache.cache)
+        yield HikingTrailsWithStats(
+            map_path = f.map_path,
+            route_count = f.route_count,
+            total_length_km = f.total_length_km,
+            infrastructure_count = f.infrastructure_count
+        )
+    }
+
+    /** Cache-dependent logic for HikingTrailsWithStats. */
+    facet HikingTrailsWithStatsFromCache(cache: OSMCache) => (map_path: String, route_count: Long, total_length_km: Double, infrastructure_count: Long) andThen {
+        trails = osm.Routes.HikingTrails(cache = $.cache, include_infrastructure = true)
+        stats = osm.Routes.RouteStatistics(input_path = trails.result.output_path)
+        map = osm.viz.RenderMap(
+            geojson_path = trails.result.output_path,
+            title = "Hiking Trails with Stats",
+            color = "#e67e22"
+        )
+        yield HikingTrailsWithStatsFromCache(
+            map_path = map.result.output_path,
+            route_count = stats.stats.route_count,
+            total_length_km = stats.stats.total_length_km,
+            infrastructure_count = stats.stats.infrastructure_count
+        )
+    }
+
+    /** Filters to national cycle network (ncn) routes only and renders a dark-green map. */
+    workflow NationalCycleNetwork(region_name: String = "Liechtenstein") => (map_path: String, feature_count: Long) andThen {
+        cache = CacheRegion(region = $.region_name)
+        f = NationalCycleNetworkFromCache(cache = cache.cache)
+        yield NationalCycleNetwork(map_path = f.map_path, feature_count = f.feature_count)
+    }
+
+    /** Cache-dependent logic for NationalCycleNetwork. */
+    facet NationalCycleNetworkFromCache(cache: OSMCache) => (map_path: String, feature_count: Long) andThen {
+        routes = osm.Routes.ExtractRoutes(
+            cache = $.cache,
+            route_type = "bicycle",
+            network = "ncn",
+            include_infrastructure = false
+        )
+        map = osm.viz.RenderMap(
+            geojson_path = routes.result.output_path,
+            title = "National Cycle Network",
+            color = "#27ae60"
+        )
+        yield NationalCycleNetworkFromCache(map_path = map.result.output_path, feature_count = routes.result.feature_count)
+    }
+}

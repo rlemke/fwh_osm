@@ -1,0 +1,43 @@
+/** Aggregates all continental OSM caches into a single world-level dataset. */
+namespace osm.World.cache {
+    use osm.types
+    use osm.Africa.cache
+    use osm.Australia.cache
+    use osm.Canada.cache
+    use osm.CentralAmerica.cache
+    use osm.Europe.cache
+    use osm.NorthAmerica.cache
+    use osm.SouthAmerica.cache
+    use osm.UnitedStates.cache
+
+
+    /** Downloads and caches OSM data for every continent, returning the combined result. */
+    facet World() => (cache: [OSMCache]) andThen {
+
+        // These broadcast the requests to the download services
+        // If they are already cache, then just the locations are returned.
+        // If not, then they are downloaded and cached.
+        // As many OSM services as you got will get the requests and
+        // participate in the downloads.
+
+        africa = AfricaIndividually()
+        australia = AustraliaIndividually()
+        canada = CanadaIndividually()
+        centralAmerica = CentralAmericaIndividually()
+        europe = EuropeIndividually()
+        northAmerica = NorthAmericaIndividually()
+        southAmerica = SouthAmericaIndividually()
+        unitedStatesAmerica = UnitedStatesIndividually()
+
+        yield World(cache = africa.cache ++
+                australia.cache ++
+                canada.cache ++
+                centralAmerica.cache ++
+                europe.cache ++
+                northAmerica.cache ++
+                southAmerica.cache ++
+                unitedStatesAmerica.cache)
+    }
+}
+
+

@@ -1,0 +1,55 @@
+// Routing adapter types — shared across all routing backends
+//
+// Defines common schemas for point-to-point and multi-stop routing
+// results so that downstream workflows work identically regardless
+// of whether the route came from an API, OSRM, or GraphHopper.
+
+/** Shared routing types for the source adapter pattern. */
+namespace osm.Routing.Types {
+
+    /** A geographic coordinate for routing waypoints. */
+    schema Waypoint {
+        lon: Double,
+        lat: Double,
+        name: String
+    }
+
+    /** A single computed route between two points. */
+    schema RouteResult {
+        from_name: String,
+        to_name: String,
+        distance_km: Double,
+        duration_min: Double,
+        output_path: String,
+        profile: String,
+        backend: String,
+        format: String
+    }
+
+    /** Result of routing between two waypoints. */
+    schema PointToPointResult {
+        route: RouteResult,
+        waypoint_count: Long
+    }
+
+    /** Result of a multi-stop route through an ordered list of waypoints. */
+    schema MultiStopResult {
+        output_path: String,
+        leg_count: Long,
+        total_distance_km: Double,
+        total_duration_min: Double,
+        profile: String,
+        backend: String,
+        format: String
+    }
+
+    /** Result of an isochrone (reachability area) computation. */
+    schema IsochroneResult {
+        output_path: String,
+        center_name: String,
+        time_minutes: Long,
+        profile: String,
+        backend: String,
+        format: String
+    }
+}

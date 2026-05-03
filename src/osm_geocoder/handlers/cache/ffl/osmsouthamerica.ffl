@@ -1,0 +1,35 @@
+/** Aggregates individual South American country OSM data downloads. */
+namespace osm.SouthAmerica.cache {
+  use osm.types
+  use osm.cache.SouthAmerica
+
+  /** Caches each South American country individually in parallel. */
+  facet SouthAmericaIndividually () => (cache: [OSMCache]) andThen {
+
+    argentina = osm.cache.SouthAmerica.Argentina()
+    bolivia = osm.cache.SouthAmerica.Bolivia()
+    brazil = osm.cache.SouthAmerica.Brazil()
+    chile = osm.cache.SouthAmerica.Chile()
+    colombia = osm.cache.SouthAmerica.Colombia()
+    ecuador = osm.cache.SouthAmerica.Ecuador()
+    guyana = osm.cache.SouthAmerica.Guyana()
+    paraguay = osm.cache.SouthAmerica.Paraguay()
+    peru = osm.cache.SouthAmerica.Peru()
+    suriname = osm.cache.SouthAmerica.Suriname()
+    uruguay = osm.cache.SouthAmerica.Uruguay()
+    venezuela = osm.cache.SouthAmerica.Venezuela()
+
+    yield SouthAmericaIndividually(cache = argentina.cache ++
+                                   bolivia.cache ++
+                                   brazil.cache ++
+                                   chile.cache ++
+                                   colombia.cache ++
+                                   ecuador.cache ++
+                                   guyana.cache ++
+                                   paraguay.cache ++
+                                   peru.cache ++
+                                   suriname.cache ++
+                                   uruguay.cache ++
+                                   venezuela.cache)
+  }
+}

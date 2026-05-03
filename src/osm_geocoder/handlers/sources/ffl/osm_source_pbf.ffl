@@ -1,0 +1,33 @@
+// Source Adapter: PBF extraction via osmium
+//
+// Extracts OSM features from .osm.pbf files into GeoJSON.
+// Delegates to existing category-specific extractors.
+
+/** PBF source adapter — extracts features from .osm.pbf files via osmium. */
+namespace osm.Source.PBF {
+    use osm.types
+
+    /** Extracts routes by transport type from a PBF file. */
+    event facet ExtractRoutes(cache: OSMCache, route_type: String = "all", network: String = "*", include_infrastructure: Boolean = true) => (result: osm.Routes.RouteFeatures)
+
+    /** Extracts amenities by category from a PBF file. */
+    event facet ExtractAmenities(cache: OSMCache, category: String = "all") => (result: osm.Amenities.AmenityFeatures)
+
+    /** Extracts roads by classification from a PBF file. */
+    event facet ExtractRoads(cache: OSMCache, road_class: String = "all") => (result: osm.Roads.RoadFeatures)
+
+    /** Extracts parks and protected areas from a PBF file. */
+    event facet ExtractParks(cache: OSMCache, park_type: String = "all", protect_classes: String = "*") => (result: osm.Parks.ParkFeatures)
+
+    /** Extracts building footprints from a PBF file. */
+    event facet ExtractBuildings(cache: OSMCache, building_type: String = "all") => (result: osm.Buildings.BuildingFeatures)
+
+    /** Extracts administrative and natural boundaries from a PBF file. */
+    event facet ExtractBoundaries(cache: OSMCache, boundary_type: String = "admin", admin_level: Long = 2) => (result: osm.Boundaries.BoundaryFeatures)
+
+    /** Extracts populated places from a PBF file. */
+    event facet ExtractPopulation(cache: OSMCache, place_type: String = "all", min_population: Long = 0) => (result: osm.Population.PopulationFilteredFeatures)
+
+    /** Extracts points of interest from a PBF file. */
+    event facet ExtractPOIs(cache: OSMCache) => (pois: OSMCache)
+}

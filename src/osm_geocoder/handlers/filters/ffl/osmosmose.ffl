@@ -1,0 +1,78 @@
+// OSMOSE Local Verifier
+//
+// Standalone local PBF/GeoJSON quality analysis — no network dependency.
+// Runs deep verification directly on .osm.pbf files (from GeoFabrik, via
+// OSMCache) and GeoJSON files.  Single-pass processing checks reference
+// integrity, coordinate ranges, geometry validity, tag completeness, and
+// duplicate IDs.
+//
+// Severity levels:
+//   1 (error)   — reference integrity failures, out-of-bounds coords,
+//                  degenerate geometry, duplicate IDs
+//   2 (warning) — missing name on named features, unclosed polygons
+//   3 (info)    — empty tag values
+
+/** Standalone local PBF/GeoJSON quality analysis with severity-graded issue detection. */
+namespace osm.ops.OSMOSE {
+
+    use osm.types
+
+    /** Verification output file with element counts. */
+    schema VerifyResult {
+        output_path: String,
+        issue_count: Long,
+        node_count: Long,
+        way_count: Long,
+        relation_count: Long,
+        format: String,
+        verify_date: String
+    }
+
+    /** Aggregate issue counts by category and severity level. */
+    schema VerifySummary {
+        total_issues: Long,
+        geometry_issues: Long,
+        tag_issues: Long,
+        reference_issues: Long,
+        coordinate_issues: Long,
+        duplicate_issues: Long,
+        level_1: Long,
+        level_2: Long,
+        level_3: Long,
+        tag_coverage_pct: Double,
+        avg_tags_per_element: Double,
+        verify_date: String
+    }
+
+    /** Runs all verification checks on a PBF cache. */
+    event facet VerifyAll(
+        cache: OSMCache,
+        output_dir: String = "/Volumes/afl_data/output/osm/osmose",
+        check_geometry: Boolean = true,
+        check_tags: Boolean = true,
+        check_references: Boolean = true,
+        check_coordinates: Boolean = true,
+        check_duplicates: Boolean = true
+    ) => (result: VerifyResult, summary: VerifySummary)
+
+    /** Verifies geometry only (degenerate ways, unclosed polygons). */
+    event facet VerifyGeometry(
+        cache: OSMCache
+    ) => (result: VerifyResult, summary: VerifySummary)
+
+    /** Verifies tag completeness with optional required-tag list. */
+    event facet VerifyTags(
+        cache: OSMCache,
+        required_tags: String = "name"
+    ) => (result: VerifyResult, summary: VerifySummary)
+
+    /** Verifies an existing GeoJSON file for structure, geometry, and coordinates. */
+    event facet VerifyGeoJSON(
+        input_path: String
+    ) => (result: VerifyResult, summary: VerifySummary)
+
+    /** Reads verification output and computes aggregate statistics. */
+    event facet ComputeVerifySummary(
+        input_path: String
+    ) => (summary: VerifySummary)
+}

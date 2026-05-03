@@ -1,0 +1,33 @@
+// Source Adapter: GeoJSON file loading
+//
+// Loads and filters existing GeoJSON files as a data source.
+// Useful for re-processing previously extracted data or third-party GeoJSON.
+
+/** GeoJSON source adapter — loads and filters existing GeoJSON files. */
+namespace osm.Source.GeoJSON {
+    use osm.types
+
+    /** Loads routes from an existing GeoJSON file, optionally filtering by type. */
+    event facet LoadRoutes(input_path: String, route_type: String = "all", network: String = "*") => (result: osm.Routes.RouteFeatures)
+
+    /** Loads amenities from an existing GeoJSON file, optionally filtering by category. */
+    event facet LoadAmenities(input_path: String, category: String = "all") => (result: osm.Amenities.AmenityFeatures)
+
+    /** Loads roads from an existing GeoJSON file, optionally filtering by class. */
+    event facet LoadRoads(input_path: String, road_class: String = "all") => (result: osm.Roads.RoadFeatures)
+
+    /** Loads parks from an existing GeoJSON file, optionally filtering by type. */
+    event facet LoadParks(input_path: String, park_type: String = "all", protect_classes: String = "*") => (result: osm.Parks.ParkFeatures)
+
+    /** Loads buildings from an existing GeoJSON file, optionally filtering by type. */
+    event facet LoadBuildings(input_path: String, building_type: String = "all") => (result: osm.Buildings.BuildingFeatures)
+
+    /** Loads boundaries from an existing GeoJSON file, optionally filtering by type. */
+    event facet LoadBoundaries(input_path: String, boundary_type: String = "admin") => (result: osm.Boundaries.BoundaryFeatures)
+
+    /** Loads populated places from an existing GeoJSON file, optionally filtering. */
+    event facet LoadPopulation(input_path: String, place_type: String = "all", min_population: Long = 0) => (result: osm.Population.PopulationFilteredFeatures)
+
+    /** Loads points of interest from an existing GeoJSON file. */
+    event facet LoadPOIs(input_path: String) => (pois: OSMCache)
+}

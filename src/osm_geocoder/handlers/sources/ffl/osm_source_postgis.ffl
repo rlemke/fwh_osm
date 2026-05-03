@@ -1,0 +1,39 @@
+// Source Adapter: PostGIS extraction via SQL
+//
+// Extracts OSM features from imported osm_nodes/osm_ways tables.
+// Queries use tags JSONB for filtering and ST_AsGeoJSON for geometry.
+
+/** PostGIS source adapter — extracts features via SQL against osm_nodes/osm_ways. */
+namespace osm.Source.PostGIS {
+    use osm.types
+
+    /** PostGIS connection parameters for source extraction. */
+    schema PostGISSource {
+        postgis_url: String,
+        region: String
+    }
+
+    /** Extracts routes by transport type from PostGIS. */
+    event facet ExtractRoutes(source: PostGISSource, route_type: String = "all", network: String = "*", include_infrastructure: Boolean = true) => (result: osm.Routes.RouteFeatures)
+
+    /** Extracts amenities by category from PostGIS. */
+    event facet ExtractAmenities(source: PostGISSource, category: String = "all") => (result: osm.Amenities.AmenityFeatures)
+
+    /** Extracts roads by classification from PostGIS. */
+    event facet ExtractRoads(source: PostGISSource, road_class: String = "all") => (result: osm.Roads.RoadFeatures)
+
+    /** Extracts parks and protected areas from PostGIS. */
+    event facet ExtractParks(source: PostGISSource, park_type: String = "all", protect_classes: String = "*") => (result: osm.Parks.ParkFeatures)
+
+    /** Extracts building footprints from PostGIS. */
+    event facet ExtractBuildings(source: PostGISSource, building_type: String = "all") => (result: osm.Buildings.BuildingFeatures)
+
+    /** Extracts administrative and natural boundaries from PostGIS. */
+    event facet ExtractBoundaries(source: PostGISSource, boundary_type: String = "admin", admin_level: Long = 2) => (result: osm.Boundaries.BoundaryFeatures)
+
+    /** Extracts populated places from PostGIS. */
+    event facet ExtractPopulation(source: PostGISSource, place_type: String = "all", min_population: Long = 0) => (result: osm.Population.PopulationFilteredFeatures)
+
+    /** Extracts points of interest from PostGIS. */
+    event facet ExtractPOIs(source: PostGISSource) => (pois: OSMCache)
+}

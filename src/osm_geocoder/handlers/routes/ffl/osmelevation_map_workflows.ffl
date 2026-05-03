@@ -1,0 +1,169 @@
+// Composed elevation + map workflows
+//
+// Full pipeline workflows that extract routes, enrich with elevation data,
+// filter by elevation criteria, and render interactive maps.
+//
+// Prerequisites: Compile with osmtypes.afl, osmroutes.afl, osmelevation.afl, osmvisualization.afl
+
+/** End-to-end pipelines that extract routes, enrich with SRTM elevation data, filter, and render maps. */
+namespace osm.ElevationMap {
+    use osm.types
+    use osm.Routes
+    use osm.Elevation
+    use osm.viz
+
+    /** Filters bicycle routes by peak elevation and renders the survivors on an interactive map. */
+    workflow BicycleElevationMap(
+        cache: OSMCache,
+        min_elevation_ft: Long = 4000,
+        network: String = "*",
+        title: String = "High Elevation Cycling Routes",
+        color: String = "#e74c3c"
+    ) => (map_path: String, feature_count: Long, matched_count: Long) andThen {
+        // Extract bicycle routes from OSM data
+        routes = BicycleRoutes(cache = $.cache, network = $.network)
+
+        // Enrich route geometries with elevation data from SRTM
+        enriched = EnrichWithElevation(input_path = routes.result.output_path)
+
+        // Keep only routes that reach above the elevation threshold
+        filtered = FilterByMaxElevation(
+            input_path = enriched.result.output_path,
+            min_max_elevation_ft = $.min_elevation_ft
+        )
+
+        // Render the filtered routes on an interactive Leaflet map
+        map = RenderMap(
+            geojson_path = filtered.result.output_path,
+            title = $.title,
+            color = $.color
+        )
+
+        yield BicycleElevationMap(
+            map_path = map.result.output_path,
+            feature_count = filtered.result.feature_count,
+            matched_count = filtered.result.matched_count
+        )
+    }
+
+    /** Filters hiking trails by peak elevation and renders them on an interactive map. */
+    workflow HikingElevationMap(
+        cache: OSMCache,
+        min_elevation_ft: Long = 2000,
+        network: String = "*",
+        title: String = "High Elevation Hiking Trails",
+        color: String = "#e67e22"
+    ) => (map_path: String, feature_count: Long, matched_count: Long) andThen {
+        trails = HikingTrails(cache = $.cache, network = $.network)
+        enriched = EnrichWithElevation(input_path = trails.result.output_path)
+        filtered = FilterByMaxElevation(
+            input_path = enriched.result.output_path,
+            min_max_elevation_ft = $.min_elevation_ft
+        )
+        map = RenderMap(
+            geojson_path = filtered.result.output_path,
+            title = $.title,
+            color = $.color
+        )
+        yield HikingElevationMap(
+            map_path = map.result.output_path,
+            feature_count = filtered.result.feature_count,
+            matched_count = filtered.result.matched_count
+        )
+    }
+
+    /** Generic elevation map: accepts any route type, filters by peak elevation, and renders. */
+    workflow ElevationRouteMap(
+        cache: OSMCache,
+        route_type: String,
+        min_elevation_ft: Long = 2000,
+        network: String = "*",
+        title: String = "High Elevation Routes",
+        color: String = "#3498db"
+    ) => (map_path: String, feature_count: Long, matched_count: Long) andThen {
+        routes = osm.Routes.ExtractRoutes(
+            cache = $.cache,
+            route_type = $.route_type,
+            network = $.network
+        )
+        enriched = EnrichWithElevation(input_path = routes.result.output_path)
+        filtered = FilterByMaxElevation(
+            input_path = enriched.result.output_path,
+            min_max_elevation_ft = $.min_elevation_ft
+        )
+        map = RenderMap(
+            geojson_path = filtered.result.output_path,
+            title = $.title,
+            color = $.color
+        )
+        yield ElevationRouteMap(
+            map_path = map.result.output_path,
+            feature_count = filtered.result.feature_count,
+            matched_count = filtered.result.matched_count
+        )
+    }
+
+    /** Selects routes with significant elevation gain and renders them on an interactive map. */
+    workflow ClimbingRoutesMap(
+        cache: OSMCache,
+        route_type: String = "bicycle",
+        min_gain_ft: Long = 1000,
+        network: String = "*",
+        title: String = "Climbing Routes",
+        color: String = "#9b59b6"
+    ) => (map_path: String, feature_count: Long, matched_count: Long) andThen {
+        routes = osm.Routes.ExtractRoutes(
+            cache = $.cache,
+            route_type = $.route_type,
+            network = $.network
+        )
+        enriched = EnrichWithElevation(input_path = routes.result.output_path)
+        filtered = FilterByElevationGain(
+            input_path = enriched.result.output_path,
+            min_gain_ft = $.min_gain_ft
+        )
+        map = RenderMap(
+            geojson_path = filtered.result.output_path,
+            title = $.title,
+            color = $.color
+        )
+        yield ClimbingRoutesMap(
+            map_path = map.result.output_path,
+            feature_count = filtered.result.feature_count,
+            matched_count = filtered.result.matched_count
+        )
+    }
+
+    /** Full five-stage pipeline: bicycle routes, elevation enrichment, filter, statistics, and map. */
+    workflow BicycleElevationStatsMap(
+        cache: OSMCache,
+        min_elevation_ft: Long = 4000,
+        network: String = "*",
+        title: String = "High Elevation Cycling Routes",
+        color: String = "#e74c3c"
+    ) => (map_path: String, feature_count: Long, matched_count: Long, route_count: Long, total_length_km: Double) andThen {
+        routes = BicycleRoutes(cache = $.cache, network = $.network)
+        enriched = EnrichWithElevation(input_path = routes.result.output_path)
+        filtered = FilterByMaxElevation(
+            input_path = enriched.result.output_path,
+            min_max_elevation_ft = $.min_elevation_ft
+        )
+
+        // Compute statistics on the filtered routes
+        stats = RouteStatistics(input_path = filtered.result.output_path)
+
+        map = RenderMap(
+            geojson_path = filtered.result.output_path,
+            title = $.title,
+            color = $.color
+        )
+
+        yield BicycleElevationStatsMap(
+            map_path = map.result.output_path,
+            feature_count = filtered.result.feature_count,
+            matched_count = filtered.result.matched_count,
+            route_count = stats.stats.route_count,
+            total_length_km = stats.stats.total_length_km
+        )
+    }
+}

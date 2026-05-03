@@ -1,0 +1,35 @@
+/** Single-pass multi-category OSM extraction for efficient PBF processing. */
+namespace osm.Combined {
+    use osm.types
+
+    /** Single-pass multi-category extraction from a PBF file.
+     *
+     * Instead of running separate extraction steps for roads, amenities,
+     * parks, etc., this facet scans the PBF once and extracts all
+     * requested categories in parallel.
+     *
+     * Categories: amenities, population, roads, routes, parks, buildings, boundaries
+     */
+    event facet CombinedScan(
+        cache: OSMCache,
+        categories: [String]
+    ) => (
+        results: String,
+        total_features: Long,
+        scan_duration: Double,
+        category_count: Long
+    ) with Timeout(minutes = 120)
+
+    /** Extracts a single category's output path from CombinedScan results.
+     *
+     * Parses the JSON results string from CombinedScan and returns the
+     * output_path and feature_count for the requested category.
+     */
+    event facet ExtractCategoryResult(
+        results: String,
+        category: String
+    ) => (
+        output_path: String,
+        feature_count: Long
+    )
+}

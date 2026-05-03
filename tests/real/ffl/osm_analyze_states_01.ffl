@@ -1,0 +1,11 @@
+/** Runs composed analysis workflows for 1 US state in parallel. */
+namespace osm.UnitedStates.analysis {
+  use osm.types
+
+  /** Runs AnalyzeRegion for 1 US state. */
+  workflow AnalyzeStates_01() => (states_completed: Long) andThen {
+    alabama = AnalyzeRegion(region = "Alabama")
+    yield AnalyzeStates_01(states_completed = 1)
+  }
+
+}

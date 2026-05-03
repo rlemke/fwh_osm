@@ -1,0 +1,175 @@
+"""OSM Geocoder event handlers.
+
+Registers handlers for OSM, Census TIGER, GraphHopper, Valhalla, OSRM,
+elevation, and visualization event facets. Modules are organized into
+functional subpackages (amenities/, boundaries/, …).
+"""
+
+from .amenities.airquality_handlers import register_airquality_handlers
+from .amenities.amenity_handlers import register_amenity_handlers
+from .boundaries.boundary_handlers import register_boundary_handlers
+from .buildings.building_handlers import register_building_handlers
+from .cache.region_handlers import register_region_handlers
+from .combined.combined_handlers import register_combined_handlers
+from .db.import_handlers import register_import_handlers
+from .downloads.operations_handlers import register_operations_handlers
+from .downloads.pgrouting_handlers import register_pgrouting_handlers
+from .downloads.postgis_handlers import register_postgis_handlers
+from .downloads.summary_handlers import register_summary_handlers
+from .filters.filter_handlers import register_filter_handlers
+from .filters.osmose_handlers import register_osmose_handlers
+from .filters.validation_handlers import register_validation_handlers
+from .graphhopper.graphhopper_handlers import register_graphhopper_handlers
+from .valhalla.valhalla_handlers import register_valhalla_handlers
+from .parks.park_handlers import register_park_handlers
+from .poi.poi_handlers import register_poi_handlers
+from .population.population_handlers import register_population_handlers
+from .roads.road_handlers import register_road_handlers
+from .roads.zoom_handlers import register_zoom_handlers
+from .routes.elevation_handlers import register_elevation_handlers
+from .routes.gtfs_handlers import register_gtfs_handlers
+from .routes.route_handlers import register_route_handlers
+from .routes.routing_handlers import register_routing_handlers
+from .shared.pbf_cache import download_region  # noqa: F401
+from .routing.routing_adapter_handlers import register_routing_adapter_handlers
+from .sources.source_handlers import register_source_handlers
+from .visualization.html_map_handlers import register_html_map_handlers
+from .visualization.visualization_handlers import register_visualization_handlers
+from .voting.tiger_handlers import register_tiger_handlers
+
+__all__ = [
+    "register_all_handlers",
+    "register_all_registry_handlers",
+    "register_combined_handlers",
+    "register_import_handlers",
+    "register_airquality_handlers",
+    "register_amenity_handlers",
+    "register_boundary_handlers",
+    "register_building_handlers",
+    "register_elevation_handlers",
+    "register_filter_handlers",
+    "register_graphhopper_handlers",
+    "register_gtfs_handlers",
+    "register_operations_handlers",
+    "register_osmose_handlers",
+    "register_park_handlers",
+    "register_pgrouting_handlers",
+    "register_postgis_handlers",
+    "register_summary_handlers",
+    "register_poi_handlers",
+    "register_population_handlers",
+    "register_region_handlers",
+    "register_road_handlers",
+    "register_route_handlers",
+    "register_routing_handlers",
+    "register_tiger_handlers",
+    "register_validation_handlers",
+    "register_visualization_handlers",
+    "register_html_map_handlers",
+    "register_zoom_handlers",
+    "register_routing_adapter_handlers",
+    "register_source_handlers",
+    "register_valhalla_handlers",
+    "download_region",
+]
+
+
+def register_all_handlers(poller) -> None:
+    """Register all event facet handlers with the given poller."""
+    register_airquality_handlers(poller)
+    register_amenity_handlers(poller)
+    register_boundary_handlers(poller)
+    register_building_handlers(poller)
+    register_elevation_handlers(poller)
+    register_filter_handlers(poller)
+    register_graphhopper_handlers(poller)
+    register_gtfs_handlers(poller)
+    register_operations_handlers(poller)
+    register_osmose_handlers(poller)
+    register_park_handlers(poller)
+    register_pgrouting_handlers(poller)
+    register_postgis_handlers(poller)
+    register_summary_handlers(poller)
+    register_poi_handlers(poller)
+    register_population_handlers(poller)
+    register_region_handlers(poller)
+    register_road_handlers(poller)
+    register_route_handlers(poller)
+    register_routing_handlers(poller)
+    register_tiger_handlers(poller)
+    register_valhalla_handlers(poller)
+    register_validation_handlers(poller)
+    register_visualization_handlers(poller)
+    register_html_map_handlers(poller)
+    register_zoom_handlers(poller)
+    register_combined_handlers(poller)
+    register_import_handlers(poller)
+    register_source_handlers(poller)
+    register_routing_adapter_handlers(poller)
+
+
+def register_all_registry_handlers(runner) -> None:
+    """Register all event facet handlers with a RegistryRunner."""
+    from .amenities.airquality_handlers import register_handlers as reg_airquality
+    from .amenities.amenity_handlers import register_handlers as reg_amenity
+    from .boundaries.boundary_handlers import register_handlers as reg_boundary
+    from .buildings.building_handlers import register_handlers as reg_building
+    from .cache.region_handlers import register_handlers as reg_region
+    from .downloads.operations_handlers import register_handlers as reg_operations
+    from .downloads.pgrouting_handlers import register_handlers as reg_pgrouting
+    from .downloads.postgis_handlers import register_handlers as reg_postgis
+    from .downloads.summary_handlers import register_handlers as reg_summary
+    from .filters.filter_handlers import register_handlers as reg_filter
+    from .filters.osmose_handlers import register_handlers as reg_osmose
+    from .filters.validation_handlers import register_handlers as reg_validation
+    from .graphhopper.graphhopper_handlers import register_handlers as reg_graphhopper
+    from .valhalla.valhalla_handlers import register_handlers as reg_valhalla
+    from .parks.park_handlers import register_handlers as reg_park
+    from .poi.poi_handlers import register_handlers as reg_poi
+    from .population.population_handlers import register_handlers as reg_population
+    from .roads.road_handlers import register_handlers as reg_road
+    from .roads.zoom_handlers import register_handlers as reg_zoom
+    from .routes.elevation_handlers import register_handlers as reg_elevation
+    from .routes.gtfs_handlers import register_handlers as reg_gtfs
+    from .routes.route_handlers import register_handlers as reg_route
+    from .routes.routing_handlers import register_handlers as reg_routing
+    from .visualization.visualization_handlers import register_handlers as reg_visualization
+    from .visualization.html_map_handlers import register_handlers as reg_html_map
+    from .voting.tiger_handlers import register_handlers as reg_tiger
+
+    reg_airquality(runner)
+    reg_amenity(runner)
+    reg_boundary(runner)
+    reg_building(runner)
+    reg_elevation(runner)
+    reg_filter(runner)
+    reg_graphhopper(runner)
+    reg_gtfs(runner)
+    reg_operations(runner)
+    reg_osmose(runner)
+    reg_park(runner)
+    reg_pgrouting(runner)
+    reg_postgis(runner)
+    reg_summary(runner)
+    reg_poi(runner)
+    reg_population(runner)
+    reg_region(runner)
+    reg_road(runner)
+    reg_route(runner)
+    reg_routing(runner)
+    reg_tiger(runner)
+    reg_valhalla(runner)
+    reg_validation(runner)
+    reg_visualization(runner)
+    reg_html_map(runner)
+    reg_zoom(runner)
+
+    from .combined.combined_handlers import register_handlers as reg_combined
+    from .db.import_handlers import register_handlers as reg_db_import
+    from .routing.routing_adapter_handlers import register_handlers as reg_routing_adapter
+    from .sources.source_handlers import register_handlers as reg_source
+
+    reg_combined(runner)
+    reg_db_import(runner)
+    reg_source(runner)
+    reg_routing_adapter(runner)

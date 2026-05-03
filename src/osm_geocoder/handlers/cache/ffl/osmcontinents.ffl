@@ -1,0 +1,30 @@
+/** Aggregates continent-level OSM data downloads. */
+namespace osm.Continents.cache {
+  use osm.types
+  use osm.cache.Continents
+
+  /** Caches each continent individually in parallel. */
+  facet ContinentsIndividually() => (cache: [OSMCache]) andThen {
+    /*
+    planet = Planet()
+    africa = Africa()
+    antarctica = Antarctica()
+    asia = Asia()
+    australia = Australia()
+    centralAmerica = CentralAmerica()
+    europe = Europe()
+    southAmerica = SouthAmerica()
+    russia = Russia()
+
+    yield ContinentsIndividually(cache =
+      planet.cache ++
+      africa.cache ++
+      antarctica.cache ++
+      australia.cache ++
+      centralAmerica.cache ++
+      europe.cache ++
+      southAmerica.cache ++
+      russia.cache)
+      */
+  }
+}

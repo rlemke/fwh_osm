@@ -1,0 +1,113 @@
+// Amenity extraction from OSM data
+//
+// Extracts amenities by category:
+// - Food: restaurants, cafes, bars, fast_food
+// - Shopping: supermarket, mall, convenience
+// - Services: bank, post_office, fuel
+// - Healthcare: hospital, pharmacy, doctors
+// - Education: school, university, library
+
+/** Amenity extraction by category: food, shopping, services, healthcare, education, entertainment. */
+namespace osm.Amenities {
+    use osm.types
+
+    /** Extracted amenity data with category and type metadata. */
+    schema AmenityFeatures {
+        output_path: String,
+        feature_count: Long,
+        amenity_category: String,
+        amenity_types: String,
+        format: String,
+        extraction_date: String
+    }
+
+    /** Aggregate amenity counts by category with name and hours coverage. */
+    schema AmenityStats {
+        total_amenities: Long,
+        food: Long,
+        shopping: Long,
+        services: Long,
+        healthcare: Long,
+        education: Long,
+        entertainment: Long,
+        transport: Long,
+        other: Long,
+        with_name: Long,
+        with_opening_hours: Long
+    }
+
+    /** Extracts all amenities from a region, optionally filtered by category. */
+    event facet ExtractAmenities(cache: OSMCache,
+        category: String = "all") => (result: AmenityFeatures)
+
+    /** Extracts restaurants. */
+    event facet Restaurants(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts cafes. */
+    event facet Cafes(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts bars. */
+    event facet Bars(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts fast food outlets. */
+    event facet FastFood(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts all food and drink amenities. */
+    event facet FoodAndDrink(cache: OSMCache) => (result: AmenityFeatures)
+
+    /** Extracts supermarkets. */
+    event facet Supermarkets(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts shopping malls. */
+    event facet ShoppingMalls(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts convenience stores. */
+    event facet ConvenienceStores(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts all shopping amenities. */
+    event facet AllShopping(cache: OSMCache) => (result: AmenityFeatures)
+
+    /** Extracts banks. */
+    event facet Banks(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts ATMs. */
+    event facet ATMs(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts post offices. */
+    event facet PostOffices(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts fuel stations. */
+    event facet FuelStations(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts EV charging stations. */
+    event facet EVCharging(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts parking facilities. */
+    event facet Parking(cache: OSMCache) => (result: AmenityFeatures)
+
+    /** Extracts hospitals. */
+    event facet Hospitals(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts pharmacies. */
+    event facet Pharmacies(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts doctors' offices. */
+    event facet Doctors(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts all healthcare amenities. */
+    event facet AllHealthcare(cache: OSMCache) => (result: AmenityFeatures)
+
+    /** Extracts schools. */
+    event facet Schools(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts universities. */
+    event facet Universities(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts libraries. */
+    event facet Libraries(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts all education amenities. */
+    event facet AllEducation(cache: OSMCache) => (result: AmenityFeatures)
+
+    /** Extracts cinemas. */
+    event facet Cinemas(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts theatres. */
+    event facet Theatres(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts nightclubs. */
+    event facet Nightclubs(cache: OSMCache) => (result: AmenityFeatures)
+    /** Extracts all entertainment amenities. */
+    event facet AllEntertainment(cache: OSMCache) => (result: AmenityFeatures)
+
+    /** Computes aggregate amenity statistics. */
+    event facet AmenityStatistics(input_path: String) => (stats: AmenityStats)
+
+    /** Filters pre-extracted amenities by category. */
+    event facet FilterAmenitiesByCategory(input_path: String,
+        category: String) => (result: AmenityFeatures)
+
+    /** Searches amenities by name pattern. */
+    event facet SearchAmenities(input_path: String,
+        name_pattern: String) => (result: AmenityFeatures)
+}

@@ -1,0 +1,127 @@
+/** Runs all composed analysis workflows for US states. */
+namespace osm.UnitedStates.analysis {
+  use osm.types
+
+  /** Runs comprehensive analysis for a single region using one CombinedScan pass. */
+  workflow AnalyzeRegion(region: String = "Liechtenstein") => (completed_region: String) andThen {
+    // Stage 1: Cache the PBF file
+    cache = osm.ops.CacheRegion(region = $.region)
+
+    // Stage 2: Single-pass extraction for all needed categories
+    scan = osm.Combined.CombinedScan(cache = cache.cache, categories = ["routes", "parks", "population", "boundaries"])
+
+    // Stage 3: Extract per-category output paths from the scan results
+    routesData = osm.Combined.ExtractCategoryResult(results = scan.results, category = "routes")
+    parksData = osm.Combined.ExtractCategoryResult(results = scan.results, category = "parks")
+    populationData = osm.Combined.ExtractCategoryResult(results = scan.results, category = "population")
+    boundariesData = osm.Combined.ExtractCategoryResult(results = scan.results, category = "boundaries")
+
+    // Stage 4: Post-processing — all steps below run in parallel where dependencies allow
+
+    // -- Bicycle routes visualization (was VisualizeBicycleRoutesFromCache)
+    bicycleRoutes = osm.Routes.FilterRoutesByType(input_path = routesData.output_path, route_type = "bicycle")
+    bicycleMap = osm.viz.RenderMap(geojson_path = bicycleRoutes.result.output_path, title = "Bicycle Routes", color = "#27ae60")
+
+    // -- Transport overview: 4 route types with stats (was TransportOverviewFromCache)
+    hikingRoutes = osm.Routes.FilterRoutesByType(input_path = routesData.output_path, route_type = "hiking")
+    trainRoutes = osm.Routes.FilterRoutesByType(input_path = routesData.output_path, route_type = "train")
+    busRoutes = osm.Routes.FilterRoutesByType(input_path = routesData.output_path, route_type = "bus")
+    bicycleStats = osm.Routes.RouteStatistics(input_path = bicycleRoutes.result.output_path)
+    hikingStats = osm.Routes.RouteStatistics(input_path = hikingRoutes.result.output_path)
+    trainStats = osm.Routes.RouteStatistics(input_path = trainRoutes.result.output_path)
+    busStats = osm.Routes.RouteStatistics(input_path = busRoutes.result.output_path)
+
+    // -- Park analysis with stats (was AnalyzeParksFromCache)
+    parkStats = osm.Parks.ParkStatistics(input_path = parksData.output_path)
+
+    // -- National parks: filter + stats + map (was NationalParksAnalysisFromCache)
+    nationalParks = osm.Parks.FilterParksByType(input_path = parksData.output_path, park_type = "national")
+    nationalParkStats = osm.Parks.ParkStatistics(input_path = nationalParks.result.output_path)
+    nationalParkMap = osm.viz.RenderMap(geojson_path = nationalParks.result.output_path, title = "National Parks", color = "#2ecc71")
+
+    // -- Large cities map (was LargeCitiesMapFromCache)
+    largeCities = osm.Population.FilterByPopulation(input_path = populationData.output_path, min_population = 10000, place_type = "city", operator = "gte")
+    largeCitiesMap = osm.viz.RenderMap(geojson_path = largeCities.result.output_path, title = "Large Cities", color = "#e74c3c")
+
+    // -- City analysis: filter + stats + map (was CityAnalysisFromCache)
+    analysisCities = osm.Population.FilterByPopulation(input_path = populationData.output_path, min_population = 100000, place_type = "city", operator = "gte")
+    cityStats = osm.Population.PopulationStatistics(input_path = analysisCities.result.output_path, place_type = "city")
+    cityMap = osm.viz.RenderMap(geojson_path = analysisCities.result.output_path, title = "Cities", color = "#3498db")
+
+    // -- Transport map: bicycle layer (was TransportMapFromCache)
+    transportMap = osm.viz.RenderMap(geojson_path = bicycleRoutes.result.output_path, title = "Transport - Bicycle", color = "#27ae60")
+
+    // -- Discover cities/towns/villages (was DiscoverCitiesAndTownsFromCache)
+    discoverCities = osm.Population.FilterByPopulation(input_path = populationData.output_path, min_population = 0, place_type = "city", operator = "gte")
+    discoverTowns = osm.Population.FilterByPopulation(input_path = populationData.output_path, min_population = 0, place_type = "town", operator = "gte")
+    discoverVillages = osm.Population.FilterByPopulation(input_path = populationData.output_path, min_population = 0, place_type = "village", operator = "gte")
+    discoverMap = osm.viz.RenderMap(geojson_path = discoverCities.result.output_path, title = "Cities and Towns", color = "#e74c3c")
+
+    // -- State boundaries map (was StateBoundariesWithStatsFromCache)
+    boundaryMap = osm.viz.RenderMap(geojson_path = boundariesData.output_path, title = "State Boundaries", color = "#9b59b6")
+
+    // -- Regional analysis: reuses parks/routes/population data (was RegionalAnalysisFromCache)
+    regionalCityStats = osm.Population.PopulationStatistics(input_path = populationData.output_path, place_type = "city")
+    parksMap = osm.viz.RenderMap(geojson_path = parksData.output_path, title = "Regional Overview - Parks", color = "#2ecc71")
+
+    yield AnalyzeRegion(completed_region = $.region)
+  }
+
+  /** Runs AnalyzeRegion for all 50 US states plus DC. */
+  workflow AnalyzeAllStates() => (states_completed: Long) andThen {
+    alabama = AnalyzeRegion(region = "Alabama")
+    alaska = AnalyzeRegion(region = "Alaska")
+    arizona = AnalyzeRegion(region = "Arizona")
+    arkansas = AnalyzeRegion(region = "Arkansas")
+    california = AnalyzeRegion(region = "California")
+    colorado = AnalyzeRegion(region = "Colorado")
+    connecticut = AnalyzeRegion(region = "Connecticut")
+    delaware = AnalyzeRegion(region = "Delaware")
+    districtOfColumbia = AnalyzeRegion(region = "DistrictOfColumbia")
+    florida = AnalyzeRegion(region = "Florida")
+    georgia = AnalyzeRegion(region = "GeorgiaUS")
+    hawaii = AnalyzeRegion(region = "Hawaii")
+    idaho = AnalyzeRegion(region = "Idaho")
+    illinois = AnalyzeRegion(region = "Illinois")
+    indiana = AnalyzeRegion(region = "Indiana")
+    iowa = AnalyzeRegion(region = "Iowa")
+    kansas = AnalyzeRegion(region = "Kansas")
+    kentucky = AnalyzeRegion(region = "Kentucky")
+    louisiana = AnalyzeRegion(region = "Louisiana")
+    maine = AnalyzeRegion(region = "Maine")
+    maryland = AnalyzeRegion(region = "Maryland")
+    massachusetts = AnalyzeRegion(region = "Massachusetts")
+    michigan = AnalyzeRegion(region = "Michigan")
+    minnesota = AnalyzeRegion(region = "Minnesota")
+    mississippi = AnalyzeRegion(region = "Mississippi")
+    missouri = AnalyzeRegion(region = "Missouri")
+    montana = AnalyzeRegion(region = "Montana")
+    nebraska = AnalyzeRegion(region = "Nebraska")
+    nevada = AnalyzeRegion(region = "Nevada")
+    newHampshire = AnalyzeRegion(region = "NewHampshire")
+    newJersey = AnalyzeRegion(region = "NewJersey")
+    newMexico = AnalyzeRegion(region = "NewMexico")
+    newYork = AnalyzeRegion(region = "NewYork")
+    northCarolina = AnalyzeRegion(region = "NorthCarolina")
+    northDakota = AnalyzeRegion(region = "NorthDakota")
+    ohio = AnalyzeRegion(region = "Ohio")
+    oklahoma = AnalyzeRegion(region = "Oklahoma")
+    oregon = AnalyzeRegion(region = "Oregon")
+    pennsylvania = AnalyzeRegion(region = "Pennsylvania")
+    rhodeIsland = AnalyzeRegion(region = "RhodeIsland")
+    southCarolina = AnalyzeRegion(region = "SouthCarolina")
+    southDakota = AnalyzeRegion(region = "SouthDakota")
+    tennessee = AnalyzeRegion(region = "Tennessee")
+    texas = AnalyzeRegion(region = "Texas")
+    utah = AnalyzeRegion(region = "Utah")
+    vermont = AnalyzeRegion(region = "Vermont")
+    virginia = AnalyzeRegion(region = "Virginia")
+    washington = AnalyzeRegion(region = "Washington")
+    westVirginia = AnalyzeRegion(region = "WestVirginia")
+    wisconsin = AnalyzeRegion(region = "Wisconsin")
+    wyoming = AnalyzeRegion(region = "Wyoming")
+
+    yield AnalyzeAllStates(states_completed = 51)
+  }
+
+}

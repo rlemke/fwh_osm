@@ -1,0 +1,50 @@
+/** Aggregates individual Australia/Oceania region OSM data downloads. */
+namespace osm.Australia.cache {
+  use osm.types
+  use osm.cache.Australia
+
+  /** Caches each Australia/Oceania region individually in parallel. */
+  facet AustraliaIndividually() => (cache: [OSMCache]) andThen {
+
+    americanOceania = osm.cache.Australia.AmericanOceania()
+    cookIslands = osm.cache.Australia.CookIslands()
+    fiji = osm.cache.Australia.Fiji()
+    kiribati = osm.cache.Australia.Kiribati()
+    ileDeClipperton = osm.cache.Australia.IleDeClipperton()
+    marshallIslands = osm.cache.Australia.MarshallIslands()
+    micronesia = osm.cache.Australia.Micronesia()
+    nauru = osm.cache.Australia.Nauru()
+    newCaledonia = osm.cache.Australia.NewCaledonia()
+    newZealand = osm.cache.Australia.NewZealand()
+    palau = osm.cache.Australia.Palau()
+    papuaNewGuinea = osm.cache.Australia.PapuaNewGuinea()
+    samoa = osm.cache.Australia.Samoa()
+    solomonIslands = osm.cache.Australia.SolomonIslands()
+    tokelau = osm.cache.Australia.Tokelau()
+    tonga = osm.cache.Australia.Tonga()
+    tuvalu = osm.cache.Australia.Tuvalu()
+    vanuatu = osm.cache.Australia.Vanuatu()
+    wallisAndFutuna = osm.cache.Australia.WallisAndFutuna()
+
+    yield AustraliaIndividually(cache = americanOceania.cache ++
+            cookIslands.cache ++
+            fiji.cache ++
+            kiribati.cache ++
+            ileDeClipperton.cache ++
+            marshallIslands.cache ++
+            micronesia.cache ++
+            nauru.cache ++
+            newCaledonia.cache ++
+            newZealand.cache ++
+            palau.cache ++
+            papuaNewGuinea.cache ++
+            samoa.cache ++
+            solomonIslands.cache ++
+            tokelau.cache ++
+            tonga.cache ++
+            tuvalu.cache ++
+            vanuatu.cache ++
+            wallisAndFutuna.cache)
+  }
+
+}

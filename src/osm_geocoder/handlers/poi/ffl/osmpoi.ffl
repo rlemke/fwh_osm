@@ -1,0 +1,42 @@
+/** Points of interest extraction from OSM data: settlements, landmarks, and facilities. */
+namespace osm.POIs {
+    use osm.types
+
+    /** Extracts all points of interest from cached OSM data. */
+    event facet POI(cache: OSMCache) => (pois: OSMCache )
+
+    /** Filters volcanoes by elevation and active status. */
+    facet Volcanos(cache: OSMCache, elevation:Long, active:Boolean) => (pois: OSMCache )
+    /** Filters prisons by operator, capacity, security level, and gender. */
+    facet Prisons(operator:String, capacity:Long, securityLevel:String, gender:String ) => (pois: OSMCache )
+    /** Extracts national park POIs. */
+    facet NationalParks() => (pois: OSMCache )
+    /** Extracts state park POIs. */
+    facet StateParks() => (pois: OSMCache )
+    /** Extracts hospital POIs. */
+    facet Hospitals() => (pois: OSMCache )
+    /** Extracts airport POIs. */
+    facet Airports() => (pois: OSMCache )
+    /** Extracts military installation POIs by kind. */
+    facet Military(kind:String) => (pois: OSMCache )
+
+    /** Extracts city-level settlements. */
+    event facet Cities(cache: OSMCache) => (cities: OSMCache )
+    /** Extracts town-level settlements. */
+    event facet Towns(cache: OSMCache) => (towns: OSMCache )
+    /** Extracts suburb-level settlements. */
+    event facet Suburbs(cache: OSMCache) => (towns: OSMCache )
+    /** Extracts village-level settlements. */
+    event facet Villages(cache: OSMCache) => (villages: OSMCache )
+    /** Extracts hamlet-level settlements. */
+    event facet Hamlets(cache: OSMCache) => (villages: OSMCache )
+    /** Extracts country-level boundaries. */
+    event facet Countries(cache: OSMCache) => (villages: OSMCache )
+    /** Converts cached OSM data to GeoJSON format. */
+    event facet GeoOSMCache(cache: OSMCache) => (geojson: OSMCache )
+
+}
+
+
+
+

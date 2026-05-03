@@ -1,0 +1,148 @@
+/** Downloads OSM-derived shapefiles for all European countries. */
+namespace osm.Europe.shapefiles {
+  use osm.types
+  use osm.ops
+  use osm.cache.Europe
+
+  /** Caches each European country and downloads its shapefile in parallel. */
+  facet EuropeShapefiles () => (cache: [OSMCache]) andThen {
+
+    albania = osm.cache.Europe.Albania()
+    andorra = osm.cache.Europe.Andorra()
+    austria = osm.cache.Europe.Austria()
+    belarus = osm.cache.Europe.Belarus()
+    belgium = osm.cache.Europe.Belgium()
+    bosniaAndHerzegovina = osm.cache.Europe.BosniaAndHerzegovina()
+    bulgaria = osm.cache.Europe.Bulgaria()
+    croatia = osm.cache.Europe.Croatia()
+    cyprus = osm.cache.Europe.Cyprus()
+    czechRepublic = osm.cache.Europe.CzechRepublic()
+    denmark = osm.cache.Europe.Denmark()
+    estonia = osm.cache.Europe.Estonia()
+    finland = osm.cache.Europe.Finland()
+    france = osm.cache.Europe.France()
+    germany = osm.cache.Europe.Germany()
+    greece = osm.cache.Europe.Greece()
+    georgia = osm.cache.Europe.Georgia()
+    hungary = osm.cache.Europe.Hungary()
+    iceland = osm.cache.Europe.Iceland()
+    ireland = osm.cache.Europe.Ireland()
+    italy = osm.cache.Europe.Italy()
+    kosovo = osm.cache.Europe.Kosovo()
+    latvia = osm.cache.Europe.Latvia()
+    liechtenstein = osm.cache.Europe.Liechtenstein()
+    lithuania = osm.cache.Europe.Lithuania()
+    luxembourg = osm.cache.Europe.Luxembourg()
+    macedonia = osm.cache.Europe.Macedonia()
+    malta = osm.cache.Europe.Malta()
+    moldova = osm.cache.Europe.Moldova()
+    monaco = osm.cache.Europe.Monaco()
+    montenegro = osm.cache.Europe.Montenegro()
+    netherlands = osm.cache.Europe.Netherlands()
+    norway = osm.cache.Europe.Norway()
+    poland = osm.cache.Europe.Poland()
+    portugal = osm.cache.Europe.Portugal()
+    romania = osm.cache.Europe.Romania()
+    serbia = osm.cache.Europe.Serbia()
+    slovakia = osm.cache.Europe.Slovakia()
+    slovenia = osm.cache.Europe.Slovenia()
+    spain = osm.cache.Europe.Spain()
+    sweden = osm.cache.Europe.Sweden()
+    switzerland = osm.cache.Europe.Switzerland()
+    turkey = osm.cache.Europe.Turkey()
+    ukraine = osm.cache.Europe.Ukraine()
+    unitedKingdom = osm.cache.Europe.UnitedKingdom()
+
+    shp_albania = DownloadShapefile(cache = albania.cache)
+    shp_andorra = DownloadShapefile(cache = andorra.cache)
+    shp_austria = DownloadShapefile(cache = austria.cache)
+    shp_belarus = DownloadShapefile(cache = belarus.cache)
+    shp_belgium = DownloadShapefile(cache = belgium.cache)
+    shp_bosniaAndHerzegovina = DownloadShapefile(cache = bosniaAndHerzegovina.cache)
+    shp_bulgaria = DownloadShapefile(cache = bulgaria.cache)
+    shp_croatia = DownloadShapefile(cache = croatia.cache)
+    shp_cyprus = DownloadShapefile(cache = cyprus.cache)
+    shp_czechRepublic = DownloadShapefile(cache = czechRepublic.cache)
+    shp_denmark = DownloadShapefile(cache = denmark.cache)
+    shp_estonia = DownloadShapefile(cache = estonia.cache)
+    shp_finland = DownloadShapefile(cache = finland.cache)
+    shp_france = DownloadShapefile(cache = france.cache)
+    shp_germany = DownloadShapefile(cache = germany.cache)
+    shp_greece = DownloadShapefile(cache = greece.cache)
+    shp_georgia = DownloadShapefile(cache = georgia.cache)
+    shp_hungary = DownloadShapefile(cache = hungary.cache)
+    shp_iceland = DownloadShapefile(cache = iceland.cache)
+    shp_ireland = DownloadShapefile(cache = ireland.cache)
+    shp_italy = DownloadShapefile(cache = italy.cache)
+    shp_kosovo = DownloadShapefile(cache = kosovo.cache)
+    shp_latvia = DownloadShapefile(cache = latvia.cache)
+    shp_liechtenstein = DownloadShapefile(cache = liechtenstein.cache)
+    shp_lithuania = DownloadShapefile(cache = lithuania.cache)
+    shp_luxembourg = DownloadShapefile(cache = luxembourg.cache)
+    shp_macedonia = DownloadShapefile(cache = macedonia.cache)
+    shp_malta = DownloadShapefile(cache = malta.cache)
+    shp_moldova = DownloadShapefile(cache = moldova.cache)
+    shp_monaco = DownloadShapefile(cache = monaco.cache)
+    shp_montenegro = DownloadShapefile(cache = montenegro.cache)
+    shp_netherlands = DownloadShapefile(cache = netherlands.cache)
+    shp_norway = DownloadShapefile(cache = norway.cache)
+    shp_poland = DownloadShapefile(cache = poland.cache)
+    shp_portugal = DownloadShapefile(cache = portugal.cache)
+    shp_romania = DownloadShapefile(cache = romania.cache)
+    shp_serbia = DownloadShapefile(cache = serbia.cache)
+    shp_slovakia = DownloadShapefile(cache = slovakia.cache)
+    shp_slovenia = DownloadShapefile(cache = slovenia.cache)
+    shp_spain = DownloadShapefile(cache = spain.cache)
+    shp_sweden = DownloadShapefile(cache = sweden.cache)
+    shp_switzerland = DownloadShapefile(cache = switzerland.cache)
+    shp_turkey = DownloadShapefile(cache = turkey.cache)
+    shp_ukraine = DownloadShapefile(cache = ukraine.cache)
+    shp_unitedKingdom = DownloadShapefile(cache = unitedKingdom.cache)
+
+    yield EuropeShapefiles(cache = shp_albania.cache ++
+            shp_andorra.cache ++
+            shp_austria.cache ++
+            shp_belarus.cache ++
+            shp_belgium.cache ++
+            shp_bosniaAndHerzegovina.cache ++
+            shp_bulgaria.cache ++
+            shp_croatia.cache ++
+            shp_cyprus.cache ++
+            shp_czechRepublic.cache ++
+            shp_denmark.cache ++
+            shp_estonia.cache ++
+            shp_finland.cache ++
+            shp_france.cache ++
+            shp_germany.cache ++
+            shp_greece.cache ++
+            shp_georgia.cache ++
+            shp_hungary.cache ++
+            shp_iceland.cache ++
+            shp_ireland.cache ++
+            shp_italy.cache ++
+            shp_kosovo.cache ++
+            shp_latvia.cache ++
+            shp_liechtenstein.cache ++
+            shp_lithuania.cache ++
+            shp_luxembourg.cache ++
+            shp_macedonia.cache ++
+            shp_malta.cache ++
+            shp_moldova.cache ++
+            shp_monaco.cache ++
+            shp_montenegro.cache ++
+            shp_netherlands.cache ++
+            shp_norway.cache ++
+            shp_poland.cache ++
+            shp_portugal.cache ++
+            shp_romania.cache ++
+            shp_serbia.cache ++
+            shp_slovakia.cache ++
+            shp_slovenia.cache ++
+            shp_spain.cache ++
+            shp_sweden.cache ++
+            shp_switzerland.cache ++
+            shp_turkey.cache ++
+            shp_ukraine.cache ++
+            shp_unitedKingdom.cache)
+ }
+}

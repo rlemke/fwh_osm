@@ -1,0 +1,32 @@
+// Test workflow for region resolution integration test
+//
+// Wraps the ResolveRegion event facet in a simple workflow so we can
+// execute it through the Evaluator + AgentPoller pipeline.
+//
+// Prerequisites: Compile with osmtypes.afl, osmregion.afl
+
+/** Integration test that wraps ResolveRegion in a workflow for end-to-end execution. */
+namespace test.region {
+    use osm.types
+    use osm.Region
+
+    /** Resolves a geographic name to its Geofabrik download path and metadata. */
+    workflow ResolveRegionTest(
+        name: String,
+        prefer_continent: String = ""
+    ) => (
+        matched_name: String,
+        continent: String,
+        geofabrik_path: String,
+        is_ambiguous: Boolean
+    ) andThen {
+        resolved = ResolveRegion(name = $.name, prefer_continent = $.prefer_continent)
+
+        yield ResolveRegionTest(
+            matched_name = resolved.resolution.matched_name,
+            continent = resolved.resolution.continent,
+            geofabrik_path = resolved.resolution.geofabrik_path,
+            is_ambiguous = resolved.resolution.is_ambiguous
+        )
+    }
+}

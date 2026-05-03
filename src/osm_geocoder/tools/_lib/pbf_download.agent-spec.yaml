@@ -1,0 +1,330 @@
+# Canonical specification — pbf_download library.
+# See /agent-spec/README.md for the format contract.
+
+identity:
+  name: pbf_download
+  kind: library
+  # Recompute on intentional spec changes via
+  #   sha256sum pbf_download.agent-spec.yaml | awk '{print "sha256:" $1}'
+  # NOTE: editing this field changes the hash; record the PREVIOUS hash
+  # in supersedes: when bumping version.
+  canonical_id: sha256:36baaf5020b94c48627c367e451acb438b436421ed4a0ef493cd0c7e527333e6
+  version: 1
+  supersedes: []
+
+purpose: |
+  Download OSM PBF files from Geofabrik into a local cache, verified
+  against upstream MD5 and recorded in a JSON manifest keyed by region.
+  The core operation is ``download_region(region)`` — idempotent given
+  unchanged upstream data, thread-safe per region, atomic at the
+  filesystem level. Produces the root artifact that every downstream
+  convert/extract/build tool in the osm-geocoder tool set consumes.
+
+# ---------------------------------------------------------------------------
+# Interface — what a caller provides and receives.
+# ---------------------------------------------------------------------------
+inputs:
+  region:
+    type: string
+    description: |
+      Geofabrik region path, relative to https://download.geofabrik.de/,
+      without the ``-latest.osm.pbf`` suffix. Leading/trailing slashes
+      are stripped; empty values are rejected.
+    constraint: "non-empty; typical regex: ^[a-z0-9][a-z0-9/_-]*$"
+    examples:
+      - europe/germany/berlin
+      - africa/algeria
+      - north-america/us/california
+
+  storage:
+    type: Storage
+    description: |
+      Storage backend instance (LocalStorage or HdfsStorage) — see
+      storage.agent-spec.yaml for the contract. Determines where the
+      cache lives and how concurrent writers are serialized.
+    default: LocalStorage()
+
+  force:
+    type: bool
+    description: |
+      When True, re-download even if the manifest reports the cached
+      copy matches the current upstream MD5.
+    default: false
+
+  on_progress:
+    type: "(callback: (label: string, bytes_so_far: int, total_bytes: int, is_final: bool) -> void) | None"
+    description: |
+      Optional progress callback. Invoked approximately every 2 seconds
+      during a download with cumulative byte counts, and exactly once
+      at completion with is_final=True. No backpressure — the callback
+      must not block.
+    default: null
+
+outputs:
+  DownloadResult:
+    type: struct
+    description: |
+      Returned from every call, even cache hits. ``was_cached=True``
+      means no network download occurred; ``was_cached=False`` means
+      a fresh download was performed and MD5-verified.
+    shape:
+      region: string
+      path: string                  # absolute path to the cached file (filesystem or HDFS)
+      relative_path: string         # path relative to the pbf/ cache dir
+      source_url: string            # Geofabrik URL fetched (or would have been)
+      size_bytes: int
+      sha256: hex_string            # locally computed, 64 hex chars
+      md5: hex_string               # upstream MD5 (matches Geofabrik's .md5 publication)
+      source_timestamp: string | null   # ISO-8601 UTC, parsed from HTTP Last-Modified
+      downloaded_at: string         # ISO-8601 UTC, recorded on fresh downloads
+      was_cached: bool
+      manifest_entry: object        # full manifest entry dict (see below)
+
+  manifest_entry:
+    type: struct
+    description: |
+      Written to ``<cache_root>/pbf/manifest.json`` under the key
+      equal to ``relative_path``. Schema is the baseline shape defined
+      in manifest-schema.agent-spec.yaml, with pbf-specific fields.
+    shape:
+      relative_path: string
+      source_url: string
+      size_bytes: int
+      sha256: hex_string
+      source_checksum:
+        algo: "md5"
+        value: hex_string
+        url: string                 # the .md5 URL fetched
+      downloaded_at: string         # ISO-8601 UTC
+      source_timestamp: string | null
+      extra:
+        region: string
+
+# ---------------------------------------------------------------------------
+# Effect surface — what this library does outside its own stack frame.
+# ---------------------------------------------------------------------------
+side_effects:
+  network:
+    - "HTTP GET https://download.geofabrik.de/<region>-latest.osm.pbf (streaming, Range-supporting)"
+    - "HTTP GET https://download.geofabrik.de/<region>-latest.osm.pbf.md5"
+    - "HTTP HEAD https://download.geofabrik.de/<region>-latest.osm.pbf (best-effort, for Last-Modified)"
+  filesystem:
+    reads:
+      - "<AFL_OSM_LOCAL_TMP_DIR or $TMPDIR>/facetwork-pbf-staging/<region>.osm.pbf.tmp (staging)"
+      - "<cache_root>/pbf/manifest.json"
+    writes:
+      - "<AFL_OSM_LOCAL_TMP_DIR or $TMPDIR>/facetwork-pbf-staging/<region>.osm.pbf.tmp (partial → complete, deleted on failure)"
+      - "<cache_root>/pbf/<region>-latest.osm.pbf (atomic, via os.rename or WebHDFS RENAME)"
+      - "<cache_root>/pbf/manifest.json (atomic, write-tmp + rename)"
+      - "<cache_root>/pbf/manifest.json.lock (fcntl advisory lock file)"
+    deletes:
+      - "staging file on success (after finalize) and on failure (during cleanup)"
+  subprocess: []
+  stdout: "none"
+  stderr: "logging.INFO/WARNING via the standard logging module; exact format is not part of the contract"
+
+# ---------------------------------------------------------------------------
+# Cache semantics — what "unchanged" means and what downstream caches depend on us.
+# ---------------------------------------------------------------------------
+cache_validity:
+  keyed_on:
+    - upstream_md5         # Geofabrik's published .md5 for the region
+    - recorded_md5         # source_checksum.value in manifest
+    - file_presence        # cached file exists at recorded size
+  skip_when: |
+    manifest.entries[<region>-latest.osm.pbf].source_checksum.value ==
+      fetch_md5(source_url)
+    AND storage.exists(cache_file)
+    AND storage.size(cache_file) ==
+      manifest.entries[<region>-latest.osm.pbf].size_bytes
+  invalidates:
+    # The sha256 in our manifest entry is the key every downstream tool
+    # checks. When we produce a new sha256 (i.e. was_cached=false), every
+    # consumer's cache for this region is stale.
+    - pbf_geojson
+    - pbf_shapefile
+    - pbf_extract
+    - pbf_clip            # clips that have source_region equal to this region
+    - graphhopper_build
+    - valhalla_build
+    - osrm_build
+
+# ---------------------------------------------------------------------------
+# Failure modes — explicit enumeration; impls MUST handle each as specified.
+# ---------------------------------------------------------------------------
+failure_modes:
+  - kind: upstream_404
+    trigger: "Geofabrik returns HTTP 404 for the PBF or its .md5 (index stale vs. served files)"
+    behavior: "fail_fast; no retry"
+    user_visible: "DownloadError wrapping the HTTP error; non-zero CLI exit code; error enumerated per-region in batch summary"
+
+  - kind: upstream_md5_mismatch
+    trigger: "downloaded bytes' md5 != Geofabrik's published .md5"
+    behavior: "unlink staging file; raise"
+    user_visible: "DownloadError with both md5s in the message"
+
+  - kind: network_timeout
+    trigger: "connect timeout 30s OR per-read timeout 120s exceeded"
+    behavior: "unlink staging file; raise"
+    user_visible: "DownloadError wrapping requests.ReadTimeout or urllib.error.URLError"
+
+  - kind: disk_full_during_stream
+    trigger: "write to staging file raises OSError(ENOSPC)"
+    behavior: "unlink staging (partial); raise"
+    user_visible: "DownloadError containing the underlying OSError"
+
+  - kind: finalize_cross_fs_cp_error
+    trigger: "local-staged file cannot be moved to destination (EILSEQ, EACCES, cross-FS rename not supported)"
+    behavior: "unlink staged tmp destination; raise"
+    user_visible: "OSError with cp stderr embedded, or the underlying rename error"
+
+  - kind: manifest_corrupt
+    trigger: "manifest.json fails to parse or is missing 'entries' key"
+    behavior: "raise ValueError"
+    user_visible: "ValueError pointing at the manifest path"
+
+# ---------------------------------------------------------------------------
+# Concurrency — what's safe, under what guarantee, and why.
+# ---------------------------------------------------------------------------
+concurrency:
+  threads: safe_per_region
+  processes: safe
+  parallelism_limit: "Geofabrik rate-limits concurrent downloads per source IP; callers SHOULD serialize per-host but this library does not enforce it"
+  rationale: |
+    A module-level dict of per-region threading.Lock() serializes concurrent
+    calls for the SAME region within one process — so two threads racing to
+    download ``europe/germany/berlin`` produce one download and one cache hit,
+    not two downloads. Different regions proceed independently.
+
+    Manifest writes use a module-level threading.Lock AND an fcntl advisory
+    lock on ``<cache_root>/pbf/manifest.json.lock``, so concurrent processes
+    on the same filesystem serialize cleanly around the JSON read-modify-write.
+
+    On HDFS, the flock is a no-op; single-writer semantics are assumed.
+    See storage.agent-spec.yaml.
+
+# ---------------------------------------------------------------------------
+# Cost model — order-of-magnitude resource use, so agents composing this
+# into pipelines can plan. Representative PBF sizes from Geofabrik 2026.
+# ---------------------------------------------------------------------------
+cost_model:
+  cpu: low                # mostly I/O-bound; sha256 and md5 streaming hash are cheap
+  memory: "~5 MB (streaming buffer + stdlib HTTP)"
+  disk: "2× source size during staging (staged copy + destination); 1× steady-state"
+  network: |
+    representative downloads:
+      - liechtenstein:    ~3 MB
+      - berlin:           ~120 MB
+      - germany (full):   ~4 GB
+      - europe (full):    ~28 GB
+  wall_clock: |
+    network-bound. At ~10 MiB/s: berlin ~12s, germany ~7min, europe ~50min.
+    Typical home connections see highly variable throughput (5–100 MiB/s)
+    depending on Geofabrik load and route.
+
+# ---------------------------------------------------------------------------
+# Properties — invariants every conforming implementation must satisfy.
+# ---------------------------------------------------------------------------
+properties:
+  - name: idempotent_given_source
+    statement: |
+      For all regions R and any Storage S, if download_region(R, storage=S,
+      force=False) completes successfully and Geofabrik's published MD5
+      for R does not change between calls, then a second call with the
+      same arguments returns was_cached=True and performs no HTTP GET on
+      the PBF body (the .md5 GET may still occur).
+    checkable_via: property_test
+
+  - name: md5_verification_blocks_bad_bytes
+    statement: |
+      No call returns was_cached=False AND leaves a cache_file present
+      whose bytes, when md5-hashed, differ from the recorded
+      source_checksum.value. I.e. corrupted downloads never land in the
+      cache.
+    checkable_via: property_test
+
+  - name: atomic_destination
+    statement: |
+      The file at <cache_file> is never observable by another process in
+      a partial state: at any instant, either the file does not exist,
+      or the file exists and equals the exact bytes delivered by
+      Geofabrik for the recorded MD5.
+    checkable_via: manual_inspection     # timing-based; stress-testable but not rigorously proved
+
+  - name: manifest_consistency
+    statement: |
+      Every key present in manifest.entries has a corresponding file on
+      disk whose size matches size_bytes and whose sha256 matches sha256
+      (locally recomputable). No "dangling" manifest entries after a
+      successful run.
+    checkable_via: example_suite
+
+  - name: source_sha_changes_iff_bytes_change
+    statement: |
+      manifest.entries[K].sha256 equals the sha256 of the on-disk bytes
+      at cache_file at the instant the manifest entry was written.
+      Downstream tools rely on this to decide cache validity.
+    checkable_via: property_test
+
+  - name: failure_leaves_no_partial_cache
+    statement: |
+      After any raised exception from download_region, cache_file does
+      not exist OR it contains the pre-call bytes (if any). Staging tmp
+      files are cleaned up.
+    checkable_via: property_test
+
+# ---------------------------------------------------------------------------
+# Dependencies — what a regenerating agent needs available.
+# ---------------------------------------------------------------------------
+dependencies:
+  libraries:
+    - "requests (optional, preferred for streaming downloads)"
+    - "urllib (stdlib; used as fallback and for HEAD / md5 fetches)"
+    - "hashlib, threading, tempfile, dataclasses, pathlib (stdlib)"
+  tools:
+    - manifest-schema.agent-spec.yaml    # the manifest JSON structure
+    - storage.agent-spec.yaml             # the Storage abstraction
+  binaries: []
+  environment:
+    - AFL_OSM_CACHE_ROOT        # cache root path; default is Storage-backend-specific
+    - AFL_OSM_STORAGE           # local | hdfs; default local
+    - AFL_OSM_LOCAL_TMP_DIR     # staging dir for downloads; default $TMPDIR
+
+# ---------------------------------------------------------------------------
+# Implementation notes — informational; not part of the contract. Regenerated
+# impls MAY make different operational choices here as long as the properties
+# above still hold.
+# ---------------------------------------------------------------------------
+implementation_notes: |
+  - Use streaming reads with small chunk sizes (16-64 KiB). HTTPResponse.read(N)
+    with large N blocks until a full N bytes are received; on slow links this
+    looks like a hung download. requests.iter_content(chunk_size=65536) or
+    urllib's HTTPResponse.read1(N) return as bytes arrive.
+
+  - Stage downloads on local disk ($TMPDIR / $AFL_OSM_LOCAL_TMP_DIR), NOT on
+    the destination volume. Slow external volumes (network/USB mounts) can
+    cause TCP receive-window backpressure if writes are slow, which stalls
+    the socket. Moving staging local decouples network from disk speeds.
+
+  - After MD5 verification, the staging file is moved to the destination via
+    Storage.finalize_from_local. On LocalStorage, this prefers os.rename
+    (same-FS, free) and falls back to 'cp -X' + rename for cross-FS. The
+    -X flag skips xattrs/resource forks which otherwise cause EILSEQ on
+    non-APFS destinations.
+
+  - Progress callbacks fire every ~2s. Callers should assume calls may be
+    missed if downloads complete in under 2s, and a final callback with
+    is_final=True always fires on success.
+
+  - The library does NOT enforce Geofabrik's per-IP rate limit. Callers
+    orchestrating batch downloads (see the CLI's --all / --update-all) must
+    serialize or rate-limit themselves.
+
+# ---------------------------------------------------------------------------
+# Cross-reference to human narrative — rationale, examples, history.
+# ---------------------------------------------------------------------------
+human_docs:
+  - examples/osm-geocoder/tools/README.md#available-tools
+  - examples/osm-geocoder/tools/README.md#typical-workflows
+  - examples/osm-geocoder/tools/download_pbf.py      # CLI wrapper
+  - examples/osm-geocoder/tools/_lib/pbf_download.py # current reference implementation

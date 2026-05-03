@@ -1,0 +1,58 @@
+// GeoJSON visualization with OSM map backgrounds
+//
+// Generates interactive HTML maps using Leaflet.js with OpenStreetMap tiles,
+// or static PNG images for embedding in documents.
+
+/** Map rendering and GeoJSON formatting using Leaflet.js with OSM tiles. */
+namespace osm.viz {
+    /** Rendered map output with bounds, format, and feature count. */
+    schema MapResult {
+        output_path: String,
+        format: String,
+        feature_count: Long,
+        bounds: String,
+        title: String,
+        extraction_date: String
+    }
+
+    /** Custom style parameters for map layer rendering. */
+    schema LayerStyle {
+        color: String,
+        fill_color: String,
+        weight: Long,
+        opacity: Double,
+        fill_opacity: Double
+    }
+    /** Generates an interactive HTML or static PNG map from GeoJSON. */
+    event facet RenderMap(geojson_path: String, title: String = "Map",
+        format: String = "html", width: Long = 800, height: Long = 600,
+        color: String = "#3388ff") => (result: MapResult)
+
+    /** Renders a map centered on specific coordinates with a zoom level. */
+    event facet RenderMapAt(geojson_path: String, lat: Double, lon: Double,
+        zoom: Long = 10, title: String = "Map") => (result: MapResult)
+
+    /** Renders multiple GeoJSON files as color-coded layers. */
+    event facet RenderLayers(layers: [String], colors: [String],
+        title: String = "Map", format: String = "html") => (result: MapResult)
+
+    /** Renders a map with custom layer styling. */
+    event facet RenderStyledMap(geojson_path: String, style: LayerStyle,
+        title: String = "Map") => (result: MapResult)
+
+    /** Opens a quick browser preview of GeoJSON data. */
+    event facet PreviewMap(geojson_path: String) => (result: MapResult)
+
+    /** Formatted text output from GeoJSON features. */
+    schema FormatResult {
+        output_path: String,
+        text: String,
+        feature_count: Long,
+        format: String,
+        title: String
+    }
+
+    /** Formats GeoJSON features as text or other output formats. */
+    event facet FormatGeoJSON(input_path: String, title: String = "Features",
+        format: String = "text") => (result: FormatResult)
+}

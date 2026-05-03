@@ -1,0 +1,65 @@
+// Building extraction from OSM data
+//
+// Extracts building footprints with classification:
+// - Residential, commercial, industrial, retail
+// - Building height/levels for 3D visualization
+// - Building attributes (name, address, etc.)
+
+/** Building footprint extraction with classification and 3D height data. */
+namespace osm.Buildings {
+    use osm.types
+
+    /** Extracted building data with type, area, and height metadata. */
+    schema BuildingFeatures {
+        output_path: String,
+        feature_count: Long,
+        building_type: String,
+        total_area_km2: Double,
+        with_height_data: Long,
+        format: String,
+        extraction_date: String
+    }
+
+    /** Aggregate building statistics by type with height and level data. */
+    schema BuildingStats {
+        total_buildings: Long,
+        total_area_km2: Double,
+        residential: Long,
+        commercial: Long,
+        industrial: Long,
+        retail: Long,
+        other: Long,
+        avg_levels: Double,
+        with_height: Long
+    }
+
+    /** Extracts all buildings from a region, optionally filtered by type. */
+    event facet ExtractBuildings(cache: OSMCache,
+        building_type: String = "all") => (result: BuildingFeatures)
+
+    /** Extracts residential buildings. */
+    event facet ResidentialBuildings(cache: OSMCache) => (result: BuildingFeatures)
+
+    /** Extracts commercial buildings. */
+    event facet CommercialBuildings(cache: OSMCache) => (result: BuildingFeatures)
+
+    /** Extracts industrial buildings. */
+    event facet IndustrialBuildings(cache: OSMCache) => (result: BuildingFeatures)
+
+    /** Extracts retail buildings (shops, malls). */
+    event facet RetailBuildings(cache: OSMCache) => (result: BuildingFeatures)
+
+    /** Extracts buildings with height/levels data for 3D visualization. */
+    event facet Buildings3D(cache: OSMCache) => (result: BuildingFeatures)
+
+    /** Extracts buildings above a minimum area threshold. */
+    event facet LargeBuildings(cache: OSMCache,
+        min_area_m2: Double = 1000) => (result: BuildingFeatures)
+
+    /** Computes aggregate building statistics. */
+    event facet BuildingStatistics(input_path: String) => (stats: BuildingStats)
+
+    /** Filters pre-extracted GeoJSON by building type. */
+    event facet FilterBuildingsByType(input_path: String,
+        building_type: String) => (result: BuildingFeatures)
+}

@@ -1,0 +1,139 @@
+// Composed routing workflows — same pipeline, different backends
+//
+// Demonstrates the routing source adapter pattern:
+// - RouteViaAPI: uses public API (no setup)
+// - RouteViaOSRM: uses local OSRM server (fast, offline)
+//
+// All produce identical output schemas so downstream steps
+// (rendering, analysis) work regardless of routing backend.
+
+/** Composed routing workflows using different backends. */
+namespace osm.Routing.Workflows {
+    use osm.Routing.Types
+    use osm.Routing.API
+    use osm.Routing.OSRM
+    use osm.viz
+
+    /** Route between two points via public API and render the result. */
+    workflow RouteViaAPI(
+        from_lat: Double,
+        from_lon: Double,
+        from_name: String,
+        to_lat: Double,
+        to_lon: Double,
+        to_name: String,
+        profile: String = "car",
+        color: String = "#2980b9"
+    ) => (
+        distance_km: Double,
+        duration_min: Double,
+        map_path: String
+    ) andThen {
+        route = osm.Routing.API.Route(
+            from_lat = $.from_lat, from_lon = $.from_lon, from_name = $.from_name,
+            to_lat = $.to_lat, to_lon = $.to_lon, to_name = $.to_name,
+            profile = $.profile
+        )
+        map = RenderMap(
+            geojson_path = route.result.route.output_path,
+            title = $.from_name ++ " to " ++ $.to_name,
+            color = $.color
+        )
+        yield RouteViaAPI(
+            distance_km = route.result.route.distance_km,
+            duration_min = route.result.route.duration_min,
+            map_path = map.result.output_path
+        )
+    }
+
+    /** Route between two points via local OSRM and render the result. */
+    workflow RouteViaOSRM(
+        from_lat: Double,
+        from_lon: Double,
+        from_name: String,
+        to_lat: Double,
+        to_lon: Double,
+        to_name: String,
+        profile: String = "car",
+        color: String = "#e74c3c"
+    ) => (
+        distance_km: Double,
+        duration_min: Double,
+        map_path: String
+    ) andThen {
+        route = osm.Routing.OSRM.Route(
+            from_lat = $.from_lat, from_lon = $.from_lon, from_name = $.from_name,
+            to_lat = $.to_lat, to_lon = $.to_lon, to_name = $.to_name,
+            profile = $.profile
+        )
+        map = RenderMap(
+            geojson_path = route.result.route.output_path,
+            title = $.from_name ++ " to " ++ $.to_name,
+            color = $.color
+        )
+        yield RouteViaOSRM(
+            distance_km = route.result.route.distance_km,
+            duration_min = route.result.route.duration_min,
+            map_path = map.result.output_path
+        )
+    }
+
+    /** Multi-stop route via API with map rendering. */
+    workflow MultiStopViaAPI(
+        waypoints: String,
+        profile: String = "car",
+        title: String = "Multi-Stop Route",
+        color: String = "#27ae60"
+    ) => (
+        leg_count: Long,
+        total_distance_km: Double,
+        total_duration_min: Double,
+        map_path: String
+    ) andThen {
+        route = osm.Routing.API.MultiStopRoute(
+            waypoints = $.waypoints,
+            profile = $.profile
+        )
+        map = RenderMap(
+            geojson_path = route.result.output_path,
+            title = $.title,
+            color = $.color
+        )
+        yield MultiStopViaAPI(
+            leg_count = route.result.leg_count,
+            total_distance_km = route.result.total_distance_km,
+            total_duration_min = route.result.total_duration_min,
+            map_path = map.result.output_path
+        )
+    }
+
+    /** Isochrone (reachability area) via API with map rendering. */
+    workflow IsochroneViaAPI(
+        center_lat: Double,
+        center_lon: Double,
+        center_name: String = "",
+        time_minutes: Long = 15,
+        profile: String = "car",
+        color: String = "#8e44ad"
+    ) => (
+        map_path: String,
+        time_minutes: Long
+    ) andThen {
+        iso = osm.Routing.API.Isochrone(
+            center_lat = $.center_lat,
+            center_lon = $.center_lon,
+            center_name = $.center_name,
+            time_minutes = $.time_minutes,
+            profile = $.profile
+        )
+        map = RenderMap(
+            geojson_path = iso.result.output_path,
+            title = $.center_name ++ " " ++ $.time_minutes ++ "min reachability",
+            color = $.color
+        )
+        yield IsochroneViaAPI(
+            map_path = map.result.output_path,
+            time_minutes = $.time_minutes
+        )
+    }
+}

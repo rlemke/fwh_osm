@@ -1,0 +1,106 @@
+// GraphHopper workflow compositions
+// Builds routing graphs from OSM caches for entire regions
+
+/** Batch GraphHopper routing graph construction for European countries. */
+namespace osm.GraphHopper.Europe {
+    use osm.types
+    uses osm.cache.Europe
+    uses osm.cache.GraphHopper.Europe
+
+    /** Builds routing graphs for ten major European countries in parallel. */
+    workflow BuildMajorEuropeGraphs(profile: String = "car", recreate: Boolean = false) => (graphs: [GraphHopperCache]) andThen {
+
+        // Step 1: Get OSM caches (parallel)
+        germany_osm = osm.cache.Europe.Germany()
+        france_osm = osm.cache.Europe.France()
+        spain_osm = osm.cache.Europe.Spain()
+        italy_osm = osm.cache.Europe.Italy()
+        uk_osm = osm.cache.Europe.UnitedKingdom()
+        poland_osm = osm.cache.Europe.Poland()
+        netherlands_osm = osm.cache.Europe.Netherlands()
+        belgium_osm = osm.cache.Europe.Belgium()
+        austria_osm = osm.cache.Europe.Austria()
+        switzerland_osm = osm.cache.Europe.Switzerland()
+
+        // Step 2: Build routing graphs (parallel)
+        germany_gh = osm.cache.GraphHopper.Europe.Germany(cache = germany_osm.cache, profile = $.profile, recreate = $.recreate)
+        france_gh = osm.cache.GraphHopper.Europe.France(cache = france_osm.cache, profile = $.profile, recreate = $.recreate)
+        spain_gh = osm.cache.GraphHopper.Europe.Spain(cache = spain_osm.cache, profile = $.profile, recreate = $.recreate)
+        italy_gh = osm.cache.GraphHopper.Europe.Italy(cache = italy_osm.cache, profile = $.profile, recreate = $.recreate)
+        uk_gh = osm.cache.GraphHopper.Europe.UnitedKingdom(cache = uk_osm.cache, profile = $.profile, recreate = $.recreate)
+        poland_gh = osm.cache.GraphHopper.Europe.Poland(cache = poland_osm.cache, profile = $.profile, recreate = $.recreate)
+        netherlands_gh = osm.cache.GraphHopper.Europe.Netherlands(cache = netherlands_osm.cache, profile = $.profile, recreate = $.recreate)
+        belgium_gh = osm.cache.GraphHopper.Europe.Belgium(cache = belgium_osm.cache, profile = $.profile, recreate = $.recreate)
+        austria_gh = osm.cache.GraphHopper.Europe.Austria(cache = austria_osm.cache, profile = $.profile, recreate = $.recreate)
+        switzerland_gh = osm.cache.GraphHopper.Europe.Switzerland(cache = switzerland_osm.cache, profile = $.profile, recreate = $.recreate)
+
+        // Step 3: Aggregate results
+        yield BuildMajorEuropeGraphs(graphs = germany_gh.graph ++ france_gh.graph ++ spain_gh.graph ++ italy_gh.graph ++ uk_gh.graph ++ poland_gh.graph ++ netherlands_gh.graph ++ belgium_gh.graph ++ austria_gh.graph ++ switzerland_gh.graph)
+    }
+
+    /** Builds a single routing graph for Germany. */
+    workflow BuildGermanyGraph(profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) andThen {
+        osm = osm.cache.Europe.Germany()
+        gh = osm.cache.GraphHopper.Europe.Germany(cache = osm.cache, profile = $.profile, recreate = $.recreate)
+        yield BuildGermanyGraph(graph = gh.graph)
+    }
+}
+
+/** Batch GraphHopper routing graph construction for North American countries. */
+namespace osm.GraphHopper.NorthAmerica {
+    use osm.types
+    uses osm.cache.NorthAmerica
+    uses osm.cache.GraphHopper.NorthAmerica
+
+    /** Builds routing graphs for the US, Canada, and Mexico in parallel. */
+    workflow BuildNorthAmericaGraphs(profile: String = "car", recreate: Boolean = false) => (graphs: [GraphHopperCache]) andThen {
+        // Get OSM caches
+        usa_osm = osm.cache.NorthAmerica.UnitedStates()
+        canada_osm = osm.cache.NorthAmerica.Canada()
+        mexico_osm = osm.cache.NorthAmerica.Mexico()
+
+        // Build graphs
+        usa_gh = osm.cache.GraphHopper.NorthAmerica.UnitedStates(cache = usa_osm.cache, profile = $.profile, recreate = $.recreate)
+        canada_gh = osm.cache.GraphHopper.NorthAmerica.Canada(cache = canada_osm.cache, profile = $.profile, recreate = $.recreate)
+        mexico_gh = osm.cache.GraphHopper.NorthAmerica.Mexico(cache = mexico_osm.cache, profile = $.profile, recreate = $.recreate)
+
+        yield BuildNorthAmericaGraphs(graphs = usa_gh.graph ++ canada_gh.graph ++ mexico_gh.graph)
+    }
+}
+
+/** Batch GraphHopper routing graph construction for individual US states. */
+namespace osm.GraphHopper.UnitedStates {
+    use osm.types
+    uses osm.cache.UnitedStates
+    uses osm.cache.GraphHopper.UnitedStates
+
+    /** Builds routing graphs for California, Oregon, and Washington in parallel. */
+    workflow BuildWestCoastGraphs(profile: String = "car", recreate: Boolean = false) => (graphs: [GraphHopperCache]) andThen {
+        ca_osm = osm.cache.UnitedStates.California()
+        or_osm = osm.cache.UnitedStates.Oregon()
+        wa_osm = osm.cache.UnitedStates.Washington()
+
+        ca_gh = osm.cache.GraphHopper.UnitedStates.California(cache = ca_osm.cache, profile = $.profile, recreate = $.recreate)
+        or_gh = osm.cache.GraphHopper.UnitedStates.Oregon(cache = or_osm.cache, profile = $.profile, recreate = $.recreate)
+        wa_gh = osm.cache.GraphHopper.UnitedStates.Washington(cache = wa_osm.cache, profile = $.profile, recreate = $.recreate)
+
+        yield BuildWestCoastGraphs(graphs = ca_gh.graph ++ or_gh.graph ++ wa_gh.graph)
+    }
+
+    /** Builds routing graphs for NY, NJ, MA, PA, and FL in parallel. */
+    workflow BuildEastCoastGraphs(profile: String = "car", recreate: Boolean = false) => (graphs: [GraphHopperCache]) andThen {
+        ny_osm = osm.cache.UnitedStates.NewYork()
+        nj_osm = osm.cache.UnitedStates.NewJersey()
+        ma_osm = osm.cache.UnitedStates.Massachusetts()
+        pa_osm = osm.cache.UnitedStates.Pennsylvania()
+        fl_osm = osm.cache.UnitedStates.Florida()
+
+        ny_gh = osm.cache.GraphHopper.UnitedStates.NewYork(cache = ny_osm.cache, profile = $.profile, recreate = $.recreate)
+        nj_gh = osm.cache.GraphHopper.UnitedStates.NewJersey(cache = nj_osm.cache, profile = $.profile, recreate = $.recreate)
+        ma_gh = osm.cache.GraphHopper.UnitedStates.Massachusetts(cache = ma_osm.cache, profile = $.profile, recreate = $.recreate)
+        pa_gh = osm.cache.GraphHopper.UnitedStates.Pennsylvania(cache = pa_osm.cache, profile = $.profile, recreate = $.recreate)
+        fl_gh = osm.cache.GraphHopper.UnitedStates.Florida(cache = fl_osm.cache, profile = $.profile, recreate = $.recreate)
+
+        yield BuildEastCoastGraphs(graphs = ny_gh.graph ++ nj_gh.graph ++ ma_gh.graph ++ pa_gh.graph ++ fl_gh.graph)
+    }
+}

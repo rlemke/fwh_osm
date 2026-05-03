@@ -1,0 +1,14 @@
+/** Downloads OSM PBF caches for 2 US states in parallel. */
+namespace osm.UnitedStates.cache {
+  use osm.types
+  use osm.ops
+  use osm.cache.UnitedStates
+
+  /** Fetches and aggregates OSM cache data for 2 US states. */
+  workflow DownloadStates_02() => (cache: [OSMCache]) andThen {
+    alabama = Alabama()
+    alaska = Alaska()
+    yield DownloadStates_02(cache = alabama.cache ++ alaska.cache)
+  }
+
+}

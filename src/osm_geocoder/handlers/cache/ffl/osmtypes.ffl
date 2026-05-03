@@ -1,0 +1,69 @@
+/** Shared type definitions used across all OSM modules. */
+namespace osm.types {
+   /** Cached OSM data file with download metadata. */
+   schema OSMCache {
+      url: String,
+      path: String,
+      date: String,
+      size: Long,
+      wasInCache: Boolean
+   }
+
+   /** Cached GraphHopper routing graph built from OSM data. */
+   schema GraphHopperCache {
+      osmSource: String,
+      graphDir: String,
+      profile: String,
+      date: String,
+      size: Long,
+      wasInCache: Boolean,
+      version: String,
+      nodeCount: Long,
+      edgeCount: Long
+   }
+
+   /** Rendered HTML map page for a region — MapLibre GL JS + PMTiles. Points at a static directory under `html/<region>-latest/` with an index.html + style.json. `sources` lists the vector_tiles layers (water, parks, roads_routable, …) currently styled on the page. */
+   schema HTMLMapCache {
+      region: String,
+      htmlDir: String,
+      indexUrl: String,
+      sources: [String],
+      size: Long,
+      date: String,
+      wasInCache: Boolean,
+      styleVersion: Long
+   }
+
+   /** Valhalla routing tileset built from OSM data. Profiles (auto, bicycle, pedestrian, truck, ...) are query-time costing models, not part of the build, so there is no per-profile field here — one tileset serves every profile. */
+   schema ValhallaCache {
+      osmSource: String,
+      tileDir: String,
+      date: String,
+      size: Long,
+      wasInCache: Boolean,
+      version: String,
+      tileCount: Long
+   }
+
+   /** pgRouting topology built from OSM road network data. */
+   schema RoutingTopology {
+      postgisUrl: String,
+      region: String,
+      profile: String,
+      nodeCount: Long,
+      edgeCount: Long,
+      date: String,
+      wasCached: Boolean
+   }
+
+   /** GTFS public transit feed with agency and shape metadata. */
+   schema GTFSFeed {
+      url: String,
+      path: String,
+      date: String,
+      size: Long,
+      wasInCache: Boolean,
+      agency_name: String,
+      has_shapes: Boolean
+   }
+}

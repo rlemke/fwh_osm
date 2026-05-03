@@ -1,0 +1,159 @@
+// Source-Agnostic Composed Workflows
+//
+// These workflows demonstrate how the same analysis pipelines work
+// with different data sources (PBF, PostGIS, GeoJSON). The analysis
+// facets (statistics, filtering, visualization) are reused across
+// all source types — only the extraction layer changes.
+
+/** Source-agnostic workflows: same analysis pipelines across PBF, PostGIS, and GeoJSON sources. */
+namespace osm.workflows.sourced {
+    use osm.types
+
+    // ==========================================================================
+    // ROUTES: Three sources → same analysis pipeline
+    // ==========================================================================
+
+    /** Extracts bicycle routes from PBF, computes statistics, and renders a map. */
+    workflow BicycleRoutesPBF(region: String = "Liechtenstein") => (map_path: String, route_count: Long, total_km: Double) andThen {
+        cache = osm.ops.CacheRegion(region = $.region)
+        routes = osm.Source.PBF.ExtractRoutes(cache = cache.cache, route_type = "bicycle")
+        stats = osm.Routes.RouteStatistics(input_path = routes.result.output_path)
+        map = osm.viz.RenderMap(geojson_path = routes.result.output_path, title = "Bicycle Routes (PBF)", color = "#27ae60")
+        yield BicycleRoutesPBF(map_path = map.result.output_path, route_count = routes.result.feature_count, total_km = stats.stats.total_length_km)
+    }
+
+    /** Extracts bicycle routes from PostGIS, computes statistics, and renders a map. */
+    workflow BicycleRoutesPostGIS(postgis_url: String = "postgresql://afl_osm:afl_osm_2024@afl-postgres:5432/osm", region: String = "Liechtenstein") => (map_path: String, route_count: Long, total_km: Double) andThen {
+        routes = osm.Source.PostGIS.ExtractRoutes(source = #{"postgis_url": $.postgis_url, "region": $.region}, route_type = "bicycle")
+        stats = osm.Routes.RouteStatistics(input_path = routes.result.output_path)
+        map = osm.viz.RenderMap(geojson_path = routes.result.output_path, title = "Bicycle Routes (PostGIS)", color = "#27ae60")
+        yield BicycleRoutesPostGIS(map_path = map.result.output_path, route_count = routes.result.feature_count, total_km = stats.stats.total_length_km)
+    }
+
+    /** Loads bicycle routes from existing GeoJSON, computes statistics, and renders a map. */
+    workflow BicycleRoutesGeoJSON(input_path: String) => (map_path: String, route_count: Long, total_km: Double) andThen {
+        routes = osm.Source.GeoJSON.LoadRoutes(input_path = $.input_path, route_type = "bicycle")
+        stats = osm.Routes.RouteStatistics(input_path = routes.result.output_path)
+        map = osm.viz.RenderMap(geojson_path = routes.result.output_path, title = "Bicycle Routes (GeoJSON)", color = "#27ae60")
+        yield BicycleRoutesGeoJSON(map_path = map.result.output_path, route_count = routes.result.feature_count, total_km = stats.stats.total_length_km)
+    }
+
+    /** Extracts hiking trails from PostGIS with elevation enrichment. */
+    workflow HikingTrailsPostGIS(postgis_url: String = "postgresql://afl_osm:afl_osm_2024@afl-postgres:5432/osm", region: String = "Liechtenstein") => (map_path: String, trail_count: Long, total_km: Double) andThen {
+        routes = osm.Source.PostGIS.ExtractRoutes(source = #{"postgis_url": $.postgis_url, "region": $.region}, route_type = "hiking")
+        stats = osm.Routes.RouteStatistics(input_path = routes.result.output_path)
+        map = osm.viz.RenderMap(geojson_path = routes.result.output_path, title = "Hiking Trails (PostGIS)", color = "#8e44ad")
+        yield HikingTrailsPostGIS(map_path = map.result.output_path, trail_count = routes.result.feature_count, total_km = stats.stats.total_length_km)
+    }
+
+    // ==========================================================================
+    // AMENITIES: PostGIS-backed analysis
+    // ==========================================================================
+
+    /** Extracts amenities from PostGIS and computes statistics. */
+    workflow AnalyzeAmenitiesPostGIS(postgis_url: String = "postgresql://afl_osm:afl_osm_2024@afl-postgres:5432/osm", region: String = "Liechtenstein", category: String = "all") => (amenity_count: Long, map_path: String) andThen {
+        amenities = osm.Source.PostGIS.ExtractAmenities(source = #{"postgis_url": $.postgis_url, "region": $.region}, category = $.category)
+        map = osm.viz.RenderMap(geojson_path = amenities.result.output_path, title = "Amenities (PostGIS)", color = "#e74c3c")
+        yield AnalyzeAmenitiesPostGIS(amenity_count = amenities.result.feature_count, map_path = map.result.output_path)
+    }
+
+    /** Extracts healthcare amenities from PostGIS and renders a map. */
+    workflow HealthcareMapPostGIS(postgis_url: String = "postgresql://afl_osm:afl_osm_2024@afl-postgres:5432/osm", region: String = "Liechtenstein") => (hospital_count: Long, map_path: String) andThen {
+        hospitals = osm.Source.PostGIS.ExtractAmenities(source = #{"postgis_url": $.postgis_url, "region": $.region}, category = "healthcare")
+        map = osm.viz.RenderMap(geojson_path = hospitals.result.output_path, title = "Healthcare Facilities (PostGIS)", color = "#e74c3c")
+        yield HealthcareMapPostGIS(hospital_count = hospitals.result.feature_count, map_path = map.result.output_path)
+    }
+
+    // ==========================================================================
+    // ROADS: Compare PBF vs PostGIS extraction
+    // ==========================================================================
+
+    /** Extracts major roads from PBF and renders a map. */
+    workflow MajorRoadsPBF(region: String = "Liechtenstein") => (road_count: Long, map_path: String) andThen {
+        cache = osm.ops.CacheRegion(region = $.region)
+        roads = osm.Source.PBF.ExtractRoads(cache = cache.cache, road_class = "major")
+        stats = osm.Roads.RoadStatistics(input_path = roads.result.output_path)
+        map = osm.viz.RenderMap(geojson_path = roads.result.output_path, title = "Major Roads (PBF)", color = "#2980b9")
+        yield MajorRoadsPBF(road_count = roads.result.feature_count, map_path = map.result.output_path)
+    }
+
+    /** Extracts major roads from PostGIS and renders a map. */
+    workflow MajorRoadsPostGIS(postgis_url: String = "postgresql://afl_osm:afl_osm_2024@afl-postgres:5432/osm", region: String = "Liechtenstein") => (road_count: Long, map_path: String) andThen {
+        roads = osm.Source.PostGIS.ExtractRoads(source = #{"postgis_url": $.postgis_url, "region": $.region}, road_class = "major")
+        stats = osm.Roads.RoadStatistics(input_path = roads.result.output_path)
+        map = osm.viz.RenderMap(geojson_path = roads.result.output_path, title = "Major Roads (PostGIS)", color = "#2980b9")
+        yield MajorRoadsPostGIS(road_count = roads.result.feature_count, map_path = map.result.output_path)
+    }
+
+    // ==========================================================================
+    // PARKS: All three sources
+    // ==========================================================================
+
+    /** Extracts parks from PBF and computes statistics. */
+    workflow AnalyzeParksPBF(region: String = "Liechtenstein") => (total_parks: Long, total_area: Double) andThen {
+        cache = osm.ops.CacheRegion(region = $.region)
+        parks = osm.Source.PBF.ExtractParks(cache = cache.cache, park_type = "all")
+        stats = osm.Parks.ParkStatistics(input_path = parks.result.output_path)
+        yield AnalyzeParksPBF(total_parks = stats.stats.total_parks, total_area = stats.stats.total_area_km2)
+    }
+
+    /** Extracts parks from PostGIS and computes statistics. */
+    workflow AnalyzeParksPostGIS(postgis_url: String = "postgresql://afl_osm:afl_osm_2024@afl-postgres:5432/osm", region: String = "Liechtenstein") => (total_parks: Long, total_area: Double) andThen {
+        parks = osm.Source.PostGIS.ExtractParks(source = #{"postgis_url": $.postgis_url, "region": $.region}, park_type = "all")
+        stats = osm.Parks.ParkStatistics(input_path = parks.result.output_path)
+        yield AnalyzeParksPostGIS(total_parks = stats.stats.total_parks, total_area = stats.stats.total_area_km2)
+    }
+
+    /** Loads parks from GeoJSON and computes statistics. */
+    workflow AnalyzeParksGeoJSON(input_path: String) => (total_parks: Long, total_area: Double) andThen {
+        parks = osm.Source.GeoJSON.LoadParks(input_path = $.input_path, park_type = "all")
+        stats = osm.Parks.ParkStatistics(input_path = parks.result.output_path)
+        yield AnalyzeParksGeoJSON(total_parks = stats.stats.total_parks, total_area = stats.stats.total_area_km2)
+    }
+
+    // ==========================================================================
+    // POPULATION: PostGIS-backed city analysis
+    // ==========================================================================
+
+    /** Extracts populated cities from PostGIS, filters by minimum population, and renders a map. */
+    workflow LargeCitiesPostGIS(postgis_url: String = "postgresql://afl_osm:afl_osm_2024@afl-postgres:5432/osm", region: String = "Liechtenstein", min_pop: Long = 10000) => (city_count: Long, map_path: String) andThen {
+        cities = osm.Source.PostGIS.ExtractPopulation(source = #{"postgis_url": $.postgis_url, "region": $.region}, place_type = "city", min_population = $.min_pop)
+        map = osm.viz.RenderMap(geojson_path = cities.result.output_path, title = "Large Cities (PostGIS)", color = "#f39c12")
+        yield LargeCitiesPostGIS(city_count = cities.result.feature_count, map_path = map.result.output_path)
+    }
+
+    // ==========================================================================
+    // BUILDINGS: PostGIS-backed building analysis
+    // ==========================================================================
+
+    /** Extracts buildings from PostGIS and renders a map. */
+    workflow BuildingMapPostGIS(postgis_url: String = "postgresql://afl_osm:afl_osm_2024@afl-postgres:5432/osm", region: String = "Liechtenstein", building_type: String = "all") => (building_count: Long, map_path: String) andThen {
+        buildings = osm.Source.PostGIS.ExtractBuildings(source = #{"postgis_url": $.postgis_url, "region": $.region}, building_type = $.building_type)
+        stats = osm.Buildings.BuildingStatistics(input_path = buildings.result.output_path)
+        map = osm.viz.RenderMap(geojson_path = buildings.result.output_path, title = "Buildings (PostGIS)", color = "#95a5a6")
+        yield BuildingMapPostGIS(building_count = buildings.result.feature_count, map_path = map.result.output_path)
+    }
+
+    // ==========================================================================
+    // BOUNDARIES: PostGIS-backed boundary extraction
+    // ==========================================================================
+
+    /** Extracts state boundaries from PostGIS and renders a map. */
+    workflow StateBoundariesPostGIS(postgis_url: String = "postgresql://afl_osm:afl_osm_2024@afl-postgres:5432/osm", region: String = "Liechtenstein") => (boundary_count: Long, map_path: String) andThen {
+        boundaries = osm.Source.PostGIS.ExtractBoundaries(source = #{"postgis_url": $.postgis_url, "region": $.region}, boundary_type = "state", admin_level = 4)
+        map = osm.viz.RenderMap(geojson_path = boundaries.result.output_path, title = "State Boundaries (PostGIS)", color = "#1abc9c")
+        yield StateBoundariesPostGIS(boundary_count = boundaries.result.feature_count, map_path = map.result.output_path)
+    }
+
+    // ==========================================================================
+    // MULTI-SOURCE: Combined analysis from multiple sources
+    // ==========================================================================
+
+    /** Extracts roads from PostGIS and parks from PostGIS concurrently, renders both as layers. */
+    workflow RoadsAndParksPostGIS(postgis_url: String = "postgresql://afl_osm:afl_osm_2024@afl-postgres:5432/osm", region: String = "Liechtenstein") => (road_count: Long, park_count: Long, map_path: String) andThen {
+        roads = osm.Source.PostGIS.ExtractRoads(source = #{"postgis_url": $.postgis_url, "region": $.region}, road_class = "major")
+        parks = osm.Source.PostGIS.ExtractParks(source = #{"postgis_url": $.postgis_url, "region": $.region}, park_type = "all")
+        map = osm.viz.RenderLayers(layers = [roads.result.output_path, parks.result.output_path], colors = ["#2980b9", "#27ae60"], title = "Roads & Parks (PostGIS)")
+        yield RoadsAndParksPostGIS(road_count = roads.result.feature_count, park_count = parks.result.feature_count, map_path = map.result.output_path)
+    }
+}

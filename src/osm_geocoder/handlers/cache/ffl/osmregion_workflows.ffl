@@ -1,0 +1,123 @@
+// Region-based elevation + map workflows
+//
+// Accept a human-friendly region name (e.g. "Colorado", "UK", "the Alps")
+// and chain: ResolveRegion → route extraction → elevation → filter → map.
+//
+// Prerequisites: Compile with osmtypes.afl, osmregion.afl, osmroutes.afl,
+//   osmelevation.afl, osmvisualization.afl
+
+/** Region-name-driven pipelines that resolve a name, extract routes, filter by elevation, and render maps. */
+namespace osm.RegionMap {
+    use osm.types
+    use osm.Region
+    use osm.Routes
+    use osm.Elevation
+    use osm.viz
+
+    /** Resolves a region name, extracts bicycle routes, filters by elevation, and renders a map. */
+    workflow BicycleElevationMapByRegion(
+        region: String,
+        min_elevation_ft: Long = 4000,
+        network: String = "*",
+        prefer_continent: String = "",
+        title: String = "High Elevation Cycling Routes",
+        color: String = "#e74c3c"
+    ) => (map_path: String, feature_count: Long, matched_count: Long, region_name: String) andThen {
+        resolved = ResolveRegion(name = $.region, prefer_continent = $.prefer_continent)
+
+        routes = BicycleRoutes(cache = resolved.cache, network = $.network)
+
+        enriched = EnrichWithElevation(input_path = routes.result.output_path)
+
+        filtered = FilterByMaxElevation(
+            input_path = enriched.result.output_path,
+            min_max_elevation_ft = $.min_elevation_ft
+        )
+
+        map = RenderMap(
+            geojson_path = filtered.result.output_path,
+            title = $.title,
+            color = $.color
+        )
+
+        yield BicycleElevationMapByRegion(
+            map_path = map.result.output_path,
+            feature_count = filtered.result.feature_count,
+            matched_count = filtered.result.matched_count,
+            region_name = resolved.resolution.matched_name
+        )
+    }
+
+    /** Resolves a region name, extracts hiking trails, filters by elevation, and renders a map. */
+    workflow HikingElevationMapByRegion(
+        region: String,
+        min_elevation_ft: Long = 2000,
+        network: String = "*",
+        prefer_continent: String = "",
+        title: String = "High Elevation Hiking Trails",
+        color: String = "#e67e22"
+    ) => (map_path: String, feature_count: Long, matched_count: Long, region_name: String) andThen {
+        resolved = ResolveRegion(name = $.region, prefer_continent = $.prefer_continent)
+
+        trails = HikingTrails(cache = resolved.cache, network = $.network)
+
+        enriched = EnrichWithElevation(input_path = trails.result.output_path)
+
+        filtered = FilterByMaxElevation(
+            input_path = enriched.result.output_path,
+            min_max_elevation_ft = $.min_elevation_ft
+        )
+
+        map = RenderMap(
+            geojson_path = filtered.result.output_path,
+            title = $.title,
+            color = $.color
+        )
+
+        yield HikingElevationMapByRegion(
+            map_path = map.result.output_path,
+            feature_count = filtered.result.feature_count,
+            matched_count = filtered.result.matched_count,
+            region_name = resolved.resolution.matched_name
+        )
+    }
+
+    /** Resolves a region name, extracts routes of any type, filters by elevation, and renders a map. */
+    workflow RouteMapByRegion(
+        region: String,
+        route_type: String,
+        min_elevation_ft: Long = 2000,
+        network: String = "*",
+        prefer_continent: String = "",
+        title: String = "High Elevation Routes",
+        color: String = "#3498db"
+    ) => (map_path: String, feature_count: Long, matched_count: Long, region_name: String) andThen {
+        resolved = ResolveRegion(name = $.region, prefer_continent = $.prefer_continent)
+
+        routes = osm.Routes.ExtractRoutes(
+            cache = resolved.cache,
+            route_type = $.route_type,
+            network = $.network
+        )
+
+        enriched = EnrichWithElevation(input_path = routes.result.output_path)
+
+        filtered = FilterByMaxElevation(
+            input_path = enriched.result.output_path,
+            min_max_elevation_ft = $.min_elevation_ft
+        )
+
+        map = RenderMap(
+            geojson_path = filtered.result.output_path,
+            title = $.title,
+            color = $.color
+        )
+
+        yield RouteMapByRegion(
+            map_path = map.result.output_path,
+            feature_count = filtered.result.feature_count,
+            matched_count = filtered.result.matched_count,
+            region_name = resolved.resolution.matched_name
+        )
+    }
+}

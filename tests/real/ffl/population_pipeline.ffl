@@ -1,0 +1,58 @@
+// Population pipeline integration test workflow
+//
+// A 4-step pipeline: ResolveRegion -> ExtractPlacesWithPopulation ->
+// FilterByPopulationRange -> PopulationStatistics
+//
+// Prerequisites: Compile with osmtypes.afl, osmregion.afl, osmfilters_population.afl
+
+/** Integration test for the end-to-end population analysis pipeline. */
+namespace test.population {
+    use osm.types
+    use osm.Region
+    use osm.Population
+
+    /** Resolves a region, extracts cities, filters by population range, and computes statistics. */
+    workflow PopulationPipeline(
+        region: String,
+        min_population: Long = 0,
+        max_population: Long = 10000000,
+        prefer_continent: String = ""
+    ) => (
+        region_name: String,
+        feature_count: Long,
+        total_places: Long,
+        total_population: Long,
+        avg_population: Long
+    ) andThen {
+        // 1. Resolve region name to download URL
+        resolved = ResolveRegion(name = $.region, prefer_continent = $.prefer_continent)
+
+        // 2. Extract all cities with population from the OSM data
+        cities = ExtractPlacesWithPopulation(
+            cache = resolved.cache,
+            place_type = "city",
+            min_population = $.min_population
+        )
+
+        // 3. Filter to the desired population range
+        filtered = FilterByPopulationRange(
+            input_path = cities.result.output_path,
+            min_population = $.min_population,
+            max_population = $.max_population
+        )
+
+        // 4. Get population statistics for the filtered set
+        stats = PopulationStatistics(
+            input_path = filtered.result.output_path,
+            place_type = "city"
+        )
+
+        yield PopulationPipeline(
+            region_name = resolved.resolution.matched_name,
+            feature_count = filtered.result.feature_count,
+            total_places = stats.stats.total_places,
+            total_population = stats.stats.total_population,
+            avg_population = stats.stats.avg_population
+        )
+    }
+}

@@ -1,0 +1,37 @@
+// Routing Adapter: Local OSRM server
+//
+// Routes via a locally running OSRM instance. Requires OSRM to be set up
+// with a pre-processed PBF for the target region.
+//
+// Set AFL_OSRM_URL (default: http://localhost:5000) to point to your instance.
+
+/** OSRM local routing adapter — routes via a self-hosted OSRM server. */
+namespace osm.Routing.OSRM {
+    use osm.Routing.Types
+
+    /** Compute a point-to-point route between two waypoints via local OSRM. */
+    event facet Route(
+        from_lat: Double,
+        from_lon: Double,
+        from_name: String = "",
+        to_lat: Double,
+        to_lon: Double,
+        to_name: String = "",
+        profile: String = "car"
+    ) => (result: PointToPointResult)
+
+    /** Compute a multi-stop route through an ordered list of waypoints via local OSRM. */
+    event facet MultiStopRoute(
+        waypoints: String,
+        profile: String = "car"
+    ) => (result: MultiStopResult)
+
+    /** Compute an isochrone (reachability polygon) from a center point via local OSRM. */
+    event facet Isochrone(
+        center_lat: Double,
+        center_lon: Double,
+        center_name: String = "",
+        time_minutes: Long = 15,
+        profile: String = "car"
+    ) => (result: IsochroneResult)
+}

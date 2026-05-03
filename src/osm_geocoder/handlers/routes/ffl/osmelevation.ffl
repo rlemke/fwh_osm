@@ -1,0 +1,95 @@
+// OSM Elevation enrichment and filtering
+//
+// Enriches route geometries with elevation data from DEM sources
+// and provides filtering by elevation criteria.
+//
+// Elevation sources:
+// - "srtm": NASA SRTM 30m resolution (default, via Open-Elevation API)
+// - "mapbox": Mapbox Terrain-RGB (requires API key)
+//
+// All elevations are in feet unless otherwise specified.
+
+/** Elevation enrichment and filtering using DEM data (SRTM, Mapbox). */
+namespace osm.Elevation {
+    use osm.types
+
+    /** Elevation statistics for a route or area in feet. */
+    schema ElevationStats {
+        min_elevation_ft: Long,
+        max_elevation_ft: Long,
+        elevation_gain_ft: Long,
+        elevation_loss_ft: Long,
+        avg_elevation_ft: Long,
+        points_sampled: Long
+    }
+
+    /** Route enriched with elevation profile and statistics. */
+    schema ElevatedRoute {
+        route_id: String,
+        name: String,
+        route_type: String,
+        network: String,
+        geometry: Json,
+        elevation_profile: Json,
+        stats: ElevationStats
+    }
+
+    /** Batch result of elevation-enriched routes with filter metadata. */
+    schema ElevatedRouteFeatures {
+        output_path: String,
+        routes: Json,
+        feature_count: Long,
+        matched_count: Long,
+        filter_applied: String,
+        elevation_source: String,
+        extraction_date: String
+    }
+
+    /** Enriches GeoJSON routes with elevation data by sampling each vertex. */
+    event facet EnrichWithElevation(input_path: String,
+        dem_source: String = "srtm",
+        sample_interval_m: Long = 100) => (result: ElevatedRouteFeatures)
+
+    /** Filters routes where max elevation exceeds a threshold. */
+    event facet FilterByMaxElevation(input_path: String,
+        min_max_elevation_ft: Long) => (result: ElevatedRouteFeatures)
+
+    /** Filters routes where min elevation is below a threshold. */
+    event facet FilterByMinElevation(input_path: String,
+        max_min_elevation_ft: Long) => (result: ElevatedRouteFeatures)
+
+    /** Filters routes by minimum total elevation gain. */
+    event facet FilterByElevationGain(input_path: String,
+        min_gain_ft: Long) => (result: ElevatedRouteFeatures)
+
+    /** Filters routes that have points within an elevation range. */
+    event facet FilterByElevationRange(input_path: String,
+        min_elevation_ft: Long,
+        max_elevation_ft: Long) => (result: ElevatedRouteFeatures)
+
+    /** Extracts hiking trails above a minimum elevation. */
+    event facet HighElevationHikingTrails(cache: OSMCache,
+        min_elevation_ft: Long = 2000,
+        network: String = "*",
+        dem_source: String = "srtm") => (result: ElevatedRouteFeatures)
+
+    /** Extracts cycling routes above a minimum elevation. */
+    event facet HighElevationCyclingRoutes(cache: OSMCache,
+        min_elevation_ft: Long = 2000,
+        network: String = "*",
+        dem_source: String = "srtm") => (result: ElevatedRouteFeatures)
+
+    /** Extracts routes of any type above a minimum elevation. */
+    event facet HighElevationRoutes(cache: OSMCache,
+        route_type: String,
+        min_elevation_ft: Long = 2000,
+        network: String = "*",
+        dem_source: String = "srtm") => (result: ElevatedRouteFeatures)
+
+    /** Extracts routes with significant elevation gain for climbing. */
+    event facet ClimbingRoutes(cache: OSMCache,
+        route_type: String,
+        min_gain_ft: Long = 1000,
+        network: String = "*",
+        dem_source: String = "srtm") => (result: ElevatedRouteFeatures)
+}

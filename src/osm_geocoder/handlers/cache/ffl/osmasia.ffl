@@ -1,0 +1,89 @@
+/** Aggregates individual Asian country OSM data downloads. */
+namespace osm.Asia.cache {
+  use osm.types
+  use osm.cache.Asia
+
+  /** Caches each Asian country individually in parallel. */
+  facet AsiaIndividually() => (cache: [OSMCache]) andThen {
+
+    afghanistan = osm.cache.Asia.Afghanistan()
+    armenia = osm.cache.Asia.Armenia()
+    azerbaijan = osm.cache.Asia.Azerbaijan()
+    bangladesh = osm.cache.Asia.Bangladesh()
+    bhutan = osm.cache.Asia.Bhutan()
+    brunei = osm.cache.Asia.Brunei()
+    cambodia = osm.cache.Asia.Cambodia()
+    china = osm.cache.Asia.China()
+    eastTimor = osm.cache.Asia.EastTimor()
+    gCCStates = osm.cache.Asia.GCCStates()
+    india = osm.cache.Asia.India()
+    indonesia = osm.cache.Asia.Indonesia()
+    iran = osm.cache.Asia.Iran()
+    iraq = osm.cache.Asia.Iraq()
+    japan = osm.cache.Asia.Japan()
+    jordan = osm.cache.Asia.Jordan()
+    kazakhstan = osm.cache.Asia.Kazakhstan()
+    kyrgyzstan = osm.cache.Asia.Kyrgyzstan()
+    laos = osm.cache.Asia.Laos()
+    lebanon = osm.cache.Asia.Lebanon()
+    malaysia = osm.cache.Asia.Malaysia()
+    maldives = osm.cache.Asia.Maldives()
+    mongolia = osm.cache.Asia.Mongolia()
+    myanmar = osm.cache.Asia.Myanmar()
+    nepal = osm.cache.Asia.Nepal()
+    northKorea = osm.cache.Asia.NorthKorea()
+    pakistan = osm.cache.Asia.Pakistan()
+    israelAndPalestine = osm.cache.Asia.IsraelAndPalestine()
+    philippines = osm.cache.Asia.Philippines()
+    southKorea = osm.cache.Asia.SouthKorea()
+    sriLanka = osm.cache.Asia.SriLanka()
+    syria = osm.cache.Asia.Syria()
+    tajikistan = osm.cache.Asia.Tajikistan()
+    thailand = osm.cache.Asia.Thailand()
+    turkmenistan = osm.cache.Asia.Turkmenistan()
+    uzbekistan = osm.cache.Asia.Uzbekistan()
+    vietnam = osm.cache.Asia.Vietnam()
+    yemen = osm.cache.Asia.Yemen()
+
+    yield AsiaIndividually(cache = afghanistan.cache ++
+                                   armenia.cache ++
+                                   azerbaijan.cache ++
+                                   bangladesh.cache ++
+                                   bhutan.cache ++
+                                   brunei.cache ++
+                                   cambodia.cache ++
+                                   china.cache ++
+                                   eastTimor.cache ++
+                                   gCCStates.cache ++
+                                   india.cache ++
+                                   indonesia.cache ++
+                                   iran.cache ++
+                                   iraq.cache ++
+                                   japan.cache ++
+                                   jordan.cache ++
+                                   kazakhstan.cache ++
+                                   kyrgyzstan.cache ++
+                                   laos.cache ++
+                                   lebanon.cache ++
+                                   malaysia.cache ++
+                                   maldives.cache ++
+                                   mongolia.cache ++
+                                   myanmar.cache ++
+                                   nepal.cache ++
+                                   northKorea.cache ++
+                                   pakistan.cache ++
+                                   israelAndPalestine.cache ++
+                                   philippines.cache ++
+                                   southKorea.cache ++
+                                   sriLanka.cache ++
+                                   syria.cache ++
+                                   tajikistan.cache ++
+                                   thailand.cache ++
+                                   turkmenistan.cache ++
+                                   uzbekistan.cache ++
+                                   vietnam.cache ++
+                                   yemen.cache)
+
+  }
+
+}

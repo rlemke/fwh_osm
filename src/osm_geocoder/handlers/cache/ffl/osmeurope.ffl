@@ -1,0 +1,101 @@
+/** Aggregates individual European country OSM data downloads. */
+namespace osm.Europe.cache {
+  use osm.types
+  use osm.cache.Europe
+
+  /** Caches each European country individually in parallel. */
+  facet EuropeIndividually () => (cache: [OSMCache]) andThen {
+
+    albania = osm.cache.Europe.Albania()
+    andorra = osm.cache.Europe.Andorra()
+    austria = osm.cache.Europe.Austria()
+    belarus = osm.cache.Europe.Belarus()
+    belgium = osm.cache.Europe.Belgium()
+    bosniaAndHerzegovina = osm.cache.Europe.BosniaAndHerzegovina()
+    bulgaria = osm.cache.Europe.Bulgaria()
+    croatia = osm.cache.Europe.Croatia()
+    cyprus = osm.cache.Europe.Cyprus()
+    czechRepublic = osm.cache.Europe.CzechRepublic()
+    denmark = osm.cache.Europe.Denmark()
+    estonia = osm.cache.Europe.Estonia()
+    finland = osm.cache.Europe.Finland()
+    france = osm.cache.Europe.France()
+    germany = osm.cache.Europe.Germany()
+    greece = osm.cache.Europe.Greece()
+    georgia = osm.cache.Europe.Georgia()
+    hungary = osm.cache.Europe.Hungary()
+    iceland = osm.cache.Europe.Iceland()
+    ireland = osm.cache.Europe.Ireland()
+    italy = osm.cache.Europe.Italy()
+    kosovo = osm.cache.Europe.Kosovo()
+    latvia = osm.cache.Europe.Latvia()
+    liechtenstein = osm.cache.Europe.Liechtenstein()
+    lithuania = osm.cache.Europe.Lithuania()
+    luxembourg = osm.cache.Europe.Luxembourg()
+    macedonia = osm.cache.Europe.Macedonia()
+    malta = osm.cache.Europe.Malta()
+    moldova = osm.cache.Europe.Moldova()
+    monaco = osm.cache.Europe.Monaco()
+    montenegro = osm.cache.Europe.Montenegro()
+    netherlands = osm.cache.Europe.Netherlands()
+    norway = osm.cache.Europe.Norway()
+    poland = osm.cache.Europe.Poland()
+    portugal = osm.cache.Europe.Portugal()
+    romania = osm.cache.Europe.Romania()
+    serbia = osm.cache.Europe.Serbia()
+    slovakia = osm.cache.Europe.Slovakia()
+    slovenia = osm.cache.Europe.Slovenia()
+    spain = osm.cache.Europe.Spain()
+    sweden = osm.cache.Europe.Sweden()
+    switzerland = osm.cache.Europe.Switzerland()
+    turkey = osm.cache.Europe.Turkey()
+    ukraine = osm.cache.Europe.Ukraine()
+    unitedKingdom = osm.cache.Europe.UnitedKingdom()
+
+    yield EuropeIndividually(cache = albania.cache ++
+            andorra.cache ++
+            austria.cache ++
+            belarus.cache ++
+            belgium.cache ++
+            bosniaAndHerzegovina.cache ++
+            bulgaria.cache ++
+            croatia.cache ++
+            cyprus.cache ++
+            czechRepublic.cache ++
+            denmark.cache ++
+            estonia.cache ++
+            finland.cache ++
+            france.cache ++
+            germany.cache ++
+            greece.cache ++
+            georgia.cache ++
+            hungary.cache ++
+            iceland.cache ++
+            ireland.cache ++
+            italy.cache ++
+            kosovo.cache ++
+            latvia.cache ++
+            liechtenstein.cache ++
+            lithuania.cache ++
+            luxembourg.cache ++
+            macedonia.cache ++
+            malta.cache ++
+            moldova.cache ++
+            monaco.cache ++
+            montenegro.cache ++
+            netherlands.cache ++
+            norway.cache ++
+            poland.cache ++
+            portugal.cache ++
+            romania.cache ++
+            serbia.cache ++
+            slovakia.cache ++
+            slovenia.cache ++
+            spain.cache ++
+            sweden.cache ++
+            switzerland.cache ++
+            turkey.cache ++
+            ukraine.cache ++
+            unitedKingdom.cache)
+ }
+}

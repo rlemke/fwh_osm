@@ -1,0 +1,1 @@
+"""OSM geocoder voting handlers."""

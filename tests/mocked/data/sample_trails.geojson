@@ -1,0 +1,95 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "@id": "trail-1",
+        "name": "Mount Whitney Trail",
+        "route": "hiking",
+        "network": "nst"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-118.2923, 36.5785],
+          [-118.2900, 36.5800],
+          [-118.2875, 36.5820],
+          [-118.2850, 36.5840],
+          [-118.2825, 36.5860]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "@id": "trail-2",
+        "name": "Coastal Path",
+        "route": "hiking",
+        "network": "lwn"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-122.4194, 37.7749],
+          [-122.4180, 37.7760],
+          [-122.4165, 37.7775],
+          [-122.4150, 37.7790]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "@id": "trail-3",
+        "name": "Rocky Mountain High Trail",
+        "route": "hiking",
+        "network": "rwn"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-105.6836, 40.3428],
+          [-105.6800, 40.3450],
+          [-105.6765, 40.3475],
+          [-105.6730, 40.3500]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "@id": "trail-4",
+        "name": "Appalachian Segment",
+        "route": "hiking",
+        "network": "nst"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-81.5449, 36.1030],
+          [-81.5420, 36.1050],
+          [-81.5390, 36.1070],
+          [-81.5360, 36.1090]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "@id": "trail-5",
+        "name": "Death Valley Low Trail",
+        "route": "hiking",
+        "network": "lwn"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-116.8162, 36.2328],
+          [-116.8140, 36.2340],
+          [-116.8120, 36.2355]
+        ]
+      }
+    }
+  ]
+}

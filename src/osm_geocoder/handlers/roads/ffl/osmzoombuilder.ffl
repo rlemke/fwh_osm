@@ -1,0 +1,191 @@
+// Low-Zoom Road Infrastructure Builder (Zoom 2–7)
+//
+// Offline pipeline that produces minZoom per logical edge (plus bypass/ring/backbone
+// flags) for progressive map rendering at zoom levels 2–7.
+//
+// Pipeline: build logical edge graph from PBF → compute structural betweenness
+// via sampled routing → apply adaptive cell budgets → detect bypasses/rings
+// → enforce monotonic reveal → export.
+
+/** Low-zoom road infrastructure builder for progressive map rendering at zoom levels 2-7. */
+namespace osm.Roads.ZoomBuilder {
+    use osm.types
+
+    /** Merged road segment between decision nodes with classification attributes. */
+    schema LogicalEdge {
+        edgeId: String,
+        fromNode: String,
+        toNode: String,
+        osmWayIds: String,
+        lengthM: Double,
+        fc: String,
+        fcScore: Double,
+        ref: String,
+        name: String,
+        maxspeed: Long,
+        lanes: Long,
+        bridge: Boolean,
+        tunnel: Boolean,
+        oneway: Boolean,
+        surfaceUnpaved: Boolean
+    }
+
+    /** Per-edge output with zoom scores and structural flags. */
+    schema ZoomEdgeResult {
+        edgeId: String,
+        fromNode: String,
+        toNode: String,
+        osmWayIds: String,
+        lengthM: Double,
+        fc: String,
+        minZoom: Long,
+        scores_csv: String,
+        sb_csv: String,
+        backbone: Boolean,
+        isBypass: Boolean,
+        isRing: Boolean,
+        isLegacyThruTown: Boolean,
+        isBridgeOrTunnel: Boolean
+    }
+
+    /** Top-level pipeline result with zoom distribution and output paths. */
+    schema ZoomBuilderResult {
+        output_dir: String,
+        total_logical_edges: Long,
+        selected_edges: Long,
+        zoom_distribution: String,
+        city_count: Long,
+        pair_count: Long,
+        route_count: Long,
+        csv_path: String,
+        metrics_path: String,
+        format: String,
+        extraction_date: String
+    }
+
+    /** Pipeline diagnostics with edge counts and timing. */
+    schema ZoomBuilderMetrics {
+        total_logical_edges: Long,
+        selected_edges: Long,
+        pruned_edges: Long,
+        backbone_edges: Long,
+        bypass_edges: Long,
+        ring_edges: Long,
+        city_count: Long,
+        anchor_counts: String,
+        pair_counts: String,
+        route_count: Long,
+        zoom_distribution: String,
+        budget_utilization: String,
+        processing_seconds: Double
+    }
+
+    /** Tunable parameters for the zoom builder pipeline. */
+    schema ZoomBuilderConfig {
+        min_zoom: Long,
+        max_zoom: Long,
+        max_concurrent_routes: Long,
+        bypass_time_ratio: Double,
+        ring_cv_threshold: Double,
+        hair_max_length_km: Double
+    }
+
+    /** Per-cell budget allocation with density factor. */
+    schema CellBudget {
+        cell_id: String,
+        zoom: Long,
+        budget_km: Double,
+        used_km: Double,
+        density_factor: Double
+    }
+
+    /** Builds a logical edge graph from PBF data. */
+    event facet BuildLogicalGraph(cache: OSMCache) => (
+        edge_count: Long,
+        node_count: Long,
+        graph_path: String
+    )
+
+    /** Builds anchor node sets for a given zoom level. */
+    event facet BuildAnchors(
+        graph_path: String,
+        cities_path: String,
+        zoom_level: Long
+    ) => (
+        anchors_path: String,
+        anchor_count: Long
+    )
+
+    /** Computes structural betweenness sampling for a zoom level. */
+    event facet ComputeSBS(
+        graph_path: String,
+        anchors_path: String,
+        graph: GraphHopperCache,
+        zoom_level: Long,
+        k_pairs: Long = 5000
+    ) => (
+        sbs_path: String,
+        route_count: Long
+    )
+
+    /** Computes per-zoom scores from SBS data. */
+    event facet ComputeScores(
+        graph_path: String,
+        sbs_paths: String
+    ) => (
+        scores_path: String
+    )
+
+    /** Detects bypass roads around settlements. */
+    event facet DetectBypasses(
+        graph_path: String,
+        cities_path: String,
+        graph: GraphHopperCache
+    ) => (
+        bypasses_path: String,
+        bypass_count: Long
+    )
+
+    /** Detects ring roads around large settlements. */
+    event facet DetectRings(
+        graph_path: String,
+        cities_path: String,
+        graph: GraphHopperCache
+    ) => (
+        rings_path: String,
+        ring_count: Long
+    )
+
+    /** Selects edges with budgeted greedy selection and backbone repair. */
+    event facet SelectEdges(
+        graph_path: String,
+        scores_path: String,
+        cities_path: String,
+        bypasses_path: String = "",
+        rings_path: String = ""
+    ) => (
+        assignments_path: String,
+        selected_count: Long
+    )
+
+    /** Exports final zoom layer assignments. */
+    event facet ExportZoomLayers(
+        assignments_path: String,
+        graph_path: String,
+        output_dir: String
+    ) => (
+        result: ZoomBuilderResult
+    )
+
+    /** Orchestrates the full zoom builder pipeline end-to-end. */
+    event facet BuildZoomLayers(
+        cache: OSMCache,
+        graph: GraphHopperCache,
+        min_population: Long = 50000,
+        output_dir: String = "/Volumes/afl_data/output/osm/zoom-builder",
+        max_concurrent: Long = 16
+    ) => (
+        result: ZoomBuilderResult,
+        metrics: ZoomBuilderMetrics
+    )
+}
