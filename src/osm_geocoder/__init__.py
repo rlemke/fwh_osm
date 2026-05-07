@@ -31,9 +31,16 @@ _RUNNER_ENV = {
     "AFL_STUCK_TIMEOUT_MS": "14400000",
 }
 
+# Integration-test FFL fixtures live at the repo root (outside src/) so they
+# stay grouped with their pytest scripts. Surface them through the discovery
+# API so `scripts/seed-examples` and friends pick them up.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_EXTRA_FFL = [_REPO_ROOT / "tests" / "real" / "ffl"]
+
 example = ExamplePackage(
     name="osm-geocoder",
     ffl_dir=Path(__file__).parent / "ffl",
     register_handlers=register_all_registry_handlers,
     runner_env=_RUNNER_ENV,
+    extra_ffl_dirs=_EXTRA_FFL,
 )
