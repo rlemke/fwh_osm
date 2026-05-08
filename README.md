@@ -29,15 +29,52 @@ making it discoverable by any Facetwork installation in the same environment.
 
 ## Run from a Facetwork checkout
 
+All commands below assume your shell is in the Facetwork checkout and the
+osm package is installed in the same Python environment that runs
+Facetwork (`pip install -e ~/ffl_handlers/osm`).
+
+The package's `runner_env` (4-hour task / stuck timeouts for long PostGIS
+imports) is baked into `osm_geocoder:example` and applied automatically to
+any runner started with `--example osm-geocoder`.
+
+### Cold start: dashboard + runner together
+
 ```bash
-# In your Facetwork repo:
-scripts/seed-examples --include osm-geocoder
+scripts/seed-examples --include osm-geocoder           # one-time, seeds FFL
 scripts/start-runner --example osm-geocoder -- --log-format text
 ```
 
-`runner.env` overrides (4-hour task / stuck timeouts for long PostGIS
-imports) are baked into `osm_geocoder:example` and applied automatically
-when the runner starts.
+This brings up the dashboard on `:8080` and a runner that polls for
+osm-geocoder tasks.
+
+### Add a runner to an already-running stack
+
+If the Facetwork dashboard is already up and you just want another runner
+attached to it (after pulling new osm code, or to scale out):
+
+```bash
+scripts/start-runner --example osm-geocoder --no-dashboard -- --log-format text
+```
+
+Internally this runs `python -m facetwork.examples osm-geocoder` against
+the same MongoDB the dashboard uses — registering the osm handlers in the
+`handlers` collection — and then starts a `RegistryRunner` process. The
+new runner appears in the dashboard's `/servers` page within a few
+seconds. Multiple runners on the same host coexist; each picks tasks
+independently.
+
+### Variants
+
+- **Multiple instances on this host:** `--instances N` spawns N runner
+  processes sharing one handler registration.
+- **Remote host:** `scripts/start-runner --host h2.example --example osm-geocoder --no-dashboard`
+  (the osm package must be installed on the remote venv too; needs SSH
+  reachability and `AFL_RUNNER_HOSTS` or repeated `--host` flags).
+- **Register handlers without starting a runner:**
+  `python -m facetwork.examples osm-geocoder` — handy if a runner is
+  already running but its handler set is stale.
+- **Drain a runner cleanly:** `scripts/drain-runners` resets in-flight
+  tasks to pending so another runner can pick them up.
 
 ## Run standalone
 
