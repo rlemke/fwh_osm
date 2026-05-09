@@ -12,10 +12,6 @@ from .buildings.building_handlers import register_building_handlers
 from .cache.region_handlers import register_region_handlers
 from .combined.combined_handlers import register_combined_handlers
 from .db.import_handlers import register_import_handlers
-from .downloads.operations_handlers import register_operations_handlers
-from .downloads.pgrouting_handlers import register_pgrouting_handlers
-from .downloads.postgis_handlers import register_postgis_handlers
-from .downloads.summary_handlers import register_summary_handlers
 from .filters.filter_handlers import register_filter_handlers
 from .filters.osmose_handlers import register_osmose_handlers
 from .filters.validation_handlers import register_validation_handlers
@@ -50,12 +46,8 @@ __all__ = [
     "register_filter_handlers",
     "register_graphhopper_handlers",
     "register_gtfs_handlers",
-    "register_operations_handlers",
     "register_osmose_handlers",
     "register_park_handlers",
-    "register_pgrouting_handlers",
-    "register_postgis_handlers",
-    "register_summary_handlers",
     "register_poi_handlers",
     "register_population_handlers",
     "register_region_handlers",
@@ -84,12 +76,8 @@ def register_all_handlers(poller) -> None:
     register_filter_handlers(poller)
     register_graphhopper_handlers(poller)
     register_gtfs_handlers(poller)
-    register_operations_handlers(poller)
     register_osmose_handlers(poller)
     register_park_handlers(poller)
-    register_pgrouting_handlers(poller)
-    register_postgis_handlers(poller)
-    register_summary_handlers(poller)
     register_poi_handlers(poller)
     register_population_handlers(poller)
     register_region_handlers(poller)
@@ -115,10 +103,6 @@ def register_all_registry_handlers(runner) -> None:
     from .boundaries.boundary_handlers import register_handlers as reg_boundary
     from .buildings.building_handlers import register_handlers as reg_building
     from .cache.region_handlers import register_handlers as reg_region
-    from .downloads.operations_handlers import register_handlers as reg_operations
-    from .downloads.pgrouting_handlers import register_handlers as reg_pgrouting
-    from .downloads.postgis_handlers import register_handlers as reg_postgis
-    from .downloads.summary_handlers import register_handlers as reg_summary
     from .filters.filter_handlers import register_handlers as reg_filter
     from .filters.osmose_handlers import register_handlers as reg_osmose
     from .filters.validation_handlers import register_handlers as reg_validation
@@ -145,12 +129,8 @@ def register_all_registry_handlers(runner) -> None:
     reg_filter(runner)
     reg_graphhopper(runner)
     reg_gtfs(runner)
-    reg_operations(runner)
     reg_osmose(runner)
     reg_park(runner)
-    reg_pgrouting(runner)
-    reg_postgis(runner)
-    reg_summary(runner)
     reg_poi(runner)
     reg_population(runner)
     reg_region(runner)
