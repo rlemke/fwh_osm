@@ -1,22 +1,17 @@
-// City-to-city driving route workflows
+// Pairwise city-routing event facet.
 //
-// Resolves a region, downloads OSM data, builds a pgRouting topology,
-// extracts cities with population, filters by population range, computes
-// pairwise driving routes between all qualifying cities, and renders a map.
+// The all-pairs shortest-path routing primitive used by the city-routing
+// workflows (see handlers/routing/ffl/routing_workflows.ffl). The handler
+// is osm.Routing.ComputePairwiseRoutes in handlers/routes/routing_handlers.py.
 //
-// This is a real end-to-end pipeline using existing event facets:
-//   - osm.Region.ResolveRegion          (region_resolver.py)
-//   - osm.ops.DownloadPBF           (operations_handlers.py → downloader.py)
-//   - osm.ops.PgRouting.*           (pgrouting_handlers.py)
-//   - osm.Population.*                  (osmfilters_population.afl handlers)
-//   - osm.viz.RenderLayers    (visualization handlers)
+// Prerequisites: compile with osmtypes.ffl (defines osm.types.RoutingTopology).
 //
-// Prerequisites: Compile with osmtypes.afl, osmregion.afl, osmoperations.afl,
-//   osmpgrouting.afl, osmfilters_population.afl, osmvisualization.afl
+// (The former osm.CityRouting.CityRouteMap pipeline that lived here depended
+// on osm.ops.PgRouting / DownloadPBF / BuildRoutingTopology / ValidateTopology
+// handlers that no longer exist — it was removed; the live city-routing
+// workflows are in routing_workflows.ffl.)
 
-// --- Event facet: compute pairwise driving routes ---
-
-/** Pairwise driving-route computation between cities using pgRouting or GraphHopper. */
+/** Pairwise driving-route computation between cities. */
 namespace osm.Routing {
     use osm.types
 
@@ -38,112 +33,4 @@ namespace osm.Routing {
         cities_path: String,
         topology: RoutingTopology
     ) => (result: PairwiseRoutingResult)
-}
-
-// --- Workflow: full pipeline from region name to rendered route map ---
-
-/** End-to-end city routing: resolves a region, builds a pgRouting topology, filters cities by population, routes pairwise, and renders. */
-namespace osm.CityRouting {
-    use osm.types
-    use osm.Region
-    use osm.ops
-    use osm.ops.PgRouting
-    use osm.Population
-    use osm.Routing
-    use osm.viz
-
-    /** Resolves a region, builds a routing topology, selects cities by population, computes pairwise driving routes, and renders a two-layer map. */
-    workflow CityRouteMap(
-        region: String,
-        min_population: Long = 1000000,
-        max_population: Long = 2000000,
-        profile: String = "car",
-        recreate: Boolean = false,
-        prefer_continent: String = "",
-        title: String = "City Driving Routes",
-        color: String = "#27ae60"
-    ) => (
-        map_path: String,
-        region_name: String,
-        city_count: Long,
-        route_count: Long,
-        total_distance_km: Long,
-        avg_distance_km: Long,
-        node_count: Long,
-        edge_count: Long
-    ) andThen {
-
-        // 1. Resolve the human-friendly name to a Geofabrik download URL
-        //    e.g. "Germany" → download.geofabrik.de/europe/germany-latest.osm.pbf
-        resolved = ResolveRegion(
-            name = $.region,
-            prefer_continent = $.prefer_continent
-        )
-
-        // 2. Download the .osm.pbf file if not already in the local cache
-        //    The handler checks resolved.cache.wasInCache and skips if true
-        downloaded = DownloadPBF(cache = resolved.cache)
-
-        // 3. Build a pgRouting topology from the PBF via osm2pgrouting
-        //    If recreate=false and topology exists, returns the cached topology
-        //    Otherwise: PBF → osm2pgrouting → routing tables in PostGIS
-        topo = BuildRoutingTopology(
-            cache = resolved.cache,
-            region = $.region,
-            profile = $.profile,
-            recreate = $.recreate
-        )
-
-        // 4. Validate the topology and get node/edge statistics
-        validation = ValidateTopology(topology = topo.topology)
-
-        // 5. Extract all cities with population tags from the same PBF
-        //    Reads place=city nodes, writes GeoJSON with name + population
-        cities = ExtractPlacesWithPopulation(
-            cache = resolved.cache,
-            place_type = "city",
-            min_population = $.min_population
-        )
-
-        // 6. Filter to the desired population range
-        filtered = FilterByPopulationRange(
-            input_path = cities.result.output_path,
-            min_population = $.min_population,
-            max_population = $.max_population
-        )
-
-        // 7. Get population statistics for the filtered set
-        stats = PopulationStatistics(
-            input_path = filtered.result.output_path,
-            place_type = "city"
-        )
-
-        // 8. Compute all-pairs driving routes between filtered cities
-        //    Uses pgRouting (pgr_dijkstra) for shortest paths
-        //    N cities → C(N,2) route segments as LineString geometries
-        routes = ComputePairwiseRoutes(
-            cities_path = filtered.result.output_path,
-            topology = topo.topology
-        )
-
-        // 9. Render the cities + routes as a two-layer map
-        //    Layer 1: city markers (points)
-        //    Layer 2: route segments (linestrings)
-        map = RenderLayers(
-            layers = filtered.result.output_path ++ routes.result.output_path,
-            colors = "#e74c3c" ++ $.color,
-            title = $.title
-        )
-
-        yield CityRouteMap(
-            map_path = map.result.output_path,
-            region_name = resolved.resolution.matched_name,
-            city_count = filtered.result.feature_count,
-            route_count = routes.result.route_count,
-            total_distance_km = routes.result.total_distance_km,
-            avg_distance_km = routes.result.avg_distance_km,
-            node_count = validation.nodeCount,
-            edge_count = validation.edgeCount
-        )
-    }
 }

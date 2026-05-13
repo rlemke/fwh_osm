@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from facetwork.runtime import ExecutionStatus
 from helpers import (
     EXAMPLE_AFL_FILES,
     compile_afl_files,
@@ -35,7 +36,15 @@ from helpers import (
     run_to_completion,
 )
 
-from facetwork.runtime import ExecutionStatus
+# The osm.CityRouting.CityRouteMap pipeline this exercises depended on the
+# osm.ops.DownloadPBF / osm.ops.PgRouting.* / BuildRoutingTopology /
+# ValidateTopology handlers, which were removed in an earlier refactor; the
+# (now-dangling) FFL workflow was removed with them. The live city-routing
+# workflows live in handlers/routing/ffl/routing_workflows.ffl.
+pytestmark = pytest.mark.skip(
+    reason="osm.CityRouting.CityRouteMap removed (its handlers no longer exist); "
+    "see handlers/routing/ for the current routing workflows"
+)
 
 # Legacy sys.path manipulation: the package is now installed via pyproject.toml,
 _EXAMPLE_ROOT = Path(__file__).parent.parent.parent.parent
@@ -81,12 +90,15 @@ def _compile_city_routing():
 
 def _register_all_handlers(poller):
     """Register all handlers needed for the 9-step pipeline."""
-    from osm_geocoder.handlers.cache.region_handlers import register_region_handlers
     from osm_geocoder.handlers.downloads.operations_handlers import register_operations_handlers
+
+    from osm_geocoder.handlers.cache.region_handlers import register_region_handlers
     from osm_geocoder.handlers.graphhopper.graphhopper_handlers import register_graphhopper_handlers
     from osm_geocoder.handlers.population.population_handlers import register_population_handlers
     from osm_geocoder.handlers.routes.routing_handlers import register_routing_handlers
-    from osm_geocoder.handlers.visualization.visualization_handlers import register_visualization_handlers
+    from osm_geocoder.handlers.visualization.visualization_handlers import (
+        register_visualization_handlers,
+    )
 
     register_region_handlers(poller)
     register_operations_handlers(poller)

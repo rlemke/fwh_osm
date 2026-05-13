@@ -6,11 +6,11 @@ namespace osm.UnitedStates.cache {
 
   /** Fetches and aggregates OSM cache data for 5 US states. */
   workflow DownloadStates_05() => (cache: [OSMCache]) andThen {
-    alabama = Alabama()
-    alaska = Alaska()
-    arizona = Arizona()
-    arkansas = Arkansas()
-    california = California()
+    alabama = osm.cache.UnitedStates.Alabama()
+    alaska = osm.cache.UnitedStates.Alaska()
+    arizona = osm.cache.UnitedStates.Arizona()
+    arkansas = osm.cache.UnitedStates.Arkansas()
+    california = osm.cache.UnitedStates.California()
     yield DownloadStates_05(cache = alabama.cache ++ alaska.cache ++ arizona.cache ++ arkansas.cache ++ california.cache)
   }
 

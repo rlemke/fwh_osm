@@ -180,6 +180,9 @@ class TestDistributed:
         if runner:
             assert runner["state"] == "completed"
 
+    @pytest.mark.skip(
+        reason="osm.CityRouting.CityRouteMap removed (its handlers no longer exist)"
+    )
     def test_city_routing_distributed(self, docker_db):
         """Full 9-step CityRouteMap pipeline via Docker runner + OSM agent.
 
