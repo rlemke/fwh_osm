@@ -1,7 +1,9 @@
-"""Event facet handlers for OSM region resolution.
+"""Event facet handlers for OSM region caching and resolution.
 
-Handles ResolveRegion, ResolveRegions, and ListRegions event facets by
-delegating to the region_resolver module.
+Handles ``osm.ops.CacheRegion`` (the PBF download step every region facet
+and composed analysis workflow starts from) plus ``osm.Region.ResolveRegion``
+/ ``ResolveRegions`` / ``ListRegions``, all delegating to the shared
+``pbf_cache`` / ``region_resolver`` libraries.
 """
 
 import os
@@ -18,6 +20,36 @@ from ..shared.region_resolver import (
 def _download_as_osm_cache(geofabrik_path: str) -> dict:
     """Download a PBF via the shared cache library and return an OSMCache dict."""
     return to_osm_cache(download_region(geofabrik_path))
+
+
+def handle_cache_region(params: dict[str, Any]) -> dict[str, Any]:
+    """Download (or reuse the cached) Geofabrik PBF for ``region``.
+
+    The ``osm.ops.CacheRegion`` event facet — the first step of every
+    ``osm.cache.*`` region facet and every composed analysis workflow.
+
+    Params:
+        region: a Geofabrik path ("africa/algeria",
+            "north-america/us/california") used directly, or a human-friendly
+            name ("Algeria", "California", "Liechtenstein") which is resolved
+            to the best-matching Geofabrik path first.
+    """
+    region = params["region"]
+    step_log = params.get("_step_log")
+
+    geofabrik_path = region
+    if "/" not in region:
+        # Friendly name (no path separator) — resolve to a Geofabrik path.
+        result = resolve(region)
+        if result.matches:
+            geofabrik_path = result.matches[0].geofabrik_path
+
+    cache = to_osm_cache(download_region(geofabrik_path))
+    if step_log:
+        step_log(
+            f"CacheRegion: '{region}' -> {geofabrik_path} (source={cache.get('source', 'unknown')})"
+        )
+    return {"cache": cache}
 
 
 def handle_resolve_region(params: dict[str, Any]) -> dict[str, Any]:
@@ -156,6 +188,7 @@ def handle_list_regions(params: dict[str, Any]) -> dict[str, Any]:
 
 # RegistryRunner dispatch adapter
 _DISPATCH = {
+    "osm.ops.CacheRegion": handle_cache_region,
     "osm.Region.ResolveRegion": handle_resolve_region,
     "osm.Region.ResolveRegions": handle_resolve_regions,
     "osm.Region.ListRegions": handle_list_regions,
@@ -182,12 +215,6 @@ def register_handlers(runner) -> None:
 
 
 def register_region_handlers(poller) -> None:
-    """Register all region resolution handlers with the poller."""
-    handlers = {
-        "osm.Region.ResolveRegion": handle_resolve_region,
-        "osm.Region.ResolveRegions": handle_resolve_regions,
-        "osm.Region.ListRegions": handle_list_regions,
-    }
-
-    for facet_name, handler in handlers.items():
+    """Register all region cache/resolution handlers with the poller."""
+    for facet_name, handler in _DISPATCH.items():
         poller.register(facet_name, handler)

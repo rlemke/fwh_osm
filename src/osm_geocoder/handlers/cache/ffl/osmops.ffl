@@ -1,0 +1,22 @@
+// Operational OSM facets shared by the cache namespaces and the composed
+// analysis workflows. Currently just CacheRegion — the PBF download step
+// every region facet (osm.cache.*) and analysis workflow starts from.
+//
+// Prerequisites: compile with osmtypes.ffl (defines osm.types.OSMCache).
+
+/** Operational OSM facets — PBF cache management. */
+namespace osm.ops {
+    use osm.types
+
+    /**
+     * Downloads (or reuses the cached) Geofabrik PBF for a region and
+     * returns it as an OSMCache handle for downstream extraction.
+     *
+     * @param region A Geofabrik path (`europe/liechtenstein`,
+     *   `north-america/us/california`, `africa/algeria`) or a human-friendly
+     *   name (`Liechtenstein`, `California`, `Algeria`) which is resolved to
+     *   the best-matching download.
+     * @return cache The cached PBF as an OSMCache (`{url, path, date, size, wasInCache}`).
+     */
+    event facet CacheRegion(region: String) => (cache: OSMCache)
+}
