@@ -1,12 +1,14 @@
 // Region-based elevation workflow wrappers
 //
-// Accept a human-friendly region name, resolve to OSMCache, then run
-// each osm.Elevation.Workflows.* workflow with the resolved cache.
+// Accept a human-friendly region name, resolve to a typed Region, download
+// the PBF, then run each osm.Elevation.Workflows.* workflow with the
+// resulting cache.
 
 /** Region-name-driven wrappers for all elevation workflows. */
 namespace osm.Elevation.RegionWorkflows {
     use osm.types
     use osm.Region
+    use osm.cache
     use osm.Elevation
 
     /** Resolves a region, then finds hiking trails above a given elevation. */
@@ -16,13 +18,14 @@ namespace osm.Elevation.RegionWorkflows {
         min_elevation_ft: Long = 2000
     ) => (result: ElevatedRouteFeatures, region_name: String) andThen {
         resolved = ResolveRegion(name = $.region, prefer_continent = $.prefer_continent)
+        cached = osm.cache.Download(region = resolved.region)
         trails = osm.Elevation.Workflows.FindHighElevationHikingTrails(
-            cache = resolved.cache,
+            cache = cached.cache,
             min_elevation_ft = $.min_elevation_ft
         )
         yield FindHighElevationHikingTrailsByRegion(
             result = trails.result,
-            region_name = resolved.resolution.matched_name
+            region_name = resolved.region.name
         )
     }
 
@@ -34,14 +37,15 @@ namespace osm.Elevation.RegionWorkflows {
         network: String = "*"
     ) => (result: ElevatedRouteFeatures, region_name: String) andThen {
         resolved = ResolveRegion(name = $.region, prefer_continent = $.prefer_continent)
+        cached = osm.cache.Download(region = resolved.region)
         routes = osm.Elevation.Workflows.FindHighElevationCyclingRoutes(
-            cache = resolved.cache,
+            cache = cached.cache,
             min_elevation_ft = $.min_elevation_ft,
             network = $.network
         )
         yield FindHighElevationCyclingRoutesByRegion(
             result = routes.result,
-            region_name = resolved.resolution.matched_name
+            region_name = resolved.region.name
         )
     }
 
@@ -53,14 +57,15 @@ namespace osm.Elevation.RegionWorkflows {
         min_gain_ft: Long = 1000
     ) => (result: ElevatedRouteFeatures, region_name: String) andThen {
         resolved = ResolveRegion(name = $.region, prefer_continent = $.prefer_continent)
+        cached = osm.cache.Download(region = resolved.region)
         climbs = osm.Elevation.Workflows.FindClimbingRoutes(
-            cache = resolved.cache,
+            cache = cached.cache,
             route_type = $.route_type,
             min_gain_ft = $.min_gain_ft
         )
         yield FindClimbingRoutesByRegion(
             result = climbs.result,
-            region_name = resolved.resolution.matched_name
+            region_name = resolved.region.name
         )
     }
 
@@ -73,15 +78,16 @@ namespace osm.Elevation.RegionWorkflows {
         max_elevation_ft: Long = 14500
     ) => (result: ElevatedRouteFeatures, region_name: String) andThen {
         resolved = ResolveRegion(name = $.region, prefer_continent = $.prefer_continent)
+        cached = osm.cache.Download(region = resolved.region)
         alpine = osm.Elevation.Workflows.FindAlpineRoutes(
-            cache = resolved.cache,
+            cache = cached.cache,
             route_type = $.route_type,
             min_elevation_ft = $.min_elevation_ft,
             max_elevation_ft = $.max_elevation_ft
         )
         yield FindAlpineRoutesByRegion(
             result = alpine.result,
-            region_name = resolved.resolution.matched_name
+            region_name = resolved.region.name
         )
     }
 
@@ -92,13 +98,14 @@ namespace osm.Elevation.RegionWorkflows {
         max_elevation_ft: Long = 500
     ) => (result: ElevatedRouteFeatures, region_name: String) andThen {
         resolved = ResolveRegion(name = $.region, prefer_continent = $.prefer_continent)
+        cached = osm.cache.Download(region = resolved.region)
         low = osm.Elevation.Workflows.FindLowElevationTrails(
-            cache = resolved.cache,
+            cache = cached.cache,
             max_elevation_ft = $.max_elevation_ft
         )
         yield FindLowElevationTrailsByRegion(
             result = low.result,
-            region_name = resolved.resolution.matched_name
+            region_name = resolved.region.name
         )
     }
 }

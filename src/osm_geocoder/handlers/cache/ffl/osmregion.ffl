@@ -5,32 +5,32 @@
 //
 // Prerequisites: Compile with osmtypes.afl
 
-/** Resolves human-friendly region names to Geofabrik download URLs,
- *  OSMCache structures, and canonical Region records. */
+/** Resolves human-friendly region names to canonical Region records. */
 namespace osm.Region {
     use osm.types
 
-    /** Single region match with continent and Geofabrik path info.
-     *  Kept for backward compatibility with the legacy
-     *  `ResolveRegion(name) => (cache, resolution)` shape. New code
-     *  should prefer `Region` from `osm.types`. */
-    schema RegionResolution {
-        query: String,
-        matched_name: String,
-        region_namespace: String,
-        continent: String,
-        geofabrik_path: String,
-        is_ambiguous: Boolean,
-        disambiguation: String
-    }
-
-    /** Resolves a region name to a single best-match OSMCache download.
-     *  Legacy shape — returns the cache plus a flat resolution record.
-     *  Will be retired in favor of the Region-returning form once
-     *  callers (osmregion_workflows.ffl, analysis-workflow tests) have
-     *  been migrated. */
+    /** Resolves a single region name to a canonical Region.
+     *
+     *  Returns only the resolved region — download is a separate step.
+     *  The recommended pipeline:
+     *
+     *      resolved = osm.Region.ResolveRegion(name = $.region)
+     *      cached = osm.cache.Download(region = resolved.region)
+     *      // analysis on cached.cache; metadata via cached.cache.region.*
+     *
+     *  Per-name disambiguation via qualifier suffix is supported (no
+     *  extra parameter needed):
+     *      "Georgia, US"              → US state
+     *      "Georgia (country)"        → country
+     *      "north-america/us/georgia" → canonical-path passthrough
+     *
+     *  `prefer_continent` is a fallback hint for names that don't carry
+     *  a qualifier suffix (e.g. "Georgia" + prefer_continent =
+     *  "NorthAmerica").  When the name remains ambiguous, the handler
+     *  returns the best-match Region; inspect downstream behavior or
+     *  use ResolveRegions for explicit ambiguity diagnostics. */
     event facet ResolveRegion(name: String,
-        prefer_continent: String = "") => (cache: OSMCache, resolution: RegionResolution)
+        prefer_continent: String = "") => (region: Region)
 
     /** Batch resolve. Continents, countries, subnational regions, and
      *  named geographic features ("Alps", "Scandinavia") may all

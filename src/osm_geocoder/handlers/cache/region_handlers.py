@@ -127,64 +127,47 @@ def handle_region_download(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_resolve_region(params: dict[str, Any]) -> dict[str, Any]:
-    """Resolve a region name and download the best matching OSM cache.
+    """Resolve a single region name to a canonical Region.
+
+    Backs ``osm.Region.ResolveRegion(name, prefer_continent) => (region: Region)``.
+    The legacy ``(cache, resolution)`` shape has been retired — callers should
+    chain ``osm.cache.Download(region = resolved.region)`` for the cache.
+
+    On no match, returns a Region with all fields empty rather than failing;
+    the caller can decide whether to abort (Download with an empty
+    geofabrik_path will raise) or continue with a soft handling.
 
     Params:
-        name: Human-friendly region name (e.g. "Colorado", "UK")
-        prefer_continent: Optional continent for disambiguation (e.g. "NorthAmerica")
+        name: Human-friendly region name (e.g. "Colorado", "UK", "Quebec").
+            Per-name qualifier suffixes ("Georgia, US" / "Georgia (country)")
+            and canonical paths ("north-america/us/georgia") are supported.
+        prefer_continent: Optional continent for batch-style disambiguation
+            (e.g. "NorthAmerica"). Qualifier suffix takes precedence.
     """
     name = params["name"]
     prefer_continent = params.get("prefer_continent", "") or None
     step_log = params.get("_step_log")
 
-    result = resolve(name, prefer_continent=prefer_continent)
+    # Use the batch resolver so qualifier-suffix parsing and the new
+    # path-based continent matching are applied consistently with
+    # ResolveRegions.
+    result = resolve_batch(
+        names=[name], prefer_continent=prefer_continent, strict=False
+    )
 
-    if not result.matches:
+    if not result.regions:
         if step_log:
             step_log(f"ResolveRegion: no match for '{name}'")
+        empty = region_from_path("", query=name).to_dict()
+        return {"region": empty}
 
-        empty_region = region_from_path("", query=name).to_dict()
-        return {
-            "cache": {
-                "region": empty_region,
-                "url": "",
-                "path": "",
-                "date": "",
-                "size": 0,
-                "wasInCache": False,
-            },
-            "resolution": {
-                "query": name,
-                "matched_name": "",
-                "region_namespace": "",
-                "continent": "",
-                "geofabrik_path": "",
-                "is_ambiguous": False,
-                "disambiguation": f"No region found for '{name}'",
-            },
-        }
-
-    best = result.matches[0]
-    matched_region = region_from_path(best.geofabrik_path, query=name).to_dict()
-    cache = _download_as_osm_cache(best.geofabrik_path, region=matched_region)
-    source = cache.get("source", "unknown")
+    region = result.regions[0]
     if step_log:
         step_log(
-            f"ResolveRegion: '{name}' -> {best.facet_name} ({best.geofabrik_path}, source={source})"
+            f"ResolveRegion: '{name}' -> {region.name} ({region.canonical}, "
+            f"level={region.level})"
         )
-
-    return {
-        "cache": cache,
-        "resolution": {
-            "query": name,
-            "matched_name": best.facet_name,
-            "region_namespace": best.namespace,
-            "continent": best.continent,
-            "geofabrik_path": best.geofabrik_path,
-            "is_ambiguous": result.is_ambiguous,
-            "disambiguation": result.disambiguation,
-        },
-    }
+    return {"region": region.to_dict()}
 
 
 def handle_resolve_regions(params: dict[str, Any]) -> dict[str, Any]:

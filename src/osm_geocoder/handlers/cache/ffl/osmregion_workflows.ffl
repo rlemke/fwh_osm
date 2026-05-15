@@ -10,6 +10,7 @@
 namespace osm.RegionMap {
     use osm.types
     use osm.Region
+    use osm.cache
     use osm.Routes
     use osm.Elevation
     use osm.viz
@@ -25,7 +26,9 @@ namespace osm.RegionMap {
     ) => (map_path: String, feature_count: Long, matched_count: Long, region_name: String) andThen {
         resolved = ResolveRegion(name = $.region, prefer_continent = $.prefer_continent)
 
-        routes = BicycleRoutes(cache = resolved.cache, network = $.network)
+        cached = osm.cache.Download(region = resolved.region)
+
+        routes = BicycleRoutes(cache = cached.cache, network = $.network)
 
         enriched = EnrichWithElevation(input_path = routes.result.output_path)
 
@@ -44,7 +47,7 @@ namespace osm.RegionMap {
             map_path = map.result.output_path,
             feature_count = filtered.result.feature_count,
             matched_count = filtered.result.matched_count,
-            region_name = resolved.resolution.matched_name
+            region_name = resolved.region.name
         )
     }
 
@@ -59,7 +62,9 @@ namespace osm.RegionMap {
     ) => (map_path: String, feature_count: Long, matched_count: Long, region_name: String) andThen {
         resolved = ResolveRegion(name = $.region, prefer_continent = $.prefer_continent)
 
-        trails = HikingTrails(cache = resolved.cache, network = $.network)
+        cached = osm.cache.Download(region = resolved.region)
+
+        trails = HikingTrails(cache = cached.cache, network = $.network)
 
         enriched = EnrichWithElevation(input_path = trails.result.output_path)
 
@@ -78,7 +83,7 @@ namespace osm.RegionMap {
             map_path = map.result.output_path,
             feature_count = filtered.result.feature_count,
             matched_count = filtered.result.matched_count,
-            region_name = resolved.resolution.matched_name
+            region_name = resolved.region.name
         )
     }
 
@@ -94,8 +99,10 @@ namespace osm.RegionMap {
     ) => (map_path: String, feature_count: Long, matched_count: Long, region_name: String) andThen {
         resolved = ResolveRegion(name = $.region, prefer_continent = $.prefer_continent)
 
+        cached = osm.cache.Download(region = resolved.region)
+
         routes = osm.Routes.ExtractRoutes(
-            cache = resolved.cache,
+            cache = cached.cache,
             route_type = $.route_type,
             network = $.network
         )
@@ -117,7 +124,7 @@ namespace osm.RegionMap {
             map_path = map.result.output_path,
             feature_count = filtered.result.feature_count,
             matched_count = filtered.result.matched_count,
-            region_name = resolved.resolution.matched_name
+            region_name = resolved.region.name
         )
     }
 }

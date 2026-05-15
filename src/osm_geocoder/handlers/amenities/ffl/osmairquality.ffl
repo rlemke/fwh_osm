@@ -69,6 +69,7 @@ namespace osm.AirQuality {
 namespace osm.SchoolAirQuality {
     use osm.types
     use osm.Region
+    use osm.cache
     use osm.Amenities
     use osm.AirQuality
     use osm.viz
@@ -111,21 +112,24 @@ namespace osm.SchoolAirQuality {
         max_pm25: Double
     ) andThen {
 
-        // 1. Resolve region name to OSM cache
+        // 1. Resolve region name to a typed Region
         resolved = ResolveRegion(
             name = $.region,
             prefer_continent = $.prefer_continent
         )
 
-        // 2. Extract schools from OSM (depends on resolved)
+        // 2. Download (or reuse cached) PBF for the resolved region
+        cached = osm.cache.Download(region = resolved.region)
+
+        // 3. Extract schools from OSM
         schools = osm.Amenities.ExtractAmenities(
-            cache = resolved.cache,
+            cache = cached.cache,
             category = "education"
         )
 
-        // 3. Fetch air quality stations from OpenAQ (depends on resolved)
+        // 4. Fetch air quality stations from OpenAQ
         air = FetchAirQuality(
-            bbox = resolved.resolution.geofabrik_path,
+            bbox = resolved.region.geofabrik_path,
             parameter = $.parameter,
             radius_m = $.radius_m
         )
@@ -151,7 +155,7 @@ namespace osm.SchoolAirQuality {
 
         yield SchoolAirQualityMap(
             map_path = map.result.output_path,
-            region_name = resolved.resolution.matched_name,
+            region_name = resolved.region.name,
             school_count = stats.stats.total_schools,
             station_count = air.result.station_count,
             high_exposure = stats.stats.high_count,
