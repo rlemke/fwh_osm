@@ -1,0 +1,94 @@
+// Canonical cross-region pattern — one workflow, regions of any mix of
+// administrative levels, maximum parallelism via foreach.
+//
+// The user-facing primitive:
+//
+//   workflow X(region_names: [String]) => (caches: [OSMCache]) andThen {
+//     resolved = osm.Region.ResolveRegions(names = $.region_names)
+//   } andThen foreach r in resolved.regions {
+//     cache = osm.cache.Download(region = $.r)
+//     yield X(caches = [cache.cache])           // 1-element list per iter
+//   }                                           // parent.caches: [N elements]
+//
+// Three runtime guarantees make this work cleanly:
+//
+// 1.  ResolveRegions accepts a heterogeneous list of admin levels —
+//     continents ("Africa", "Europe"), countries ("France"),
+//     subnational regions ("California", "Quebec"), and named features
+//     ("Alps", "Scandinavia") may all appear in `names`.  Per-name
+//     qualifier suffixes ("Georgia, US", "Georgia (country)") and
+//     canonical paths ("north-america/us/georgia") are also supported.
+//
+// 2.  andThen foreach dispatches every sub-block in parallel — each
+//     iteration becomes its own runtime step, scheduled across the
+//     runner fleet.  N regions => N parallel downloads.
+//
+// 3.  Yield merging is type-driven (runtime: facetwork.runtime.handlers
+//     .capture._merge_yield_value).  Collection-typed yields (list,
+//     set) AGGREGATE across iterations — wrap each iteration's
+//     contribution in a 1-element list and the parent sees the full
+//     [N-element] collection at completion.  Scalar yields overwrite
+//     (last iteration wins, dispatch-order-dependent) — use them for
+//     "any-one" markers or summary counters, not for aggregation.
+//
+// Prerequisites: Compile with osmtypes.afl, osmregion.afl, osmcache_download.afl
+
+/** Canonical cross-region workflow demonstrating the recommended pattern. */
+namespace osm.examples {
+    use osm.types
+    use osm.Region
+    use osm.cache
+
+    /** Download every region in `region_names` and return all caches.
+     *
+     *  Accepts any mix of continents, countries, subnational regions, and
+     *  named features.  Each region's PBF download runs as its own
+     *  parallel sub-block; the resulting OSMCaches aggregate into one
+     *  list at the workflow's output via the foreach yield-merge.
+     *
+     *  Example invocations (dashboard "New run" or `afl run`):
+     *      region_names = ["Africa", "California", "Europe", "Quebec"]
+     *          → 4 caches (2 continents, 1 US state, 1 Canadian province)
+     *      region_names = ["Alps"]
+     *          → 7 caches (feature expansion: Austria, Switzerland,
+     *            France, Italy, Germany, Slovenia, Liechtenstein)
+     *      region_names = ["California", "Alps", "Quebec"]
+     *          → 9 caches (1 + 7 + 1)
+     *
+     *  Inspect `diagnostics` for unresolved or ambiguous names when
+     *  running with `strict = false` (the default). */
+    workflow DownloadAcrossRegions(
+        region_names: [String],
+        prefer_continent: String = "",
+        strict: Boolean = false
+    ) => (
+        caches: [OSMCache],
+        diagnostics: ResolutionDiagnostics
+    ) andThen {
+        // Resolve all names in one batched call.  This is a single event
+        // step regardless of how many names you pass — the parallelism
+        // comes after, in the foreach below.
+        resolved = osm.Region.ResolveRegions(
+            names = $.region_names,
+            prefer_continent = $.prefer_continent,
+            strict = $.strict
+        )
+
+        // Scalar yield: `diagnostics` is set once.  If the foreach below
+        // had also yielded `diagnostics = ...`, the last-iteration value
+        // would win — fine for scalars, but `diagnostics` is naturally a
+        // single value so we set it here.
+        yield DownloadAcrossRegions(diagnostics = resolved.diagnostics)
+    } andThen foreach r in resolved.regions {
+        // One Download event facet per region, fanned out by the runtime
+        // — N regions become N parallel runtime steps.
+        cache = osm.cache.Download(region = $.r)
+
+        // List-typed yield: wrapping the single OSMCache in a 1-element
+        // list makes `caches` a collection.  The runtime aggregates each
+        // iteration's contribution with the prior accumulated list (see
+        // capture.py:_merge_yield_value), so the parent step's final
+        // `caches` is the full [N-element] set.
+        yield DownloadAcrossRegions(caches = [cache.cache])
+    }
+}
