@@ -1,0 +1,30 @@
+// Region-driven cache download.
+//
+// Universal cache facet that takes a fully-resolved Region and returns the
+// downloaded OSMCache. Pairs with osm.Region.ResolveRegions for the
+// recommended cross-region pattern:
+//
+//   resolved = ResolveRegions(names = ["Africa", "California", "Europe", "Quebec"])
+//   andThen foreach r in resolved.regions {
+//       cache = Download(region = $.r)
+//       // ...analysis on cache...
+//   }
+//
+// Eventually replaces the 50+ hardcoded per-region facets (California(),
+// Quebec(), Algeria(), ...) which become thin one-line wrappers in step 4.
+//
+// Prerequisites: Compile with osmtypes.afl
+
+/** Region-driven cache download. */
+namespace osm.cache {
+    use osm.types
+
+    /** Download (or return the cached) Geofabrik PBF for a region.
+     *  Idempotent: re-running with the same Region returns the existing
+     *  cache entry with `wasInCache = true`.
+     *
+     *  Input is a fully-resolved Region (typically produced by
+     *  `osm.Region.ResolveRegions`) — the handler reads
+     *  `region.geofabrik_path` to fetch the extract. */
+    event facet Download(region: Region) => (cache: OSMCache)
+}

@@ -53,6 +53,60 @@ def handle_cache_region(params: dict[str, Any]) -> dict[str, Any]:
     return {"cache": cache}
 
 
+def handle_region_download(params: dict[str, Any]) -> dict[str, Any]:
+    """Download (or return cached) the Geofabrik PBF for a typed Region.
+
+    Backs ``osm.cache.Download(region: Region) => (cache: OSMCache)``. The
+    Region's ``geofabrik_path`` is the authoritative input; everything else
+    on the Region struct (name, level, continent, ...) is metadata used only
+    for logging and downstream traceability.
+
+    Pairs with ``osm.Region.ResolveRegions`` for the cross-region pattern:
+
+        resolved = ResolveRegions(names = ["Africa", "California", ...])
+        andThen foreach r in resolved.regions {
+            cache = Download(region = $.r)
+            ...
+        }
+
+    Idempotent: re-running with the same Region returns the existing cache
+    entry with ``wasInCache = true``.
+
+    Params:
+        region: A Region dict matching the ``osm.types.Region`` schema.
+            ``region["geofabrik_path"]`` is required; other fields are
+            metadata.
+    """
+    region = params.get("region") or {}
+    if not isinstance(region, dict):
+        raise ValueError(
+            f"Download: 'region' must be a Region dict, got {type(region).__name__}"
+        )
+
+    geofabrik_path = region.get("geofabrik_path") or ""
+    if not geofabrik_path:
+        # Falling back to canonical when geofabrik_path is missing keeps the
+        # handler usable with hand-constructed Region literals.
+        geofabrik_path = region.get("canonical") or ""
+    if not geofabrik_path:
+        raise ValueError(
+            "Download: Region is missing geofabrik_path (and canonical). "
+            "Resolve the region via osm.Region.ResolveRegions first, or "
+            "construct the Region with a geofabrik_path."
+        )
+
+    step_log = params.get("_step_log")
+    cache = to_osm_cache(download_region(geofabrik_path))
+    if step_log:
+        display = region.get("name") or geofabrik_path
+        source = cache.get("source", "unknown")
+        step_log(
+            f"Download: '{display}' -> {geofabrik_path} (source={source}, "
+            f"wasInCache={cache.get('wasInCache', False)})"
+        )
+    return {"cache": cache}
+
+
 def handle_resolve_region(params: dict[str, Any]) -> dict[str, Any]:
     """Resolve a region name and download the best matching OSM cache.
 
@@ -192,6 +246,7 @@ def handle_list_regions(params: dict[str, Any]) -> dict[str, Any]:
 # RegistryRunner dispatch adapter
 _DISPATCH = {
     "osm.ops.CacheRegion": handle_cache_region,
+    "osm.cache.Download": handle_region_download,
     "osm.Region.ResolveRegion": handle_resolve_region,
     "osm.Region.ResolveRegions": handle_resolve_regions,
     "osm.Region.ListRegions": handle_list_regions,
