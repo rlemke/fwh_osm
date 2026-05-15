@@ -9,6 +9,58 @@ namespace osm.types {
       wasInCache: Boolean
    }
 
+   /** Canonical identity for an OSM extract.
+    *  Carries enough metadata to download the extract and to reason about
+    *  hierarchy (continent ↔ country ↔ subnational ↔ feature).
+    *
+    *  Level vocabulary (closed set, for filtering by ListRegions):
+    *    "planet"       — the whole-planet extract
+    *    "continent"    — Africa, Europe, Asia, Russia (Geofabrik top-level)
+    *    "country"      — France, Brazil, Algeria, ...
+    *    "subnational"  — US states, Canadian provinces + territories,
+    *                     German Länder, UK constituent countries
+    *    "feature"      — named groupings ("Alps", "Scandinavia",
+    *                     "PacificNorthwest")
+    *
+    *  level_label is Geofabrik's human term ("state", "province",
+    *  "territory", "Land", "constituent country", "region") for display.
+    *  continent follows Geofabrik's tree placement and may be "" for
+    *  top-level extracts (Russia, Antarctica, Planet). */
+   schema Region {
+      query: String,
+      name: String,
+      canonical: String,
+      level: String,
+      level_label: String,
+      parent_canonical: String,
+      continent: String,
+      geofabrik_path: String
+   }
+
+   /** One ambiguous resolution kept for caller review.
+    *  `chosen` is the best guess actually returned in `regions`;
+    *  `candidates` is the full set ordered by score. */
+   schema AmbiguousMatch {
+      query: String,
+      chosen: Region,
+      candidates: [Region]
+   }
+
+   /** A name that expanded into multiple regions (e.g. "Alps" → 7 countries). */
+   schema FeatureExpansion {
+      query: String,
+      feature_name: String,
+      regions: [Region]
+   }
+
+   /** Side-channel report from ResolveRegions. Inspect to decide
+    *  whether to proceed, prompt the user, or abort. */
+   schema ResolutionDiagnostics {
+      unresolved: [String],
+      ambiguous: [AmbiguousMatch],
+      expanded: [FeatureExpansion]
+   }
+
    /** Cached GraphHopper routing graph built from OSM data. */
    schema GraphHopperCache {
       osmSource: String,

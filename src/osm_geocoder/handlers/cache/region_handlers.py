@@ -11,9 +11,10 @@ from typing import Any
 
 from ..shared.pbf_cache import download_region, to_osm_cache
 from ..shared.region_resolver import (
-    list_geographic_features,
-    list_regions,
+    StrictResolutionError,
+    list_regions_typed,
     resolve,
+    resolve_batch,
 )
 
 
@@ -111,78 +112,80 @@ def handle_resolve_region(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_resolve_regions(params: dict[str, Any]) -> dict[str, Any]:
-    """Resolve a region name and download all matching OSM caches.
+    """Batch resolve a list of region names to ``Region`` records.
+
+    Backs ``osm.Region.ResolveRegions(names: [String], prefer_continent,
+    strict)``. Returns the resolved regions as a flat list (feature
+    expansions like ``"Alps"`` contribute every constituent) plus a
+    diagnostics record listing unresolved names, ambiguous matches, and
+    feature expansions.
 
     Params:
-        name: Region or geographic feature name (e.g. "Alps", "Scandinavia")
-        prefer_continent: Optional continent for disambiguation
+        names: List of region names. Continents, countries, subnational
+            regions, and named geographic features may be freely mixed.
+            Per-name qualifier suffixes ("Georgia, US" / "Georgia
+            (country)") and canonical Geofabrik paths
+            ("north-america/us/georgia") are supported.
+        prefer_continent: Batch-wide tiebreaker (only used for names
+            without a qualifier suffix).
+        strict: When True, fail the step if any name is unresolved or
+            ambiguous. When False (default), return partial results and
+            let the caller inspect diagnostics.
     """
-    name = params["name"]
+    names = params.get("names") or []
     prefer_continent = params.get("prefer_continent", "") or None
+    strict = bool(params.get("strict", False))
     step_log = params.get("_step_log")
 
-    result = resolve(name, prefer_continent=prefer_continent)
-    if step_log:
-        step_log(f"ResolveRegions: '{name}' -> {len(result.matches)} matches")
-
-    caches = []
-    regions = []
-    for match in result.matches:
-        cache = _download_as_osm_cache(match.geofabrik_path)
-        source = cache.get("source", "unknown")
+    try:
+        result = resolve_batch(
+            names=names, prefer_continent=prefer_continent, strict=strict
+        )
+    except StrictResolutionError as exc:
         if step_log:
-            step_log(
-                f"ResolveRegions: '{match.facet_name}' ({match.geofabrik_path}, source={source})"
-            )
-        caches.append(cache)
-        regions.append(
-            {
-                "name": match.facet_name,
-                "namespace": match.namespace,
-                "continent": match.continent,
-                "geofabrik_path": match.geofabrik_path,
-            }
+            step_log(f"ResolveRegions: strict failure — {exc}")
+        raise
+
+    if step_log:
+        step_log(
+            f"ResolveRegions: {len(names)} input → {len(result.regions)} regions "
+            f"(unresolved={len(result.diagnostics.unresolved)}, "
+            f"ambiguous={len(result.diagnostics.ambiguous)}, "
+            f"expanded={len(result.diagnostics.expanded)})"
         )
 
     return {
-        "caches": caches,
-        "resolution": {
-            "query": name,
-            "match_count": len(result.matches),
-            "is_geographic_feature": result.is_geographic_feature,
-            "regions": regions,
-        },
+        "regions": [r.to_dict() for r in result.regions],
+        "diagnostics": result.diagnostics.to_dict(),
     }
 
 
 def handle_list_regions(params: dict[str, Any]) -> dict[str, Any]:
-    """List all available regions and geographic features.
+    """List the known region catalog as ``Region`` records.
+
+    Backs ``osm.Region.ListRegions(parent_canonical, level, continent)``.
 
     Params:
-        continent: Optional continent filter (e.g. "Europe", "Africa")
+        parent_canonical: Filter to regions whose parent path equals this
+            (e.g. ``"north-america/canada"`` for Canadian provinces).
+        level: Filter to regions of this hierarchical level
+            (``"planet"``, ``"continent"``, ``"country"``, ``"subnational"``).
+        continent: Filter to regions in this continent display bucket
+            (``"Europe"``, ``"NorthAmerica"``, …). Top-level extracts like
+            Russia / Antarctica / Planet have ``continent == ""``.
     """
+    parent_canonical = params.get("parent_canonical", "") or None
+    level = params.get("level", "") or None
     continent = params.get("continent", "") or None
 
-    regions = list_regions(continent=continent)
-    features = list_geographic_features()
-
-    region_list = [
-        {
-            "name": r.facet_name,
-            "namespace": r.namespace,
-            "continent": r.continent,
-            "geofabrik_path": r.geofabrik_path,
-        }
-        for r in regions
-    ]
+    regions = list_regions_typed(
+        parent_canonical=parent_canonical,
+        level=level,
+        continent=continent,
+    )
 
     return {
-        "result": {
-            "region_count": len(region_list),
-            "regions": region_list,
-            "feature_count": len(features),
-            "geographic_features": dict(features.items()),
-        },
+        "regions": [r.to_dict() for r in regions],
     }
 
 

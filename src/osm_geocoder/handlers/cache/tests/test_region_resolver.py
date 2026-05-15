@@ -472,3 +472,305 @@ class TestEdgeCases:
             result = resolve(feature_name)
             assert len(result.matches) >= 1, f"Geographic feature '{feature_name}' has no matches"
             assert result.is_geographic_feature
+
+
+# ---------------------------------------------------------------------------
+# Region-typed surface — backs FFL ResolveRegions / ListRegions facets
+# ---------------------------------------------------------------------------
+
+from osm_geocoder.handlers.shared.region_resolver import (  # noqa: E402
+    Region,
+    StrictResolutionError,
+    _continent_from_path,
+    _display_name_from_facet,
+    _level_from_path,
+    _level_label_from_path,
+    _parent_canonical_from_path,
+    _parse_qualifier_suffix,
+    list_regions_typed,
+    resolve_batch,
+)
+
+
+class TestPathDerivation:
+    """Level / level_label / continent / parent inference from Geofabrik paths."""
+
+    def test_planet_level(self):
+        assert _level_from_path("planet") == "planet"
+        assert _level_label_from_path("planet") == ""
+        assert _continent_from_path("planet") == ""
+        assert _parent_canonical_from_path("planet") == ""
+
+    def test_continent_level_with_no_slash(self):
+        for path in ["africa", "asia", "europe", "north-america", "australia-oceania"]:
+            assert _level_from_path(path) == "continent", path
+            assert _continent_from_path(path) == "", path
+            assert _parent_canonical_from_path(path) == "", path
+
+    def test_top_level_oddballs(self):
+        # Russia and Antarctica are top-level extracts under Geofabrik —
+        # they are continents in our level vocabulary with no continent parent.
+        assert _level_from_path("russia") == "continent"
+        assert _continent_from_path("russia") == ""
+        assert _level_from_path("antarctica") == "continent"
+        assert _continent_from_path("antarctica") == ""
+
+    def test_country_level(self):
+        assert _level_from_path("africa/algeria") == "country"
+        assert _level_label_from_path("africa/algeria") == "country"
+        assert _continent_from_path("africa/algeria") == "Africa"
+        assert _parent_canonical_from_path("africa/algeria") == "africa"
+
+    def test_country_in_north_america(self):
+        assert _level_from_path("north-america/us") == "country"
+        assert _continent_from_path("north-america/us") == "NorthAmerica"
+
+    def test_us_state_is_subnational(self):
+        assert _level_from_path("north-america/us/california") == "subnational"
+        assert _level_label_from_path("north-america/us/california") == "state"
+        assert _continent_from_path("north-america/us/california") == "NorthAmerica"
+        assert _parent_canonical_from_path("north-america/us/california") == "north-america/us"
+
+    def test_canadian_province_is_subnational(self):
+        assert _level_from_path("north-america/canada/quebec") == "subnational"
+        assert _level_label_from_path("north-america/canada/quebec") == "province"
+
+    def test_yukon_is_a_territory(self):
+        assert _level_label_from_path("north-america/canada/yukon") == "territory"
+
+    def test_central_and_south_america_continents(self):
+        assert _continent_from_path("central-america/cuba") == "CentralAmerica"
+        assert _continent_from_path("south-america/brazil") == "SouthAmerica"
+
+
+class TestDisplayName:
+    def test_pascalcase_split(self):
+        assert _display_name_from_facet("BritishColumbia", "north-america/canada/british-columbia") == "British Columbia"
+
+    def test_underscore_replaced(self):
+        assert _display_name_from_facet("Congo_Brazzaville", "africa/congo-brazzaville") == "Congo Brazzaville"
+
+    def test_disambiguator_stripped(self):
+        assert _display_name_from_facet("GeorgiaUS", "north-america/us/georgia") == "Georgia"
+        assert _display_name_from_facet("GeorgiaEU", "europe/georgia") == "Georgia"
+
+    def test_all_prefix_stripped_for_registry_aliases(self):
+        assert _display_name_from_facet("AllAfrica", "africa") == "Africa"
+        assert _display_name_from_facet("AllUnitedStates", "north-america/us") == "United States"
+
+    def test_alabama_not_stripped(self):
+        """'Al' prefix without 'l-uppercase' must not be stripped — 'Alabama' != 'abama'."""
+        assert _display_name_from_facet("Alabama", "north-america/us/alabama") == "Alabama"
+
+    def test_albania_not_stripped(self):
+        assert _display_name_from_facet("Albania", "europe/albania") == "Albania"
+
+    def test_alps_feature(self):
+        # Not in registry, but verifying the bare PascalCase pathway anyway.
+        assert _display_name_from_facet("DistrictOfColumbia", "north-america/us/district-of-columbia") == "District Of Columbia"
+
+
+class TestParseQualifierSuffix:
+    def test_comma_form(self):
+        assert _parse_qualifier_suffix("Georgia, US") == ("Georgia", "US")
+
+    def test_paren_form(self):
+        assert _parse_qualifier_suffix("Georgia (country)") == ("Georgia", "country")
+
+    def test_paren_form_with_extra_whitespace(self):
+        assert _parse_qualifier_suffix("Quebec  (province)") == ("Quebec", "province")
+
+    def test_no_qualifier(self):
+        assert _parse_qualifier_suffix("Georgia") == ("Georgia", None)
+
+    def test_unicode_name(self):
+        assert _parse_qualifier_suffix("Córdoba, ES") == ("Córdoba", "ES")
+
+    def test_canonical_path_passthrough(self):
+        # Slash → treat as canonical path; do not parse as qualifier.
+        assert _parse_qualifier_suffix("north-america/us/georgia") == (
+            "north-america/us/georgia",
+            None,
+        )
+
+    def test_long_tail_not_treated_as_qualifier(self):
+        # Multi-word tail after comma is not a qualifier — preserve original.
+        result = _parse_qualifier_suffix("New York, New York")
+        # The current heuristic strips only short single-token tails; a multi-word
+        # tail like "New York" contains a space and should be rejected.
+        # The "tail" here is "New York" which has a space → rejected → unchanged.
+        assert result == ("New York, New York", None)
+
+    def test_empty_string(self):
+        assert _parse_qualifier_suffix("") == ("", None)
+
+
+class TestResolveBatch:
+    def test_mixed_levels_user_case(self):
+        """The user's exact scenario: a continent, two countries (via continent
+        aliases here), a US state, and a Canadian province."""
+        result = resolve_batch(["Africa", "California", "Europe", "Quebec"])
+        assert len(result.regions) == 4
+        names = [r.name for r in result.regions]
+        assert "Africa" in names
+        assert "California" in names
+        assert "Europe" in names
+        assert "Quebec" in names
+        assert not result.diagnostics.unresolved
+        assert not result.diagnostics.ambiguous
+        assert not result.diagnostics.expanded
+
+    def test_levels_are_populated(self):
+        result = resolve_batch(["Africa", "California", "Quebec", "France"])
+        by_name = {r.name: r for r in result.regions}
+        assert by_name["Africa"].level == "continent"
+        assert by_name["California"].level == "subnational"
+        assert by_name["California"].level_label == "state"
+        assert by_name["Quebec"].level == "subnational"
+        assert by_name["Quebec"].level_label == "province"
+        assert by_name["France"].level == "country"
+
+    def test_feature_expansion_flattens(self):
+        result = resolve_batch(["Alps"])
+        # Alps maps to 7 European countries — all should be in regions.
+        assert len(result.regions) == 7
+        assert {r.continent for r in result.regions} == {"Europe"}
+        # And a single expansion entry in diagnostics.
+        assert len(result.diagnostics.expanded) == 1
+        exp = result.diagnostics.expanded[0]
+        assert exp.query == "Alps"
+        assert exp.feature_name == "alps"
+        assert len(exp.regions) == 7
+
+    def test_mixed_with_feature(self):
+        result = resolve_batch(["California", "Alps", "Quebec"])
+        # 1 + 7 + 1 = 9 regions (no overlap between Alps countries and Quebec/CA)
+        assert len(result.regions) == 9
+        assert len(result.diagnostics.expanded) == 1
+
+    def test_qualifier_disambiguates_georgia_us(self):
+        result = resolve_batch(["Georgia, US"])
+        assert len(result.regions) == 1
+        r = result.regions[0]
+        assert r.canonical == "north-america/us/georgia"
+        assert r.level == "subnational"
+
+    def test_qualifier_paren_country(self):
+        result = resolve_batch(["Georgia (country)"])
+        assert len(result.regions) == 1
+        r = result.regions[0]
+        assert r.level == "country"
+        assert r.canonical == "europe/georgia"
+
+    def test_canonical_path_passthrough(self):
+        result = resolve_batch(["north-america/us/california"])
+        assert len(result.regions) == 1
+        assert result.regions[0].canonical == "north-america/us/california"
+
+    def test_unresolved_lenient(self):
+        result = resolve_batch(["Quebec", "NotARealPlace"])
+        assert len(result.regions) == 1
+        assert result.regions[0].name == "Quebec"
+        assert result.diagnostics.unresolved == ["NotARealPlace"]
+
+    def test_unresolved_strict_raises(self):
+        with pytest.raises(StrictResolutionError):
+            resolve_batch(["Quebec", "NotARealPlace"], strict=True)
+
+    def test_prefer_continent_applies_to_unqualified_only(self):
+        # "Georgia" without qualifier uses prefer_continent; "Quebec" is not
+        # ambiguous so prefer_continent is a no-op for it.
+        result = resolve_batch(
+            ["Georgia", "Quebec"], prefer_continent="NorthAmerica"
+        )
+        by_name = {r.canonical: r for r in result.regions}
+        assert "north-america/us/georgia" in by_name
+        assert "north-america/canada/quebec" in by_name
+
+    def test_empty_names_are_unresolved(self):
+        result = resolve_batch(["", "  ", "Quebec"])
+        assert result.diagnostics.unresolved == ["", "  "]
+        assert len(result.regions) == 1
+
+    def test_duplicate_names_deduplicated(self):
+        result = resolve_batch(["California", "California", "CA"])
+        # All three map to the same canonical path — only one Region returned.
+        assert len(result.regions) == 1
+        assert result.regions[0].canonical == "north-america/us/california"
+
+    def test_returns_region_dataclass(self):
+        result = resolve_batch(["Quebec"])
+        assert isinstance(result.regions[0], Region)
+
+
+class TestListRegionsTyped:
+    def test_filter_by_level_continent(self):
+        result = list_regions_typed(level="continent")
+        # 7 mainland continents (no Russia in continents list as it has its own
+        # top-level extract under "russia" — that's level=continent too) + Antarctica + Russia.
+        levels = {r.level for r in result}
+        assert levels == {"continent"}
+        names = {r.name for r in result}
+        assert "Africa" in names
+        assert "Europe" in names
+
+    def test_filter_by_parent_canonical_canada(self):
+        result = list_regions_typed(parent_canonical="north-america/canada")
+        # All Canadian provinces + Yukon territory — registry has 10 provinces + Yukon.
+        assert len(result) == 11
+        labels = {r.level_label for r in result}
+        assert "province" in labels
+        assert "territory" in labels  # Yukon
+
+    def test_filter_by_parent_canonical_us(self):
+        result = list_regions_typed(parent_canonical="north-america/us")
+        # 50 states + DC = 51
+        assert len(result) == 51
+        assert all(r.level == "subnational" for r in result)
+        assert all(r.level_label == "state" for r in result)
+
+    def test_filter_by_continent(self):
+        result = list_regions_typed(continent="Europe")
+        assert len(result) > 0
+        assert all(r.continent == "Europe" for r in result)
+
+    def test_combined_filters(self):
+        # All subnational extracts in North America = US states + Canadian
+        # provinces + Canadian territories = 51 + 11 = 62.
+        result = list_regions_typed(level="subnational", continent="NorthAmerica")
+        assert len(result) == 62
+
+    def test_returns_region_dataclass(self):
+        result = list_regions_typed(level="continent")
+        for r in result:
+            assert isinstance(r, Region)
+
+
+class TestRegionToDict:
+    """Verify the dict shape matches the FFL osm.types.Region schema."""
+
+    def test_to_dict_fields(self):
+        result = resolve_batch(["Quebec"])
+        d = result.regions[0].to_dict()
+        assert set(d.keys()) == {
+            "query",
+            "name",
+            "canonical",
+            "level",
+            "level_label",
+            "parent_canonical",
+            "continent",
+            "geofabrik_path",
+        }
+        assert d["name"] == "Quebec"
+        assert d["level"] == "subnational"
+        assert d["level_label"] == "province"
+
+    def test_diagnostics_to_dict(self):
+        result = resolve_batch(["Quebec", "Alps", "NotARealPlace"])
+        d = result.diagnostics.to_dict()
+        assert d["unresolved"] == ["NotARealPlace"]
+        assert len(d["expanded"]) == 1
+        assert d["expanded"][0]["query"] == "Alps"
+        assert d["expanded"][0]["feature_name"] == "alps"
+        assert len(d["expanded"][0]["regions"]) == 7
