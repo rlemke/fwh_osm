@@ -1,14 +1,5 @@
 /** Shared type definitions used across all OSM modules. */
 namespace osm.types {
-   /** Cached OSM data file with download metadata. */
-   schema OSMCache {
-      url: String,
-      path: String,
-      date: String,
-      size: Long,
-      wasInCache: Boolean
-   }
-
    /** Canonical identity for an OSM extract.
     *  Carries enough metadata to download the extract and to reason about
     *  hierarchy (continent ↔ country ↔ subnational ↔ feature).
@@ -35,6 +26,24 @@ namespace osm.types {
       parent_canonical: String,
       continent: String,
       geofabrik_path: String
+   }
+
+   /** Cached OSM data file with download metadata.
+    *
+    *  The embedded ``region`` is the canonical identity of the extract —
+    *  downstream handlers read ``cache.region.name`` for display,
+    *  ``cache.region.canonical`` as a stable id, and
+    *  ``cache.region.geofabrik_path`` for the download path. Always
+    *  populated: when the source is a plain path string (the legacy
+    *  ``osm.ops.CacheRegion`` entry point), the handler resolves it back
+    *  to a Region before constructing the cache. */
+   schema OSMCache {
+      region: Region,
+      url: String,
+      path: String,
+      date: String,
+      size: Long,
+      wasInCache: Boolean
    }
 
    /** One ambiguous resolution kept for caller review.

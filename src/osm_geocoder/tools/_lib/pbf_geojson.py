@@ -272,9 +272,29 @@ def convert_region(
         )
 
 
-def to_osm_cache(result: ConvertResult) -> dict[str, Any]:
-    """Map a ``ConvertResult`` to the ``OSMCache`` dict FFL handlers return."""
+def to_osm_cache(
+    result: ConvertResult, region: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Map a ``ConvertResult`` to the ``OSMCache`` dict FFL handlers return.
+
+    ``region`` should be the typed ``osm.types.Region`` dict for the
+    conversion's source. When None, a minimal placeholder is built from
+    ``ConvertResult.region`` (the geofabrik path string).
+    """
+    if region is None:
+        path = result.region
+        region = {
+            "query": "",
+            "name": "",
+            "canonical": path,
+            "level": "",
+            "level_label": "",
+            "parent_canonical": "",
+            "continent": "",
+            "geofabrik_path": path,
+        }
     return {
+        "region": region,
         "url": result.source_url,
         "path": result.path,
         "date": result.generated_at,

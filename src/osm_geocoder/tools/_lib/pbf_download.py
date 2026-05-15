@@ -442,13 +442,38 @@ def filter_leaves(regions: list[str]) -> list[str]:
     return [r for r in regions if r not in non_leaves]
 
 
-def to_osm_cache(result: DownloadResult) -> dict[str, Any]:
+def to_osm_cache(
+    result: DownloadResult, region: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Convert a ``DownloadResult`` into the ``OSMCache`` dict shape.
 
-    The FFL ``osm.types.OSMCache`` schema is ``{url, path, date, size,
-    wasInCache}``; handlers also include a ``source`` field.
+    The FFL ``osm.types.OSMCache`` schema is ``{region, url, path, date,
+    size, wasInCache}``; handlers also include a ``source`` field.
+
+    Args:
+        result: The download outcome.
+        region: A ``osm.types.Region`` dict identifying the extract. New
+            code should always pass this — the typed Region carries
+            ``name`` / ``level`` / ``continent`` / etc. that downstream
+            handlers consume for logging and grouping. When ``None``,
+            a minimal placeholder Region is constructed from the
+            ``DownloadResult.region`` path string (``canonical`` and
+            ``geofabrik_path`` are populated; other fields are empty).
     """
+    if region is None:
+        path = result.region
+        region = {
+            "query": "",
+            "name": "",
+            "canonical": path,
+            "level": "",
+            "level_label": "",
+            "parent_canonical": "",
+            "continent": "",
+            "geofabrik_path": path,
+        }
     return {
+        "region": region,
         "url": result.source_url,
         "path": result.path,
         "date": result.downloaded_at,

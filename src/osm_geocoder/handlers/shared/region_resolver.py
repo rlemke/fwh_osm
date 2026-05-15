@@ -687,6 +687,64 @@ def _match_to_region(match: RegionMatch, query: str) -> Region:
     )
 
 
+def region_from_path(path: str, query: str = "") -> Region:
+    """Build a typed Region from a Geofabrik path string.
+
+    Public helper for handlers that have only a path (e.g. the legacy
+    ``osm.ops.CacheRegion(region: String)`` entry point) and need to
+    populate ``OSMCache.region`` without going through ``resolve()``.
+
+    Tries the registry first so the resulting Region carries the
+    canonical display name (``"British Columbia"`` rather than the path
+    leaf ``"british-columbia"``); falls back to a path-derived Region
+    when the path is unknown to the registry.
+
+    Args:
+        path: Geofabrik path (``"north-america/canada/quebec"``,
+            ``"africa"``, ``"planet"``, ...).
+        query: Optional original user query for traceability.
+
+    Returns:
+        A Region. Always non-empty: ``canonical`` and ``geofabrik_path``
+        are set to ``path``; other fields are derived from the path
+        structure (or empty when the path is malformed).
+    """
+    normpath = (path or "").strip().lower()
+    if not normpath:
+        return Region(
+            query=query,
+            name="",
+            canonical="",
+            level="",
+            level_label="",
+            parent_canonical="",
+            continent="",
+            geofabrik_path="",
+        )
+
+    match = _match_canonical_path(normpath)
+    if match is not None:
+        # Use the registry's display name and namespace metadata.
+        region = _match_to_region(match, query=query)
+        return region
+
+    # Path-only fallback: derive from path structure, leaf-as-display-name.
+    leaf = normpath.rsplit("/", 1)[-1]
+    display_name = _display_name_from_facet(
+        re.sub(r"[-_]+", "_", leaf).title().replace("_", ""), normpath
+    )
+    return Region(
+        query=query,
+        name=display_name,
+        canonical=normpath,
+        level=_level_from_path(normpath),
+        level_label=_level_label_from_path(normpath),
+        parent_canonical=_parent_canonical_from_path(normpath),
+        continent=_continent_from_path(normpath),
+        geofabrik_path=normpath,
+    )
+
+
 def _parse_qualifier_suffix(name: str) -> tuple[str, str | None]:
     """Strip a qualifier suffix from a user-supplied region name.
 
@@ -727,14 +785,25 @@ def _parse_qualifier_suffix(name: str) -> tuple[str, str | None]:
 
 
 def _match_canonical_path(path: str) -> RegionMatch | None:
-    """If ``path`` is a known Geofabrik path, return the matching RegionMatch."""
+    """If ``path`` is a known Geofabrik path, return the matching RegionMatch.
+
+    When multiple registry rows share a path (e.g. ``"planet"`` is keyed
+    by both ``Planet`` and ``AllContinents``), prefer the shortest facet
+    name — that's the canonical display form, since registry aliases
+    are conventionally prefixed with ``"All"``.
+    """
     _build_index()
     normpath = path.strip().lower()
+    candidates: list[RegionMatch] = []
+    seen = set()
     for matches in _LOOKUP.values():
         for m in matches:
-            if m.geofabrik_path == normpath:
-                return m
-    return None
+            if m.geofabrik_path == normpath and id(m) not in seen:
+                candidates.append(m)
+                seen.add(id(m))
+    if not candidates:
+        return None
+    return min(candidates, key=lambda m: (len(m.facet_name), m.facet_name))
 
 
 def _apply_qualifier(

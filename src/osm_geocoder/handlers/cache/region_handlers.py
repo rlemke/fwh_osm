@@ -13,14 +13,24 @@ from ..shared.pbf_cache import download_region, to_osm_cache
 from ..shared.region_resolver import (
     StrictResolutionError,
     list_regions_typed,
+    region_from_path,
     resolve,
     resolve_batch,
 )
 
 
-def _download_as_osm_cache(geofabrik_path: str) -> dict:
-    """Download a PBF via the shared cache library and return an OSMCache dict."""
-    return to_osm_cache(download_region(geofabrik_path))
+def _download_as_osm_cache(
+    geofabrik_path: str, region: dict | None = None
+) -> dict:
+    """Download a PBF and return an OSMCache dict with the embedded Region.
+
+    When ``region`` is None, the helper resolves the path via
+    ``region_from_path`` so every OSMCache has a populated region — even
+    when callers only know the path string.
+    """
+    if region is None:
+        region = region_from_path(geofabrik_path).to_dict()
+    return to_osm_cache(download_region(geofabrik_path), region=region)
 
 
 def handle_cache_region(params: dict[str, Any]) -> dict[str, Any]:
@@ -45,7 +55,13 @@ def handle_cache_region(params: dict[str, Any]) -> dict[str, Any]:
         if result.matches:
             geofabrik_path = result.matches[0].geofabrik_path
 
-    cache = to_osm_cache(download_region(geofabrik_path))
+    # Resolve the path back into a typed Region so OSMCache.region is always
+    # populated — downstream handlers shouldn't care whether the cache was
+    # produced via the new Region-driven path or the legacy string entry.
+    typed_region = region_from_path(geofabrik_path, query=region).to_dict()
+    cache = to_osm_cache(
+        download_region(geofabrik_path), region=typed_region
+    )
     if step_log:
         step_log(
             f"CacheRegion: '{region}' -> {geofabrik_path} (source={cache.get('source', 'unknown')})"
@@ -96,7 +112,10 @@ def handle_region_download(params: dict[str, Any]) -> dict[str, Any]:
         )
 
     step_log = params.get("_step_log")
-    cache = to_osm_cache(download_region(geofabrik_path))
+    # Pass the input Region through verbatim so OSMCache.region carries the
+    # caller's typed metadata (name, level, continent, ...) rather than the
+    # path-only fallback.
+    cache = to_osm_cache(download_region(geofabrik_path), region=region)
     if step_log:
         display = region.get("name") or geofabrik_path
         source = cache.get("source", "unknown")
@@ -124,8 +143,10 @@ def handle_resolve_region(params: dict[str, Any]) -> dict[str, Any]:
         if step_log:
             step_log(f"ResolveRegion: no match for '{name}'")
 
+        empty_region = region_from_path("", query=name).to_dict()
         return {
             "cache": {
+                "region": empty_region,
                 "url": "",
                 "path": "",
                 "date": "",
@@ -144,7 +165,8 @@ def handle_resolve_region(params: dict[str, Any]) -> dict[str, Any]:
         }
 
     best = result.matches[0]
-    cache = _download_as_osm_cache(best.geofabrik_path)
+    matched_region = region_from_path(best.geofabrik_path, query=name).to_dict()
+    cache = _download_as_osm_cache(best.geofabrik_path, region=matched_region)
     source = cache.get("source", "unknown")
     if step_log:
         step_log(

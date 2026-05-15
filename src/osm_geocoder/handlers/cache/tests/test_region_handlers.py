@@ -19,14 +19,36 @@ import pytest
 from osm_geocoder.handlers.cache.region_handlers import (
     _DISPATCH,
     handle,
+    handle_cache_region,
     handle_region_download,
 )
 from osm_geocoder.handlers.shared.region_resolver import resolve_batch
 
 
-def _fake_cache(geofabrik_path: str, *, was_in_cache: bool = False) -> dict:
-    """Build an OSMCache-shaped dict for tests, mirroring ``to_osm_cache``."""
+def _empty_region(path: str = "") -> dict:
     return {
+        "query": "",
+        "name": "",
+        "canonical": path,
+        "level": "",
+        "level_label": "",
+        "parent_canonical": "",
+        "continent": "",
+        "geofabrik_path": path,
+    }
+
+
+def _fake_cache(
+    geofabrik_path: str, *, was_in_cache: bool = False, region: dict | None = None
+) -> dict:
+    """Build an OSMCache-shaped dict for tests, mirroring ``to_osm_cache``.
+
+    Always includes a ``region`` field matching the new OSMCache schema —
+    callers can pass a typed Region dict to verify propagation or omit
+    it to use a path-only placeholder.
+    """
+    return {
+        "region": region if region is not None else _empty_region(geofabrik_path),
         "url": f"https://download.geofabrik.de/{geofabrik_path}-latest.osm.pbf",
         "path": f"/tmp/cache/{geofabrik_path}.osm.pbf",
         "date": "2024-01-01",
@@ -41,14 +63,15 @@ def patched_download():
     """Patch the cache library so handlers run without touching disk/net.
 
     Returns the patched ``download_region`` mock so tests can assert call
-    arguments. The companion ``to_osm_cache`` is patched to a pass-through
-    that returns whatever ``download_region`` returned.
+    arguments. ``to_osm_cache`` is patched to mirror the real signature
+    ``(result, region=region)`` so it can capture the typed Region the
+    handler passes in.
     """
     with patch(
         "osm_geocoder.handlers.cache.region_handlers.download_region"
     ) as dl, patch(
         "osm_geocoder.handlers.cache.region_handlers.to_osm_cache",
-        side_effect=lambda r: r,
+        side_effect=lambda r, region=None: {**r, "region": region if region is not None else r.get("region", _empty_region())},
     ):
         dl.side_effect = lambda path: _fake_cache(path)
         yield dl
@@ -84,8 +107,27 @@ class TestDownloadHandler:
         assert set(out.keys()) == {"cache"}
         cache = out["cache"]
         # Required OSMCache fields per the FFL schema.
-        for field in ("url", "path", "date", "size", "wasInCache"):
+        for field in ("region", "url", "path", "date", "size", "wasInCache"):
             assert field in cache, field
+
+    def test_region_propagated_into_cache(self, patched_download):
+        """A typed Region passed in to Download is preserved in OSMCache.region."""
+        region = {
+            "query": "Quebec",
+            "name": "Quebec",
+            "canonical": "north-america/canada/quebec",
+            "level": "subnational",
+            "level_label": "province",
+            "parent_canonical": "north-america/canada",
+            "continent": "NorthAmerica",
+            "geofabrik_path": "north-america/canada/quebec",
+        }
+        out = handle_region_download({"region": region})
+        cached_region = out["cache"]["region"]
+        assert cached_region["name"] == "Quebec"
+        assert cached_region["level"] == "subnational"
+        assert cached_region["level_label"] == "province"
+        assert cached_region["continent"] == "NorthAmerica"
 
     def test_falls_back_to_canonical_when_geofabrik_path_missing(
         self, patched_download
@@ -148,7 +190,10 @@ class TestDownloadHandler:
             return_value=_fake_cache("africa/algeria", was_in_cache=True),
         ), patch(
             "osm_geocoder.handlers.cache.region_handlers.to_osm_cache",
-            side_effect=lambda r: r,
+            side_effect=lambda r, region=None: {
+                **r,
+                "region": region if region is not None else r.get("region", _empty_region()),
+            },
         ):
             region = {"geofabrik_path": "africa/algeria", "name": "Algeria"}
             out = handle_region_download({"region": region})
@@ -232,3 +277,60 @@ class TestResolveDownloadFlow:
         called_paths = [c.args[0] for c in patched_download.call_args_list]
         assert len(called_paths) == 7
         assert all(p.startswith("europe/") for p in called_paths)
+
+    def test_typed_region_survives_into_cache(self, patched_download):
+        """End-to-end: resolve_batch produces typed Regions whose name +
+        level land intact on OSMCache.region — that's the whole point of
+        embedding Region in OSMCache (downstream handlers can log
+        'Quebec (province)' without re-resolving)."""
+        resolved = resolve_batch(["California", "Quebec"])
+        outputs = [
+            handle_region_download({"region": r.to_dict()})
+            for r in resolved.regions
+        ]
+        by_name = {
+            out["cache"]["region"]["name"]: out["cache"]["region"]
+            for out in outputs
+        }
+        assert by_name["California"]["level"] == "subnational"
+        assert by_name["California"]["level_label"] == "state"
+        assert by_name["Quebec"]["level_label"] == "province"
+        assert by_name["California"]["continent"] == "NorthAmerica"
+
+
+# ---------------------------------------------------------------------------
+# handle_cache_region (legacy string-input entry point)
+# ---------------------------------------------------------------------------
+
+
+class TestCacheRegionHandler:
+    """The legacy ``osm.ops.CacheRegion(region: String)`` entry point now
+    populates OSMCache.region by resolving its string input through
+    ``region_from_path``, so downstream handlers don't have to care which
+    entry point produced the cache."""
+
+    def test_path_input_populates_region(self, patched_download):
+        out = handle_cache_region({"region": "north-america/us/california"})
+        cached_region = out["cache"]["region"]
+        assert cached_region["name"] == "California"
+        assert cached_region["level"] == "subnational"
+        assert cached_region["level_label"] == "state"
+        assert cached_region["canonical"] == "north-america/us/california"
+        assert cached_region["continent"] == "NorthAmerica"
+
+    def test_friendly_name_input_populates_region(self, patched_download):
+        # "California" with no slash → handler resolves it to a path,
+        # then region_from_path produces the Region.
+        out = handle_cache_region({"region": "California"})
+        cached_region = out["cache"]["region"]
+        assert cached_region["name"] == "California"
+        assert cached_region["level"] == "subnational"
+        # The user's original query is preserved.
+        assert cached_region["query"] == "California"
+
+    def test_continent_path_input(self, patched_download):
+        out = handle_cache_region({"region": "africa"})
+        cached_region = out["cache"]["region"]
+        assert cached_region["level"] == "continent"
+        assert cached_region["continent"] == ""  # continents have no parent continent
+        assert cached_region["canonical"] == "africa"
