@@ -1,6 +1,6 @@
 """Build OSRM MLD routing graphs from cached OSM PBFs.
 
-Thin CLI wrapper around ``_lib.osrm_build.build_graph``. Runs the
+Thin CLI wrapper around ``_osm_tools.osrm_build.build_graph``. Runs the
 3-stage OSRM pipeline (extract → partition → customize) and stores
 the result at ``<cache_root>/osrm/<region>-latest/<profile>/``.
 
@@ -29,8 +29,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _lib import sidecar  # noqa: E402
-from _lib.osrm_build import (  # noqa: E402
+from _osm_tools import sidecar  # noqa: E402
+from _osm_tools.osrm_build import (  # noqa: E402
     DEFAULT_TIMEOUT_SECONDS,
     NAMESPACE,
     OSRM_VERSION,
@@ -44,7 +44,7 @@ from _lib.osrm_build import (  # noqa: E402
     is_up_to_date,
     pbf_abs_path,
 )
-from _lib.pbf_download import (  # noqa: E402
+from _osm_tools.pbf_download import (  # noqa: E402
     filter_leaves,
     regions_from_pbf_cache,
 )

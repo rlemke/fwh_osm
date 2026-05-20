@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _lib.gtfs_download import (  # noqa: E402
+from _osm_tools.gtfs_download import (  # noqa: E402
     DownloadError,
     DownloadResult,
     download,

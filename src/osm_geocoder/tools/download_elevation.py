@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _lib.elevation_download import (  # noqa: E402
+from _osm_tools.elevation_download import (  # noqa: E402
     DEFAULT_TIMEOUT_SECONDS,
     ELEVATION_VERSION,
     SOURCE_COP_DEM_30M,

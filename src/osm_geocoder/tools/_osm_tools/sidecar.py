@@ -33,7 +33,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
-from _lib.storage import (
+from _osm_tools.storage import (
     LocalStorage,
     Storage,
     cache_root,

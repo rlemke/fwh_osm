@@ -14,7 +14,7 @@
 
 """GraphHopper routing graph handlers.
 
-Thin adapters over ``tools/_lib/graphhopper_build.py``. The real logic
+Thin adapters over ``tools/_osm_tools/graphhopper_build.py``. The real logic
 (subprocess invocation, config YAML, manifest-based cache, per-
 (region, profile) locking, finalize-from-local staging) lives in the
 library so the CLI tool (``build-graphhopper-graph``) and these

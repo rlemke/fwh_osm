@@ -38,8 +38,8 @@ try:
 except ImportError:  # pragma: no cover - optional, only needed for bulk streaming
     requests = None
 
-from _lib import sidecar
-from _lib.storage import LocalStorage, Storage, local_staging_subdir
+from _osm_tools import sidecar
+from _osm_tools.storage import LocalStorage, Storage, local_staging_subdir
 
 NAMESPACE = "osm"
 CACHE_TYPE = "pbf"
@@ -403,7 +403,7 @@ def regions_from_pbf_cache(
     if use_index:
         # Soft-import cache_index so unit tests that stub storage
         # don't have to wire the index module up.
-        from _lib import cache_index
+        from _osm_tools import cache_index
 
         try:
             idx = cache_index.read_index(NAMESPACE, CACHE_TYPE, storage=storage)

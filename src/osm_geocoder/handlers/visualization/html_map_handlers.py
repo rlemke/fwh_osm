@@ -14,7 +14,7 @@
 
 """HTML map-page render handlers (MapLibre + PMTiles).
 
-Thin adapters over ``tools/_lib/html_render.py``. The real render
+Thin adapters over ``tools/_osm_tools/html_render.py``. The real render
 logic (style generation, per-region directory, master index rewrite,
 manifest-based cache) lives in the library so the CLI
 (``render-html-maps``) and these handlers share one code path and

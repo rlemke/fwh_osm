@@ -39,8 +39,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from _lib import sidecar
-from _lib.storage import LocalStorage
+from _osm_tools import sidecar
+from _osm_tools.storage import LocalStorage
 
 NAMESPACE = "osm"
 SOURCE_CACHE_TYPE = "pbf"

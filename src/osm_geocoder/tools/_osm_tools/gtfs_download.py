@@ -37,8 +37,8 @@ try:
 except ImportError:  # pragma: no cover
     requests = None
 
-from _lib import sidecar
-from _lib.storage import LocalStorage
+from _osm_tools import sidecar
+from _osm_tools.storage import LocalStorage
 
 NAMESPACE = "gtfs"
 CACHE_TYPE = "feeds"

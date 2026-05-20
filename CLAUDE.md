@@ -80,8 +80,8 @@ osm2pgsql-compatible views are auto-created by `ensure_schema`:
 ### Tools / handlers / cache pattern
 
 Every domain pipeline follows one contract: a `tools/` dir of Python CLIs +
-shell wrappers backed by `tools/_lib/`, FFL handlers that call into the
-same `_lib/` via a `handlers/shared/<domain>_utils.py` shim, and a
+shell wrappers backed by `tools/_osm_tools/`, FFL handlers that call into the
+same `_osm_tools/` via a `handlers/shared/<domain>_utils.py` shim, and a
 sidecar-backed cache under `$AFL_CACHE_ROOT/<namespace>/`. See
 `agent-spec/tools-pattern.agent-spec.yaml` and
 `agent-spec/cache-layout.agent-spec.yaml` for the full contract.

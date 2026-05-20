@@ -5,7 +5,7 @@ subdirectory (``<cache_root>/<category>/<region>-latest.geojsonseq``)
 with its own ``manifest.json``. Downstream consumers load the small
 already-filtered file instead of re-parsing the full PBF.
 
-Categories are defined in ``_lib/pbf_extract.py::CATEGORIES``. Adding a
+Categories are defined in ``_osm_tools/pbf_extract.py::CATEGORIES``. Adding a
 new one is a single dict entry (name, tag filter, description,
 filter_version).
 
@@ -30,12 +30,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _lib import sidecar  # noqa: E402
-from _lib.pbf_download import (  # noqa: E402
+from _osm_tools import sidecar  # noqa: E402
+from _osm_tools.pbf_download import (  # noqa: E402
     filter_leaves,
     regions_from_pbf_cache,
 )
-from _lib.pbf_extract import (  # noqa: E402
+from _osm_tools.pbf_extract import (  # noqa: E402
     CATEGORIES,
     NAMESPACE,
     SOURCE_CACHE_TYPE,

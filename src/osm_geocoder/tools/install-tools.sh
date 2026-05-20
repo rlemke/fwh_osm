@@ -47,7 +47,7 @@ On Debian/Ubuntu the apt equivalent packages are:
 fi
 
 # ---- GraphHopper version + download URL -----------------------------------
-# Keep in sync with GRAPHHOPPER_VERSION in tools/_lib/graphhopper_build.py.
+# Keep in sync with GRAPHHOPPER_VERSION in tools/_osm_tools/graphhopper_build.py.
 GRAPHHOPPER_VERSION="${GRAPHHOPPER_VERSION:-8.0}"
 GRAPHHOPPER_JAR_URL="https://github.com/graphhopper/graphhopper/releases/download/${GRAPHHOPPER_VERSION}/graphhopper-web-${GRAPHHOPPER_VERSION}.jar"
 GRAPHHOPPER_DIR="${GRAPHHOPPER_DIR:-$HOME/.graphhopper}"

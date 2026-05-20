@@ -1,6 +1,6 @@
 """Build Valhalla routing tilesets from cached OSM PBFs.
 
-Thin CLI wrapper around ``_lib.valhalla_build.build_tiles``. Both this
+Thin CLI wrapper around ``_osm_tools.valhalla_build.build_tiles``. Both this
 tool and the FFL ``osm.ops.Valhalla.BuildTiles`` handler call that
 library, so they share one cache layout and one manifest.
 
@@ -43,12 +43,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _lib import sidecar  # noqa: E402
-from _lib.pbf_download import (  # noqa: E402
+from _osm_tools import sidecar  # noqa: E402
+from _osm_tools.pbf_download import (  # noqa: E402
     filter_leaves,
     regions_from_pbf_cache,
 )
-from _lib.valhalla_build import (  # noqa: E402
+from _osm_tools.valhalla_build import (  # noqa: E402
     DEFAULT_TIMEOUT_SECONDS,
     NAMESPACE,
     QUERY_PROFILES,

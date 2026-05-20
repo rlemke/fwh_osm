@@ -1,6 +1,6 @@
 """Download OSM PBF files from Geofabrik into the shared OSM cache.
 
-Thin CLI wrapper around ``_lib.pbf_download.download_region``; the same
+Thin CLI wrapper around ``_osm_tools.pbf_download.download_region``; the same
 library is used by the FFL ``osm.ops.CacheRegion`` handler, so the FFL
 and the tool share one cache layout and one manifest.
 
@@ -42,7 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _lib.pbf_download import (  # noqa: E402
+from _osm_tools.pbf_download import (  # noqa: E402
     GEOFABRIK_BASE,
     DownloadError,
     DownloadResult,
@@ -53,7 +53,7 @@ from _lib.pbf_download import (  # noqa: E402
     regions_from_pbf_cache,
     staging_path,
 )
-from _lib.storage import default_backend, get_storage  # noqa: E402
+from _osm_tools.storage import default_backend, get_storage  # noqa: E402
 
 GEOFABRIK_INDEX_URL = f"{GEOFABRIK_BASE}/index-v1.json"
 USER_AGENT = "facetwork-osm-geocoder/1.0 (OSM PBF downloader)"

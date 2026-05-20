@@ -49,7 +49,7 @@ tools/
 ├── install-tools.sh                 ← one-shot binary installer (brew + GraphHopper jar)
 ├── update-all.sh                    ← chains every --update-all in dependency order
 │
-├── _lib/                            ← shared library (tools and FFL handlers both import these)
+├── _osm_tools/                            ← shared library (tools and FFL handlers both import these)
 │   ├── manifest.py                  ← per-cache-type JSON manifest I/O (atomic, flock'd)
 │   ├── storage.py                   ← Storage abstraction (LocalStorage, HdfsStorage)
 │   ├── pbf_download.py              ← Geofabrik PBF download + path-mirroring cache
@@ -77,7 +77,7 @@ tools/
 └── download-elevation.sh  / download_elevation.py
 ```
 
-One `.py` + one `.sh` per tool. Shared code lives in `tools/_lib/` — anything reused by two or more tools (or by FFL handlers) goes there. Handler-side code imports from `_lib/` via thin re-export shims in `handlers/shared/` (e.g. `pbf_cache.py`, `pbf_convert.py`).
+One `.py` + one `.sh` per tool. Shared code lives in `tools/_osm_tools/` — anything reused by two or more tools (or by FFL handlers) goes there. Handler-side code imports from `_osm_tools/` via thin re-export shims in `handlers/shared/` (e.g. `pbf_cache.py`, `pbf_convert.py`).
 
 ## Quick start on a fresh machine
 
@@ -112,7 +112,7 @@ Organized by role in the pipeline.
 
 - **convert-pbf-geojson** — `osmium export` PBF → GeoJSON. Defaults to `geojsonseq` (one feature per line, streamable); `--format geojson` for a FeatureCollection. Cache keyed by source PBF SHA + format. `--jobs N` parallelizes; `--update-all` sweeps the pbf manifest for regions whose GeoJSON is missing or stale.
 - **convert-pbf-shapefile** — `ogr2ogr` PBF → multi-layer ESRI Shapefile **bundle directory** (one `.shp`/`.shx`/`.dbf`/`.prj`/`.cpg` set per layer). Layers: `points`, `lines`, `multilinestrings`, `multipolygons` (the `other_relations` GeometryCollection is always skipped — shapefile can't hold it). `--layers` restricts the output; superset-semantics cache hits (a cache built with all four layers satisfies a later request for a subset).
-- **extract** — `osmium tags-filter | osmium export` — one pre-filtered GeoJSONSeq per category. Categories live in `_lib/pbf_extract.py::CATEGORIES` (one dict entry defines a category: name, FFL facet name, tag expression, filter_version). Current set: `water`, `protected_areas`, `parks`, `forests`, `roads_routable`, `turn_restrictions`, `railways_routable`, `cycle_routes`, `hiking_routes`. `--extract-all-categories` runs every category per region; `--update-all` pre-filters to just the stale work. Adding a new category = one dict entry + one FFL `event facet` line.
+- **extract** — `osmium tags-filter | osmium export` — one pre-filtered GeoJSONSeq per category. Categories live in `_osm_tools/pbf_extract.py::CATEGORIES` (one dict entry defines a category: name, FFL facet name, tag expression, filter_version). Current set: `water`, `protected_areas`, `parks`, `forests`, `roads_routable`, `turn_restrictions`, `railways_routable`, `cycle_routes`, `hiking_routes`. `--extract-all-categories` runs every category per region; `--update-all` pre-filters to just the stale work. Adding a new category = one dict entry + one FFL `event facet` line.
 - **build-vector-tiles** — `tippecanoe` GeoJSONSeq → PMTiles. `--source` picks the input cache (`geojson` for whole-region, or any extract category); `--all-sources` fans out across every valid source. Tiling options (min/max zoom, layer name) are part of the cache key, so changing them triggers a rebuild only for affected entries.
 - **render-html-maps** — MapLibre GL JS + PMTiles viewer per region. Consumes the `vector_tiles/` cache and emits `html/<region>-latest/index.html` + `style.json`. Sub-classifies layers at render time via MapLibre filter expressions — **highways split into motorway / trunk / primary / secondary / tertiary / residential**, **water split into lakes, rivers (line + polygon), canals, streams**, **protected areas split into national park / state park / other protected / nature reserve**, and **16 POI categories with per-category colored circles with click popups showing OSM tags**. Also refreshes the master `html/index.html` table on every run. Cache validity: source PMTiles SHAs + `STYLE_VERSION`. Serve with `python -m http.server --directory $AFL_OSM_CACHE_ROOT 8000` and open `http://localhost:8000/html/`.
 
@@ -224,7 +224,7 @@ Every tool records:
 - Config from env vars where possible (`AFL_DATA_ROOT`, `AFL_POSTGIS_URL`, etc.). CLI flags override env vars.
 - Do **not** depend on the Facetwork runtime, MongoDB, or the dashboard. Tools should run without a workflow stack. PostGIS, HDFS, external APIs are fine.
 - Type hints on every function. Module docstring with usage + external deps.
-- If your tool caches outputs, put the core logic in `_lib/<name>.py` so the FFL handlers can call it too. The CLI becomes a thin wrapper.
+- If your tool caches outputs, put the core logic in `_osm_tools/<name>.py` so the FFL handlers can call it too. The CLI becomes a thin wrapper.
 
 ### Shell wrapper (`<name>.sh`)
 

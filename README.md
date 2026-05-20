@@ -95,7 +95,7 @@ osm/
 ├── agent-spec/                     # tools-pattern, cache-layout specs
 ├── agent.py                        # standalone AgentPoller variant
 ├── tools/                          # repo-level CLI scripts (PBF → tiles → HTML)
-│   ├── _lib/                       # shared library for tools
+│   ├── _osm_tools/                       # shared library for tools
 │   ├── all-extract.sh
 │   ├── all-render-html-maps.sh
 │   └── ...

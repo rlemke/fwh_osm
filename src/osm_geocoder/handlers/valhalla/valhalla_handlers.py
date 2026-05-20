@@ -14,7 +14,7 @@
 
 """Valhalla routing tileset handlers.
 
-Thin adapters over ``tools/_lib/valhalla_build.py``. The real build
+Thin adapters over ``tools/_osm_tools/valhalla_build.py``. The real build
 logic (subprocess invocation, config JSON generation, manifest-based
 cache, per-region locking, finalize-from-local staging) lives in the
 library so the CLI (``build-valhalla-tiles``) and these handlers share

@@ -23,8 +23,8 @@ import json
 import os
 from typing import Any
 
-from _lib import sidecar
-from _lib.storage import LocalStorage, Storage, indexes_root
+from _osm_tools import sidecar
+from _osm_tools.storage import LocalStorage, Storage, indexes_root
 
 INDEX_VERSION = 1
 INDEX_SUFFIX = ".index.json"

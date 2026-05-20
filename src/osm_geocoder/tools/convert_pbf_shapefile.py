@@ -1,6 +1,6 @@
 """Convert cached OSM PBF files to multi-layer ESRI Shapefile bundles.
 
-Thin CLI wrapper around ``_lib.pbf_shapefile.convert_region``. Both
+Thin CLI wrapper around ``_osm_tools.pbf_shapefile.convert_region``. Both
 this tool and the FFL ``osm.ops.ConvertPbfToShapefile`` handler call
 that library, so they share one cache layout and one manifest.
 
@@ -30,12 +30,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _lib import sidecar  # noqa: E402
-from _lib.pbf_download import (  # noqa: E402
+from _osm_tools import sidecar  # noqa: E402
+from _osm_tools.pbf_download import (  # noqa: E402
     filter_leaves,
     regions_from_pbf_cache,
 )
-from _lib.pbf_shapefile import (  # noqa: E402
+from _osm_tools.pbf_shapefile import (  # noqa: E402
     NAMESPACE,
     OSM_LAYER_NAMES,
     SOURCE_CACHE_TYPE,

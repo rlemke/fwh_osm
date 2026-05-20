@@ -1,6 +1,6 @@
 """Build GraphHopper routing graphs from cached OSM PBFs.
 
-Thin CLI wrapper around ``_lib.graphhopper_build.build_graph``. Both
+Thin CLI wrapper around ``_osm_tools.graphhopper_build.build_graph``. Both
 this tool and the FFL ``osm.ops.GraphHopper.BuildGraph`` handler call
 that library, so they share one cache layout + manifest.
 
@@ -25,7 +25,7 @@ Usage::
     python build_graphhopper_graph.py --update-all --profile car
 
 Requires Java 17+ and a GraphHopper 8.x ``-web.jar``. See
-``_lib/graphhopper_build.py`` for jar-path / JVM-memory resolution.
+``_osm_tools/graphhopper_build.py`` for jar-path / JVM-memory resolution.
 """
 
 from __future__ import annotations
@@ -38,8 +38,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _lib import sidecar  # noqa: E402
-from _lib.graphhopper_build import (  # noqa: E402
+from _osm_tools import sidecar  # noqa: E402
+from _osm_tools.graphhopper_build import (  # noqa: E402
     DEFAULT_JVM_MEMORY,
     DEFAULT_TIMEOUT_SECONDS,
     GRAPHHOPPER_VERSION,
@@ -54,7 +54,7 @@ from _lib.graphhopper_build import (  # noqa: E402
     is_up_to_date,
     pbf_abs_path,
 )
-from _lib.pbf_download import (  # noqa: E402
+from _osm_tools.pbf_download import (  # noqa: E402
     filter_leaves,
     regions_from_pbf_cache,
 )

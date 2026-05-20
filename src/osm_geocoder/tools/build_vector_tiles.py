@@ -28,11 +28,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _lib.pbf_download import (  # noqa: E402
+from _osm_tools.pbf_download import (  # noqa: E402
     filter_leaves,
     regions_from_pbf_cache,
 )
-from _lib.vector_tiles_build import (  # noqa: E402
+from _osm_tools.vector_tiles_build import (  # noqa: E402
     DEFAULT_MAX_ZOOM,
     DEFAULT_MIN_ZOOM,
     DEFAULT_TIMEOUT_SECONDS,

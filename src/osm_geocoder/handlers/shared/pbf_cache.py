@@ -1,6 +1,6 @@
 """Handler-side re-export of the shared PBF cache library.
 
-The real implementation lives in ``examples/osm-geocoder/tools/_lib/``. It
+The real implementation lives in ``examples/osm-geocoder/tools/_osm_tools/``. It
 is shared verbatim by:
 
 - the ``download-pbf`` CLI tool (``examples/osm-geocoder/tools/``), and
@@ -27,7 +27,7 @@ _TOOLS_ROOT = Path(__file__).resolve().parents[2] / "tools"
 if str(_TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(_TOOLS_ROOT))
 
-from _lib.pbf_download import (  # noqa: E402,F401
+from _osm_tools.pbf_download import (  # noqa: E402,F401
     DownloadError,
     DownloadResult,
     cached_path,
@@ -37,4 +37,4 @@ from _lib.pbf_download import (  # noqa: E402,F401
     sidecar_entry_for,
     to_osm_cache,
 )
-from _lib.storage import LocalStorage, Storage, get_storage  # noqa: E402,F401
+from _osm_tools.storage import LocalStorage, Storage, get_storage  # noqa: E402,F401

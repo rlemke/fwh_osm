@@ -39,7 +39,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _lib.html_render import (  # noqa: E402
+from _osm_tools.html_render import (  # noqa: E402
     STYLE_VERSION,
     RenderError,
     RenderResult,
@@ -51,8 +51,8 @@ from _lib.html_render import (  # noqa: E402
     write_master_index,
     _discover_sources,
 )
-from _lib import sidecar  # noqa: E402
-from _lib.pbf_download import (  # noqa: E402
+from _osm_tools import sidecar  # noqa: E402
+from _osm_tools.pbf_download import (  # noqa: E402
     filter_leaves,
     regions_from_pbf_cache,
 )

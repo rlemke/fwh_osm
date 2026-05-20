@@ -327,4 +327,4 @@ human_docs:
   - examples/osm-geocoder/tools/README.md#available-tools
   - examples/osm-geocoder/tools/README.md#typical-workflows
   - examples/osm-geocoder/tools/download_pbf.py      # CLI wrapper
-  - examples/osm-geocoder/tools/_lib/pbf_download.py # current reference implementation
+  - examples/osm-geocoder/tools/_osm_tools/pbf_download.py # current reference implementation

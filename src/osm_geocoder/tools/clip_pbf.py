@@ -1,6 +1,6 @@
 """Clip a cached OSM PBF to a bbox or polygon via ``osmium extract``.
 
-Thin CLI wrapper around ``_lib.pbf_clip.clip_pbf``. The clipped PBF
+Thin CLI wrapper around ``_osm_tools.pbf_clip.clip_pbf``. The clipped PBF
 lands in the regular ``pbf/`` cache under ``clips/<name>-latest.osm.pbf``
 so every downstream tool (``convert-pbf-geojson``,
 ``convert-pbf-shapefile``, ``extract``, ``build-graphhopper-graph``,
@@ -37,8 +37,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _lib import sidecar  # noqa: E402
-from _lib.pbf_clip import (  # noqa: E402
+from _osm_tools import sidecar  # noqa: E402
+from _osm_tools.pbf_clip import (  # noqa: E402
     CACHE_TYPE,
     NAMESPACE,
     SOURCE_CACHE_TYPE,

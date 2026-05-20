@@ -32,9 +32,9 @@ from html import escape as html_escape
 from pathlib import Path
 from typing import Any
 
-from _lib import sidecar
-from _lib.storage import LocalStorage, Storage
-from _lib.vector_tiles_build import tileset_abs_path
+from _osm_tools import sidecar
+from _osm_tools.storage import LocalStorage, Storage
+from _osm_tools.vector_tiles_build import tileset_abs_path
 
 NAMESPACE = "osm"
 OUTPUT_CACHE_TYPE = "html"

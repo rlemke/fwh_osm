@@ -1,6 +1,6 @@
 """Convert cached OSM PBF files to GeoJSON using ``osmium export``.
 
-Thin CLI wrapper around ``_lib.pbf_geojson.convert_region``. Both this
+Thin CLI wrapper around ``_osm_tools.pbf_geojson.convert_region``. Both this
 tool and the FFL ``osm.ops.ConvertPbfToGeoJson`` handler call that
 library, so they share one cache layout and one manifest.
 
@@ -31,11 +31,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _lib.pbf_download import (  # noqa: E402
+from _osm_tools.pbf_download import (  # noqa: E402
     filter_leaves,
     regions_from_pbf_cache,
 )
-from _lib.pbf_geojson import (  # noqa: E402
+from _osm_tools.pbf_geojson import (  # noqa: E402
     DEFAULT_FORMAT,
     FORMAT_EXT,
     ConversionError,
@@ -45,8 +45,8 @@ from _lib.pbf_geojson import (  # noqa: E402
     is_up_to_date,
     pbf_abs_path,
 )
-from _lib import sidecar  # noqa: E402
-from _lib.pbf_geojson import NAMESPACE, SOURCE_CACHE_TYPE  # noqa: E402
+from _osm_tools import sidecar  # noqa: E402
+from _osm_tools.pbf_geojson import NAMESPACE, SOURCE_CACHE_TYPE  # noqa: E402
 
 DEFAULT_JOBS = 2
 
