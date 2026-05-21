@@ -6,14 +6,14 @@ import pytest
 
 from facetwork.parser import parse
 
-AFL_DIR = Path(__file__).resolve().parent.parent / "afl"
+AFL_DIR = Path(__file__).resolve().parent.parent / "ffl"
 
 # All routing FFL files that should compile
 AFL_FILES = sorted(AFL_DIR.glob("*.ffl"))
 
 # Dependency files needed for use statements
 DEPS_DIR = Path(__file__).resolve().parent.parent.parent
-TYPES_AFL = DEPS_DIR / "cache" / "afl" / "osmtypes.ffl"
+TYPES_AFL = DEPS_DIR / "cache" / "ffl" / "osmtypes.ffl"
 VIZ_AFL = list((DEPS_DIR / "visualization").rglob("*.ffl"))
 
 

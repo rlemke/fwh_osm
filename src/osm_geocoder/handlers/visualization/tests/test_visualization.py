@@ -316,7 +316,7 @@ class TestVisualizationHandlers:
 
         handler = _make_render_map_handler("RenderMap")
 
-        with patch("handlers.visualization_handlers.HAS_FOLIUM", False):
+        with patch("osm_geocoder.handlers.visualization.visualization_handlers.HAS_FOLIUM", False):
             result = handler(
                 {
                     "geojson_path": "/some/file.geojson",
@@ -364,7 +364,7 @@ class TestVisualizationHandlers:
 
         handler = _make_preview_map_handler("PreviewMap")
 
-        with patch("handlers.visualization_handlers.HAS_FOLIUM", False):
+        with patch("osm_geocoder.handlers.visualization.visualization_handlers.HAS_FOLIUM", False):
             result = handler({"geojson_path": "/some/file.geojson"})
 
         assert result["result"]["output_path"] == ""

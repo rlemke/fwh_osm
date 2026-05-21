@@ -36,6 +36,17 @@ requires_shapely = pytest.mark.skipif(not HAS_SHAPELY, reason="shapely not insta
 requires_osmium = pytest.mark.skipif(not HAS_OSMIUM, reason="pyosmium not installed")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_output_base(tmp_path, monkeypatch):
+    """Redirect the OSM output base to a tmp dir.
+
+    Filter handlers that don't take an explicit output directory resolve it
+    from ``AFL_OUTPUT_BASE`` (default ``/Volumes/afl_data/output``). Point it
+    at a per-test tmp dir so the suite never touches the real data volume.
+    """
+    monkeypatch.setenv("AFL_OUTPUT_BASE", str(tmp_path / "output"))
+
+
 class TestUnitConversion:
     """Tests for unit conversion functions."""
 
@@ -367,7 +378,7 @@ class TestFilterHandlers:
         handler = _make_radius_filter_handler("FilterByRadius")
 
         # Patch HAS_SHAPELY to False
-        with patch("handlers.filter_handlers.HAS_SHAPELY", False):
+        with patch("osm_geocoder.handlers.filters.filter_handlers.HAS_SHAPELY", False):
             result = handler(
                 {
                     "input_path": "/some/file.geojson",
@@ -387,7 +398,7 @@ class TestFilterHandlers:
 
         handler = _make_radius_range_handler("FilterByRadiusRange")
 
-        with patch("handlers.filter_handlers.HAS_SHAPELY", False):
+        with patch("osm_geocoder.handlers.filters.filter_handlers.HAS_SHAPELY", False):
             result = handler(
                 {
                     "input_path": "/some/file.geojson",
@@ -406,7 +417,7 @@ class TestFilterHandlers:
 
         handler = _make_type_and_radius_handler("FilterByTypeAndRadius")
 
-        with patch("handlers.filter_handlers.HAS_SHAPELY", False):
+        with patch("osm_geocoder.handlers.filters.filter_handlers.HAS_SHAPELY", False):
             result = handler(
                 {
                     "input_path": "/some/file.geojson",
@@ -706,7 +717,7 @@ class TestOSMTypeFilterHandlers:
 
         handler = _make_osm_type_filter_handler("FilterByOSMType")
 
-        with patch("handlers.filter_handlers.HAS_OSMIUM_TYPE", False):
+        with patch("osm_geocoder.handlers.filters.filter_handlers.HAS_OSMIUM_TYPE", False):
             result = handler(
                 {
                     "input_path": "/some/file.pbf",
@@ -725,7 +736,7 @@ class TestOSMTypeFilterHandlers:
 
         handler = _make_osm_tag_filter_handler("FilterByOSMTag")
 
-        with patch("handlers.filter_handlers.HAS_OSMIUM_TYPE", False):
+        with patch("osm_geocoder.handlers.filters.filter_handlers.HAS_OSMIUM_TYPE", False):
             result = handler(
                 {
                     "input_path": "/some/file.pbf",

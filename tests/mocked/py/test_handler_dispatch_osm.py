@@ -7,44 +7,33 @@ number of times.
 """
 
 import importlib
-import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-OSM_DIR = str(Path(__file__).resolve().parent.parent.parent.parent)
+import osm_geocoder.handlers as _H
+
+# .../src/osm_geocoder/handlers
+_HROOT = Path(_H.__file__).resolve().parent
+# .../src  (parents of the osm_geocoder package directory)
+_SRC = _HROOT.parent.parent
 
 
 def _osm_import(module_name: str):
-    """Import an OSM handlers submodule, ensuring correct sys.path."""
-    # Make sure OSM dir is first on path
-    if OSM_DIR in sys.path:
-        sys.path.remove(OSM_DIR)
-    sys.path.insert(0, OSM_DIR)
+    """Import an OSM handlers submodule by locating it under the package.
 
-    full_name = f"handlers.{module_name}"
-
-    # If module is already loaded from the right location, return it
-    if full_name in sys.modules:
-        mod = sys.modules[full_name]
-        mod_file = getattr(mod, "__file__", "")
-        if mod_file and "osm-geocoder" in mod_file:
-            return mod
-        # Wrong location, need to reload
-        del sys.modules[full_name]
-
-    # Ensure the handlers package itself is from OSM
-    if "handlers" in sys.modules:
-        pkg = sys.modules["handlers"]
-        pkg_file = getattr(pkg, "__file__", "")
-        if pkg_file and "osm-geocoder" not in pkg_file:
-            # Wrong package, clear all handlers modules
-            stale = [k for k in sys.modules if k == "handlers" or k.startswith("handlers.")]
-            for k in stale:
-                del sys.modules[k]
-
-    return importlib.import_module(full_name)
+    Modules now live under ``osm_geocoder/handlers/<subpkg>/<module>.py``.
+    Resolve the dotted path by filesystem search so the test does not need
+    to hard-code each subpackage.
+    """
+    if module_name == "__init__":
+        return importlib.import_module("osm_geocoder.handlers")
+    hits = [p for p in _HROOT.rglob(f"{module_name}.py") if "tests" not in p.parts]
+    if not hits:
+        raise ImportError(f"no osm handler module {module_name!r}")
+    dotted = ".".join(hits[0].relative_to(_SRC).with_suffix("").parts)
+    return importlib.import_module(dotted)
 
 
 class TestOsmParkHandlers:
@@ -115,7 +104,9 @@ class TestOsmFilterHandlers:
 class TestOsmRegionHandlers:
     def test_dispatch_keys(self):
         mod = _osm_import("region_handlers")
-        assert len(mod._DISPATCH) == 3
+        # Post cross-region migration: ListRegions, ResolveRegion,
+        # ResolveRegions, osm.cache.Download, osm.ops.CacheRegion.
+        assert len(mod._DISPATCH) == 5
         assert "osm.Region.ResolveRegion" in mod._DISPATCH
 
     def test_handle_dispatches(self):
@@ -203,52 +194,6 @@ class TestOsmAirqualityHandlers:
 
     def test_register_handlers(self):
         mod = _osm_import("airquality_handlers")
-        runner = MagicMock()
-        mod.register_handlers(runner)
-        assert runner.register_handler.call_count == len(mod._DISPATCH)
-
-
-class TestOsmOperationsHandlers:
-    def test_dispatch_keys(self):
-        mod = _osm_import("operations_handlers")
-        assert len(mod._DISPATCH) > 0
-
-    def test_handle_dispatches(self):
-        mod = _osm_import("operations_handlers")
-        facet = next(iter(mod._DISPATCH))
-        mock_cache = {
-            "url": "https://example.com/test.osm.pbf",
-            "path": "/tmp/test.osm.pbf",
-            "date": "2026-01-01",
-            "size": 100,
-            "wasInCache": True,
-            "source": "cache",
-        }
-        with patch(
-            "handlers.shared.pbf_cache.download_region",
-            side_effect=lambda region, **_: type(
-                "R",
-                (),
-                {
-                    "region": region,
-                    "path": mock_cache["path"],
-                    "relative_path": f"{region}-latest.osm.pbf",
-                    "source_url": mock_cache["url"],
-                    "size_bytes": mock_cache["size"],
-                    "sha256": "",
-                    "md5": "",
-                    "source_timestamp": None,
-                    "downloaded_at": mock_cache["date"],
-                    "was_cached": mock_cache["wasInCache"],
-                    "manifest_entry": {},
-                },
-            )(),
-        ):
-            result = mod.handle({"_facet_name": facet, "region": "TestRegion"})
-        assert isinstance(result, dict)
-
-    def test_register_handlers(self):
-        mod = _osm_import("operations_handlers")
         runner = MagicMock()
         mod.register_handlers(runner)
         assert runner.register_handler.call_count == len(mod._DISPATCH)
@@ -401,32 +346,6 @@ class TestOsmZoomHandlers:
 
     def test_register_handlers(self):
         mod = _osm_import("zoom_handlers")
-        runner = MagicMock()
-        mod.register_handlers(runner)
-        assert runner.register_handler.call_count == len(mod._DISPATCH)
-
-
-class TestOsmPostgisHandlers:
-    def test_dispatch_keys(self):
-        mod = _osm_import("postgis_handlers")
-        assert len(mod._DISPATCH) > 0
-        for key in mod._DISPATCH:
-            assert key.startswith("osm.ops.")
-
-    def test_handle_dispatches(self):
-        mod = _osm_import("postgis_handlers")
-        facet = next(iter(mod._DISPATCH))
-        result = mod.handle({"_facet_name": facet})
-        assert isinstance(result, dict)
-        assert "stats" in result
-
-    def test_handle_unknown_facet(self):
-        mod = _osm_import("postgis_handlers")
-        with pytest.raises(ValueError, match="Unknown facet"):
-            mod.handle({"_facet_name": "osm.ops.NonExistent"})
-
-    def test_register_handlers(self):
-        mod = _osm_import("postgis_handlers")
         runner = MagicMock()
         mod.register_handlers(runner)
         assert runner.register_handler.call_count == len(mod._DISPATCH)

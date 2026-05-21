@@ -77,7 +77,7 @@ class TestImportHandler:
         result = _handler({"output_path": "", "category": "parks", "region": "test"})
         assert result["imported_count"] == 0
 
-    @patch("handlers.db.osm_store.get_mongo_db")
+    @patch("osm_geocoder.handlers.db.osm_store.get_mongo_db")
     def test_import_geojson(self, mock_get_db, geojson_file):
         path, features = geojson_file
 
@@ -104,7 +104,7 @@ class TestImportHandler:
         assert result["collection"] == "osm_features"
         assert mock_coll.bulk_write.called
 
-    @patch("handlers.db.osm_store.get_mongo_db")
+    @patch("osm_geocoder.handlers.db.osm_store.get_mongo_db")
     def test_import_empty_geojson(self, mock_get_db, empty_geojson_file):
         mock_db = MagicMock()
         mock_coll = MagicMock()
@@ -127,7 +127,7 @@ class TestImportHandler:
         assert result["imported_count"] == 0
         assert result["dataset_key"] == "osm.parks.delaware"
 
-    @patch("handlers.db.osm_store.get_mongo_db")
+    @patch("osm_geocoder.handlers.db.osm_store.get_mongo_db")
     def test_step_log_called(self, mock_get_db, geojson_file):
         path, _ = geojson_file
 
@@ -152,7 +152,7 @@ class TestImportHandler:
 
         assert step_log.call_count >= 2  # start + success
 
-    @patch("handlers.db.osm_store.get_mongo_db")
+    @patch("osm_geocoder.handlers.db.osm_store.get_mongo_db")
     def test_dataset_key_no_category(self, mock_get_db, geojson_file):
         path, _ = geojson_file
 
@@ -176,7 +176,7 @@ class TestImportHandler:
 
 
 class TestOsmStore:
-    @patch("handlers.db.osm_store.get_mongo_db")
+    @patch("osm_geocoder.handlers.db.osm_store.get_mongo_db")
     def test_import_geojson_batching(self, mock_get_db, geojson_file):
         """Verify bulk_write is called with correct batch sizes."""
         path, features = geojson_file
@@ -211,7 +211,7 @@ class TestOsmStore:
 
         assert mock_coll.create_index.call_count == 3
 
-    @patch("handlers.db.osm_store.get_mongo_db")
+    @patch("osm_geocoder.handlers.db.osm_store.get_mongo_db")
     def test_metadata_written(self, mock_get_db, geojson_file):
         path, _ = geojson_file
 

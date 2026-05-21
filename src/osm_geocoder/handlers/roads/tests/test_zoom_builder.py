@@ -58,6 +58,17 @@ from osm_geocoder.handlers.roads.zoom_selection import (
 requires_h3 = pytest.mark.skipif(not HAS_H3, reason="h3 not installed")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_output_base(tmp_path, monkeypatch):
+    """Redirect the OSM output base to a tmp dir.
+
+    The zoom-builder handlers resolve their output directory from
+    ``AFL_OUTPUT_BASE`` (default ``/Volumes/afl_data/output``). Point it at a
+    per-test tmp dir so the suite never touches the real data volume.
+    """
+    monkeypatch.setenv("AFL_OUTPUT_BASE", str(tmp_path / "output"))
+
+
 def _make_edge(
     edge_id,
     from_node,
@@ -738,7 +749,7 @@ class TestHandlerFactories:
     def test_build_logical_graph_no_osmium(self):
         """BuildLogicalGraph returns empty when no osmium."""
         handler = _make_build_logical_graph_handler("BuildLogicalGraph")
-        with patch("handlers.zoom_handlers.HAS_OSMIUM", False):
+        with patch("osm_geocoder.handlers.roads.zoom_handlers.HAS_OSMIUM", False):
             result = handler({"cache": {"path": "/tmp/test.pbf"}})
             assert result["edge_count"] == 0
             assert result["graph_path"] == ""
@@ -798,7 +809,7 @@ class TestHandlerFactories:
     def test_build_zoom_layers_no_osmium(self):
         """BuildZoomLayers returns empty result when no osmium."""
         handler = _make_build_zoom_layers_handler("BuildZoomLayers")
-        with patch("handlers.zoom_builder.HAS_OSMIUM", False):
+        with patch("osm_geocoder.handlers.roads.zoom_builder.HAS_OSMIUM", False):
             result = handler({"cache": {"path": "/tmp/test.pbf"}, "graph": {}})
             assert result["result"]["total_logical_edges"] == 0
             assert result["metrics"]["total_logical_edges"] == 0

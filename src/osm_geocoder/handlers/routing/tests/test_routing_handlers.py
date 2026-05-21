@@ -25,7 +25,7 @@ class TestAPIRouterDispatch:
         """Route handler should return estimate when APIs are unavailable."""
         from osm_geocoder.handlers.routing.api_router import _handle_route
 
-        with patch("handlers.routing.api_router._output_dir", return_value=str(tmp_path)):
+        with patch("osm_geocoder.handlers.routing.api_router._output_dir", return_value=str(tmp_path)):
             result = _handle_route({
                 "from_lat": 48.8566,
                 "from_lon": 2.3522,
@@ -61,7 +61,7 @@ class TestAPIRouterDispatch:
             {"lon": 4.9041, "lat": 52.3676, "name": "Amsterdam"},
         ])
 
-        with patch("handlers.routing.api_router._output_dir", return_value=str(tmp_path)):
+        with patch("osm_geocoder.handlers.routing.api_router._output_dir", return_value=str(tmp_path)):
             result = _handle_multi_stop({
                 "waypoints": waypoints,
                 "profile": "car",
@@ -77,7 +77,7 @@ class TestAPIRouterDispatch:
         """MultiStopRoute should parse 'lon,lat;lon,lat' format."""
         from osm_geocoder.handlers.routing.api_router import _handle_multi_stop
 
-        with patch("handlers.routing.api_router._output_dir", return_value=str(tmp_path)):
+        with patch("osm_geocoder.handlers.routing.api_router._output_dir", return_value=str(tmp_path)):
             result = _handle_multi_stop({
                 "waypoints": "2.3522,48.8566;4.3517,50.8503",
                 "profile": "car",
@@ -89,7 +89,7 @@ class TestAPIRouterDispatch:
         """MultiStopRoute with < 2 waypoints returns empty result."""
         from osm_geocoder.handlers.routing.api_router import _handle_multi_stop
 
-        with patch("handlers.routing.api_router._output_dir", return_value=str(tmp_path)):
+        with patch("osm_geocoder.handlers.routing.api_router._output_dir", return_value=str(tmp_path)):
             result = _handle_multi_stop({
                 "waypoints": json.dumps([{"lon": 0, "lat": 0}]),
                 "profile": "car",
@@ -101,7 +101,7 @@ class TestAPIRouterDispatch:
         """Isochrone should produce a polygon estimate when no API is available."""
         from osm_geocoder.handlers.routing.api_router import _handle_isochrone
 
-        with patch("handlers.routing.api_router._output_dir", return_value=str(tmp_path)):
+        with patch("osm_geocoder.handlers.routing.api_router._output_dir", return_value=str(tmp_path)):
             result = _handle_isochrone({
                 "center_lat": 48.8566,
                 "center_lon": 2.3522,
@@ -138,7 +138,7 @@ class TestOSRMRouterDispatch:
         """OSRM route should fall back to estimate when server is unavailable."""
         from osm_geocoder.handlers.routing.osrm_router import _handle_route
 
-        with patch("handlers.routing.osrm_router._output_dir", return_value=str(tmp_path)):
+        with patch("osm_geocoder.handlers.routing.osrm_router._output_dir", return_value=str(tmp_path)):
             result = _handle_route({
                 "from_lat": 48.8566,
                 "from_lon": 2.3522,
@@ -161,7 +161,7 @@ class TestOSRMRouterDispatch:
             {"lon": 4.3517, "lat": 50.8503, "name": "Brussels"},
         ])
 
-        with patch("handlers.routing.osrm_router._output_dir", return_value=str(tmp_path)):
+        with patch("osm_geocoder.handlers.routing.osrm_router._output_dir", return_value=str(tmp_path)):
             result = _handle_multi_stop({
                 "waypoints": waypoints,
                 "profile": "car",

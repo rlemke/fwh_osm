@@ -13,6 +13,20 @@ import pytest
 
 from ..plugin_base import ElementType, TagInterest
 
+
+@pytest.fixture(autouse=True)
+def _isolate_output_base(tmp_path, monkeypatch):
+    """Redirect the OSM output base to a tmp dir.
+
+    The GeoJSON stream writer stages its atomic temp file under
+    ``get_temp_dir()`` (``AFL_OUTPUT_BASE/tmp``, default
+    ``/Volumes/afl_data/output/tmp``). Point the base at a per-test tmp dir so
+    the suite never touches the real data volume even though finalize() is
+    given an explicit output directory.
+    """
+    monkeypatch.setenv("AFL_OUTPUT_BASE", str(tmp_path / "output"))
+
+
 # ── TagInterest tests ────────────────────────────────────────────────
 
 

@@ -30,6 +30,19 @@ from osm_geocoder.handlers.voting.tiger_handlers import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_output_base(tmp_path, monkeypatch):
+    """Redirect the OSM output base to a tmp dir.
+
+    The district-filter handler resolves its output directory from
+    ``AFL_OUTPUT_BASE`` (default ``/Volumes/afl_data/output``). Point it at a
+    per-test tmp dir so the suite never touches the real data volume.  (The
+    ``/Volumes/...`` strings elsewhere in this file are mocked download return
+    values, not real writes, and are unaffected.)
+    """
+    monkeypatch.setenv("AFL_OUTPUT_BASE", str(tmp_path / "output"))
+
+
 class TestStateFIPSResolution:
     """Tests for resolve_state_fips()."""
 
@@ -161,7 +174,7 @@ class TestTigerHandlers:
 
         handler = _make_congressional_handler("CongressionalDistricts")
 
-        with patch("handlers.tiger_handlers.download_congressional_districts") as mock_dl:
+        with patch("osm_geocoder.handlers.voting.tiger_handlers.download_congressional_districts") as mock_dl:
             mock_dl.return_value = {
                 "url": "https://example.com/cd.zip",
                 "path": "/Volumes/afl_data/output/census/tiger-cache/cd.zip",
@@ -185,7 +198,7 @@ class TestTigerHandlers:
 
         handler = _make_state_senate_handler("StateSenateDistricts")
 
-        with patch("handlers.tiger_handlers.download_state_senate_districts") as mock_dl:
+        with patch("osm_geocoder.handlers.voting.tiger_handlers.download_state_senate_districts") as mock_dl:
             mock_dl.return_value = {
                 "url": "https://example.com/sldu.zip",
                 "path": "/Volumes/afl_data/output/census/tiger-cache/sldu.zip",
@@ -208,7 +221,7 @@ class TestTigerHandlers:
 
         handler = _make_voting_precincts_handler("VotingPrecincts")
 
-        with patch("handlers.tiger_handlers.download_voting_precincts") as mock_dl:
+        with patch("osm_geocoder.handlers.voting.tiger_handlers.download_voting_precincts") as mock_dl:
             mock_dl.side_effect = Exception("Network error")
 
             result = handler({"state": "CA", "year": 2020})
