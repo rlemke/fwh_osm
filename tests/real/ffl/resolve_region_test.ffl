@@ -10,23 +10,27 @@ namespace test.region {
     use osm.types
     use osm.Region
 
-    /** Resolves a geographic name to its Geofabrik download path and metadata. */
+    /** Resolves a geographic name to its Geofabrik download path and metadata.
+     *
+     *  ResolveRegion now yields a single `region: Region` (the legacy
+     *  `(cache, resolution)` shape was retired in the cross-region migration),
+     *  so the workflow maps its outputs from `resolved.region.*`. The output
+     *  field names are kept (`matched_name`, `continent`, `geofabrik_path`)
+     *  for the test assertions; `matched_name` maps to `region.name`. */
     workflow ResolveRegionTest(
         name: String,
         prefer_continent: String = ""
     ) => (
         matched_name: String,
         continent: String,
-        geofabrik_path: String,
-        is_ambiguous: Boolean
+        geofabrik_path: String
     ) andThen {
         resolved = ResolveRegion(name = $.name, prefer_continent = $.prefer_continent)
 
         yield ResolveRegionTest(
-            matched_name = resolved.resolution.matched_name,
-            continent = resolved.resolution.continent,
-            geofabrik_path = resolved.resolution.geofabrik_path,
-            is_ambiguous = resolved.resolution.is_ambiguous
+            matched_name = resolved.region.name,
+            continent = resolved.region.continent,
+            geofabrik_path = resolved.region.geofabrik_path
         )
     }
 }

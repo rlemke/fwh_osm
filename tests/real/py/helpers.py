@@ -21,10 +21,11 @@ from facetwork.validator import validate
 
 # Paths
 _EXAMPLE_ROOT = Path(__file__).parent.parent.parent.parent
-EXAMPLE_AFL_DIR = _EXAMPLE_ROOT / "afl"  # root afl/ (geocoder.afl)
-INTEGRATION_AFL_DIR = Path(__file__).parent.parent / "afl"
+# Integration FFL fixtures live under tests/real/ffl/ (the directory was
+# renamed afl/ -> ffl/ during the migration).
+INTEGRATION_AFL_DIR = Path(__file__).parent.parent / "ffl"
 
-# All FFL files indexed by filename (root afl/ + handlers/*/ffl/)
+# All FFL files indexed by filename (handlers/*/ffl/ across the package)
 EXAMPLE_AFL_FILES: dict[str, Path] = {}
 for _p in sorted(_EXAMPLE_ROOT.rglob("*.ffl")):
     if "/tests/" not in str(_p):

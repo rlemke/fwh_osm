@@ -12,9 +12,6 @@ Run:
     pytest tests/real/py/test_population_pipeline.py -v --mongodb
 """
 
-import sys
-from pathlib import Path
-
 import pytest
 from helpers import (
     EXAMPLE_AFL_FILES,
@@ -26,10 +23,8 @@ from helpers import (
 
 from facetwork.runtime import ExecutionStatus
 
-# Legacy sys.path manipulation: the package is now installed via pyproject.toml,
-_EXAMPLE_ROOT = Path(__file__).parent.parent.parent.parent
-if str(_EXAMPLE_ROOT) not in sys.path:
-    sys.path.insert(0, str(_EXAMPLE_ROOT))
+# The package is installed via pyproject.toml, so handlers import
+# package-qualified (osm_geocoder.handlers.*) — no sys.path manipulation needed.
 
 
 # Skip if osmium not available
@@ -55,6 +50,7 @@ def _compile_population_pipeline():
         INTEGRATION_AFL_DIR / "population_pipeline.ffl",
         EXAMPLE_AFL_FILES["osmtypes.ffl"],
         EXAMPLE_AFL_FILES["osmregion.ffl"],
+        EXAMPLE_AFL_FILES["osmcache_download.ffl"],
         EXAMPLE_AFL_FILES["osmfilters_population.ffl"],
     )
 

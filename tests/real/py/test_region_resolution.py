@@ -10,9 +10,6 @@ Run:
     pytest tests/real/py/test_region_resolution.py -v --mongodb
 """
 
-import sys
-from pathlib import Path
-
 from helpers import (
     EXAMPLE_AFL_FILES,
     INTEGRATION_AFL_DIR,
@@ -23,64 +20,33 @@ from helpers import (
 
 from facetwork.runtime import ExecutionStatus
 
-# Legacy sys.path manipulation: the package is now installed via pyproject.toml,
-_EXAMPLE_ROOT = Path(__file__).parent.parent.parent.parent
-if str(_EXAMPLE_ROOT) not in sys.path:
-    sys.path.insert(0, str(_EXAMPLE_ROOT))
-
-from osm_geocoder.handlers.shared.region_resolver import resolve  # noqa: E402
+# The package is installed via pyproject.toml, so handlers import
+# package-qualified — no sys.path manipulation needed.
+from osm_geocoder.handlers.shared.region_resolver import (  # noqa: E402
+    region_from_path,
+    resolve_batch,
+)
 
 
 def _resolve_region_handler(params: dict) -> dict:
-    """Handle ResolveRegion using the real resolver but mock cache data.
+    """Handle ResolveRegion using the real resolver, returning a typed Region.
 
-    Calls the real region_resolver.resolve() for accurate name matching,
-    but returns synthetic cache data instead of downloading from Geofabrik.
+    Mirrors the real ``osm.Region.ResolveRegion`` handler
+    (``cache/region_handlers.py::handle_resolve_region``): it runs the batch
+    resolver for accurate qualifier-suffix / continent matching and returns
+    ``{"region": <Region dict>}`` — the modern single-output contract. The
+    legacy ``(cache, resolution)`` shape has been retired. No network I/O.
     """
     name = params["name"]
     prefer_continent = params.get("prefer_continent", "") or None
 
-    result = resolve(name, prefer_continent=prefer_continent)
+    result = resolve_batch(names=[name], prefer_continent=prefer_continent, strict=False)
 
-    if not result.matches:
-        return {
-            "cache": {
-                "url": "",
-                "path": "",
-                "date": "",
-                "size": 0,
-                "wasInCache": False,
-            },
-            "resolution": {
-                "query": name,
-                "matched_name": "",
-                "region_namespace": "",
-                "continent": "",
-                "geofabrik_path": "",
-                "is_ambiguous": False,
-                "disambiguation": f"No region found for '{name}'",
-            },
-        }
+    if not result.regions:
+        # No match — return an all-empty Region (matches the real handler).
+        return {"region": region_from_path("", query=name).to_dict()}
 
-    best = result.matches[0]
-    return {
-        "cache": {
-            "url": f"https://download.geofabrik.de/{best.geofabrik_path}-latest.osm.pbf",
-            "path": f"/tmp/osm-cache/{best.geofabrik_path}-latest.osm.pbf",
-            "date": "2026-01-01T00:00:00",
-            "size": 1024000,
-            "wasInCache": True,
-        },
-        "resolution": {
-            "query": name,
-            "matched_name": best.facet_name,
-            "region_namespace": best.namespace,
-            "continent": best.continent,
-            "geofabrik_path": best.geofabrik_path,
-            "is_ambiguous": result.is_ambiguous,
-            "disambiguation": result.disambiguation,
-        },
-    }
+    return {"region": result.regions[0].to_dict()}
 
 
 def _compile_region_test():

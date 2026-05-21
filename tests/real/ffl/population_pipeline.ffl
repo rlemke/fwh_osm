@@ -1,17 +1,24 @@
 // Population pipeline integration test workflow
 //
-// A 4-step pipeline: ResolveRegion -> ExtractPlacesWithPopulation ->
+// A 5-step pipeline: ResolveRegion -> Download -> ExtractPlacesWithPopulation ->
 // FilterByPopulationRange -> PopulationStatistics
 //
-// Prerequisites: Compile with osmtypes.afl, osmregion.afl, osmfilters_population.afl
+// ResolveRegion now yields a single `region: Region` (the legacy
+// `(cache, resolution)` shape was retired in the cross-region migration), so
+// the download is an explicit `osm.cache.Download(region = resolved.region)`
+// step and the region name comes from `resolved.region.name`.
+//
+// Prerequisites: Compile with osmtypes.afl, osmregion.afl,
+//   osmcache_download.afl, osmfilters_population.afl
 
 /** Integration test for the end-to-end population analysis pipeline. */
 namespace test.population {
     use osm.types
     use osm.Region
+    use osm.cache
     use osm.Population
 
-    /** Resolves a region, extracts cities, filters by population range, and computes statistics. */
+    /** Resolves a region, downloads its extract, extracts cities, filters by population range, and computes statistics. */
     workflow PopulationPipeline(
         region: String,
         min_population: Long = 0,
@@ -24,31 +31,34 @@ namespace test.population {
         total_population: Long,
         avg_population: Long
     ) andThen {
-        // 1. Resolve region name to download URL
+        // 1. Resolve region name to a typed Region
         resolved = ResolveRegion(name = $.region, prefer_continent = $.prefer_continent)
 
-        // 2. Extract all cities with population from the OSM data
+        // 2. Download (or reuse cached) the Geofabrik PBF for the region
+        cached = osm.cache.Download(region = resolved.region)
+
+        // 3. Extract all cities with population from the OSM data
         cities = ExtractPlacesWithPopulation(
-            cache = resolved.cache,
+            cache = cached.cache,
             place_type = "city",
             min_population = $.min_population
         )
 
-        // 3. Filter to the desired population range
+        // 4. Filter to the desired population range
         filtered = FilterByPopulationRange(
             input_path = cities.result.output_path,
             min_population = $.min_population,
             max_population = $.max_population
         )
 
-        // 4. Get population statistics for the filtered set
+        // 5. Get population statistics for the filtered set
         stats = PopulationStatistics(
             input_path = filtered.result.output_path,
             place_type = "city"
         )
 
         yield PopulationPipeline(
-            region_name = resolved.resolution.matched_name,
+            region_name = resolved.region.name,
             feature_count = filtered.result.feature_count,
             total_places = stats.stats.total_places,
             total_population = stats.stats.total_population,

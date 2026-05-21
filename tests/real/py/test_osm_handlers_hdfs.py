@@ -19,10 +19,21 @@ from facetwork.runtime.storage import (
     LocalStorageBackend,
     get_storage_backend,
 )
-from tests.hdfs_helpers import WebHDFSClient, hdfs, workdir  # noqa: F401, F811
 
-# Skip entire module unless --hdfs is passed
+# Skip entire module unless --hdfs is passed.
 pytestmark = pytest.mark.skipif("not config.getoption('--hdfs')")
+
+# ``tests.hdfs_helpers`` only exists in the live-HDFS harness; importing it at
+# module scope would break offline collection (no --hdfs). It defines the
+# ``hdfs`` and ``workdir`` pytest fixtures plus ``WebHDFSClient``. Import it
+# lazily — only when --hdfs is actually requested — and re-export its fixtures
+# into this module's namespace so pytest can resolve them as test fixtures.
+if any("--hdfs" in str(a) for a in __import__("sys").argv):  # pragma: no cover
+    from tests.hdfs_helpers import (  # noqa: F401
+        WebHDFSClient,
+        hdfs,
+        workdir,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +46,7 @@ class TestStorageBackendHDFSSelection:
 
     def setup_method(self):
         """Reset backend caches between tests."""
-        import afl.runtime.storage as _mod
+        import facetwork.runtime.storage as _mod
 
         _mod._hdfs_backends.clear()
         _mod._local_backend = None
