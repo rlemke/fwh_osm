@@ -16,7 +16,7 @@ from pathlib import Path
 
 from facetwork.runtime.storage import get_storage_backend
 
-from ..shared._output import open_output, uri_stem
+from ..shared._output import ensure_dir, open_output, resolve_output_dir, uri_stem
 
 _storage = get_storage_backend()
 
@@ -218,6 +218,105 @@ def _haversine_length(coords: list) -> float:
         total += R * c
 
     return total
+
+
+def extract_roads(
+    pbf_path: str | Path,
+    road_class: str = "all",
+    output_path: str | Path | None = None,
+    heartbeat=None,
+    task_uuid: str = "",
+) -> RoadFeatures:
+    """Extract highway ways from a PBF as GeoJSON LineStrings.
+
+    Iterates ways carrying a ``highway`` tag, builds geometry via osmium's
+    ``WKBFactory``, classifies each via :func:`classify_road`, and — unless
+    ``road_class == "all"`` — keeps only the requested class (e.g.
+    ``"motorway"``). Every OSM tag is preserved as a feature property —
+    including ``ref`` (route numbers like ``I 5``) and ``name`` — plus a derived
+    ``road_class``. Streams to a temp file then moves into place (multi-GB safe).
+    """
+    import os
+    import shutil
+    import tempfile
+
+    import osmium
+    from shapely import wkb as shapely_wkb
+    from shapely.geometry import mapping as shapely_mapping
+
+    from facetwork.config import get_temp_dir
+    from facetwork.runtime.storage import localize
+
+    from ..shared.geojson_writer import GeoJSONStreamWriter
+
+    pbf_path = str(pbf_path)
+    if output_path is None:
+        out_dir = resolve_output_dir("osm-roads")
+        output_path_str = f"{out_dir}/{uri_stem(pbf_path)}_roads_{road_class}.geojson"
+    else:
+        output_path_str = str(output_path)
+    ensure_dir(output_path_str)
+
+    local_pbf = localize(pbf_path)
+    wkbfab = osmium.geom.WKBFactory()
+
+    class _RoadHandler(osmium.SimpleHandler):
+        def __init__(self, writer):
+            super().__init__()
+            self.writer = writer
+            self.original = 0
+            self.kept = 0
+            self.length_km = 0.0
+            self.with_speed = 0
+
+        def way(self, w) -> None:
+            tags = {t.k: t.v for t in w.tags}
+            if "highway" not in tags:
+                return
+            self.original += 1
+            rc = classify_road(tags)
+            if road_class != "all" and rc != road_class:
+                return
+            try:
+                geom = shapely_mapping(
+                    shapely_wkb.loads(wkbfab.create_linestring(w), hex=True)
+                )
+            except Exception:
+                return  # incomplete geometry (missing nodes) — skip
+            props = dict(tags)
+            props["osm_id"] = w.id
+            props["road_class"] = rc
+            self.writer.write_feature(
+                {"type": "Feature", "properties": props, "geometry": geom}
+            )
+            self.kept += 1
+            self.length_km += calculate_line_length(geom)
+            if "maxspeed" in tags:
+                self.with_speed += 1
+            if heartbeat and self.kept % 5000 == 0:
+                heartbeat()
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".geojson", dir=get_temp_dir())
+    os.close(tmp_fd)
+    try:
+        with GeoJSONStreamWriter(tmp_path) as writer:
+            handler = _RoadHandler(writer)
+            handler.apply_file(local_pbf, locations=True, idx="flex_mem")
+        ensure_dir(output_path_str)
+        shutil.move(tmp_path, output_path_str)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    return RoadFeatures(
+        output_path=output_path_str,
+        feature_count=handler.kept,
+        road_class=road_class,
+        total_length_km=round(handler.length_km, 2),
+        with_speed_limit=handler.with_speed,
+        extraction_date=datetime.now(UTC).isoformat(),
+    )
 
 
 def calculate_road_stats(input_path: str | Path) -> RoadStats:
