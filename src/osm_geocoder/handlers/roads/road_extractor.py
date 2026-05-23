@@ -241,11 +241,10 @@ def extract_roads(
     import tempfile
 
     import osmium
-    from shapely import wkb as shapely_wkb
-    from shapely.geometry import mapping as shapely_mapping
-
     from facetwork.config import get_temp_dir
     from facetwork.runtime.storage import localize
+    from shapely import wkb as shapely_wkb
+    from shapely.geometry import mapping as shapely_mapping
 
     from ..shared.geojson_writer import GeoJSONStreamWriter
 
