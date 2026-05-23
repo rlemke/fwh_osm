@@ -1,8 +1,11 @@
 """Standalone HTTP downloader with filesystem caching for OSM data.
 
-Downloads .osm.pbf files from Geofabrik and caches them locally.
+Downloads .osm.pbf files from Geofabrik and caches them under the unified
+data root (``$AFL_DATA_ROOT/cache/osm`` — the same sidecar-cache root the
+``osm.cache.Download`` / pbf_cache handlers use; see
+agent-spec/cache-layout.agent-spec.yaml).
 Also provides a generic download_url() for fetching any URL to any path
-(local or HDFS).  No Facetwork dependencies — can be used independently.
+(local or HDFS).
 
 Concurrent access is safe: per-path locks prevent duplicate downloads when
 multiple threads request the same file, and atomic temp-file renames ensure
@@ -12,18 +15,31 @@ the cache file is always either absent or complete (never partial).
 import logging
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 from datetime import UTC, datetime
+from pathlib import Path
 
 import requests
 
-from facetwork.config import get_output_base
 from facetwork.runtime.storage import get_storage_backend
+
+# Reach the shared OSM tool library so the cache resolves to the canonical
+# sidecar-cache root (AFL_DATA_ROOT/cache), identical to what the
+# osm.cache.Download / pbf_cache handlers use. Mirrors the shim in pbf_cache.py.
+_TOOLS_ROOT = Path(__file__).resolve().parents[2] / "tools"
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
+from _osm_tools.storage import cache_root  # noqa: E402
 
 log = logging.getLogger(__name__)
 
-CACHE_DIR = os.environ.get("AFL_CACHE_DIR", os.path.join(get_output_base(), "cache", "osm"))
+# OSM PBF download cache under the unified data root:
+#   $AFL_DATA_ROOT/cache/osm   (default: /Volumes/afl_data/cache/osm)
+# Override the whole cache root with AFL_CACHE_ROOT, or switch backend with
+# AFL_STORAGE=hdfs. The legacy AFL_CACHE_DIR is no longer consulted.
+CACHE_DIR = os.path.join(cache_root(), "osm")
 _storage = get_storage_backend(CACHE_DIR)
 GEOFABRIK_BASE = "https://download.geofabrik.de"
 GEOFABRIK_MIRROR = os.environ.get("AFL_GEOFABRIK_MIRROR", "/Volumes/afl_data/osm")
