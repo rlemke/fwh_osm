@@ -76,7 +76,7 @@ REGION_REGISTRY = {
 }
 ```
 
-Each handler calls the `download()` function from `handlers/downloader.py` with the region's Geofabrik path:
+Each handler calls `download_region()` from the OSM tool library (`tools/_osm_tools/pbf_download.py`) with the region's Geofabrik path:
 
 ```python
 def _make_handler(region_path: str):
@@ -127,9 +127,9 @@ Downloaded files are stored under the system temp directory:
 └── ...
 ```
 
-The cache is keyed by region path and format. A file is considered cached if it exists on disk — there is no TTL or expiration. To force a re-download, delete the local file.
+The cache is keyed by region path. A file is considered up-to-date when its `.meta.json` sidecar's stored MD5 matches Geofabrik's current `<file>.md5` and the artifact is intact; otherwise it is re-downloaded. Pass `force=True` (or delete the file) to force a re-download.
 
-Concurrent downloads of the same file are safe — the downloader uses per-path locks and atomic temp-file writes so the cache file is always either absent or complete. See [downloads README](../downloads/README.md) for full details on the mirror and concurrency mechanisms.
+Concurrent downloads of the same region are safe — the PBF downloader uses per-region locks and atomic staging-then-finalize, so the cache file is always either absent or complete.
 
 ## Geofabrik URL mapping
 

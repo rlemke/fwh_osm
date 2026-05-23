@@ -78,21 +78,12 @@ Shapefile URL:      https://download.geofabrik.de/europe/albania-latest.free.shp
 
 ## Downloader API
 
-The `handlers/downloader.py` module supports both formats through a `fmt` parameter:
-
-```python
-from handlers.downloader import download, geofabrik_url, cache_path
-
-# PBF (default)
-download("europe/albania")
-geofabrik_url("europe/albania")          # .../albania-latest.osm.pbf
-cache_path("europe/albania")             # /tmp/osm-cache/europe/albania-latest.osm.pbf
-
-# Shapefile
-download("europe/albania", fmt="shp")
-geofabrik_url("europe/albania", fmt="shp")  # .../albania-latest.free.shp.zip
-cache_path("europe/albania", fmt="shp")     # /tmp/osm-cache/europe/albania-latest.free.shp.zip
-```
+The legacy shared `handlers/downloader.py` (a single `download()` with a `fmt`
+parameter for PBF/shapefile) has been **removed**. OSM PBF downloads now go
+through the tool library `tools/_osm_tools/pbf_download.py`
+(`download_region()`), which caches with MD5-based freshness and `.meta.json`
+sidecars under `$AFL_DATA_ROOT/cache/osm/`. PBF→shapefile conversion lives in
+`tools/_osm_tools/pbf_shapefile.py`.
 
 The `FORMAT_EXTENSIONS` dict maps format keys to file extensions:
 
@@ -128,10 +119,7 @@ To add shapefile downloads for another region (e.g. Africa):
 
 ## Tests
 
-Shapefile-specific tests are in `test_downloader.py`:
-
-```bash
-PYTHONPATH=. python -m pytest examples/osm-geocoder/test_downloader.py -v -k shapefile
-```
+The legacy `test_downloader.py` was removed with the shared downloader. Run the
+package suite with `pytest src/osm_geocoder/handlers tests/mocked`.
 
 Tests cover URL generation, cache path construction, cache hits, cache misses, and correct URL requests for the shapefile format.
