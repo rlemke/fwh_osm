@@ -63,4 +63,11 @@ namespace osm.Filters {
     /** Filters pre-extracted GeoJSON by OSM type stored in feature properties. */
     event facet FilterGeoJSONByOSMType(input_path: String, osm_type: String,
         tag_key: String = "", tag_value: String = "*") => (result: OSMFilteredFeatures)
+
+    /** Filters pre-extracted GeoJSON to features whose tag value starts with a
+        prefix. Complements FilterByOSMTag (exact match): a prefix on the `ref`
+        tag selects a route family, e.g. tag_key="ref", value_prefix="I " keeps
+        Interstate freeways (I 5, I 80) and drops US/state routes (US 101, CA 1). */
+    event facet FilterGeoJSONByTagPrefix(input_path: String, tag_key: String,
+        value_prefix: String) => (result: OSMFilteredFeatures)
 }

@@ -476,6 +476,78 @@ def filter_geojson_by_osm_type(
     )
 
 
+def filter_geojson_by_tag_prefix(
+    input_path: str | Path,
+    tag_key: str,
+    value_prefix: str,
+    output_path: str | Path | None = None,
+    heartbeat: callable | None = None,
+    task_uuid: str = "",
+) -> OSMFilteredFeatures:
+    """Filter a GeoJSON file to features whose ``tag_key`` property value
+    starts with ``value_prefix``.
+
+    Complements :func:`filter_geojson_by_osm_type`, which matches a tag value
+    *exactly*. Prefix matching selects route families by their ``ref`` tag —
+    e.g. ``tag_key="ref", value_prefix="I "`` keeps Interstate freeways
+    (``I 5``, ``I 80``) while dropping US/state routes (``US 101``, ``CA 1``).
+
+    Args:
+        input_path: Path to the input GeoJSON file.
+        tag_key: Feature property to match (e.g. ``"ref"``).
+        value_prefix: Required prefix of ``properties[tag_key]``.
+        output_path: Output GeoJSON path (default: adds a ``_filtered`` suffix).
+        heartbeat: Optional progress callback for long streams.
+
+    Returns:
+        OSMFilteredFeatures with the output path and matched/original counts.
+    """
+    import os
+    import shutil
+    import tempfile
+
+    from facetwork.config import get_temp_dir
+
+    from ..shared.geojson_writer import GeoJSONStreamWriter, iter_geojson_features
+
+    input_path = str(input_path)
+    if output_path is None:
+        out_dir = resolve_output_dir("osm-filtered")
+        output_path_str = f"{out_dir}/{uri_stem(input_path)}_filtered.geojson"
+    else:
+        output_path_str = str(output_path)
+    ensure_dir(output_path_str)
+
+    # Stream features (multi-GB safe) to a local temp file, then move into place.
+    local_path = localize(input_path)
+    original_count = 0
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".geojson", dir=get_temp_dir())
+    os.close(tmp_fd)
+    try:
+        with GeoJSONStreamWriter(tmp_path) as writer:
+            for feature in iter_geojson_features(local_path, heartbeat):
+                original_count += 1
+                value = feature.get("properties", {}).get(tag_key)
+                if isinstance(value, str) and value.startswith(value_prefix):
+                    writer.write_feature(feature)
+        ensure_dir(output_path_str)
+        shutil.move(tmp_path, output_path_str)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    return OSMFilteredFeatures(
+        output_path=output_path_str,
+        feature_count=writer.feature_count,
+        original_count=original_count,
+        osm_type="*",
+        filter_applied=f"{tag_key} startswith {value_prefix!r}",
+        dependencies_included=False,
+        extraction_date=datetime.now(UTC).isoformat(),
+    )
+
+
 def _describe_osm_filter(
     osm_type: OSMType,
     tag_key: str | None,

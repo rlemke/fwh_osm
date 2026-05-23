@@ -17,6 +17,7 @@ from .osm_type_filter import (
 from .osm_type_filter import (
     OSMFilteredFeatures,
     filter_geojson_by_osm_type,
+    filter_geojson_by_tag_prefix,
     filter_pbf_by_type,
 )
 from .radius_filter import (
@@ -611,6 +612,75 @@ def _make_geojson_osm_type_filter_handler(facet_name: str):
     return handler
 
 
+def _make_geojson_tag_prefix_filter_handler(facet_name: str):
+    """Create a handler for the FilterGeoJSONByTagPrefix event facet.
+
+    Keeps GeoJSON features whose ``tag_key`` property starts with
+    ``value_prefix`` (e.g. ``ref`` -> ``"I "`` for Interstate freeways).
+    """
+    qualified = f"{NAMESPACE}.{facet_name}"
+
+    def handler(payload: dict) -> dict:
+        input_path = payload.get("input_path", "")
+        tag_key = payload.get("tag_key", "")
+        value_prefix = payload.get("value_prefix", "")
+        step_log = payload.get("_step_log")
+
+        # Dynamic cache check
+        input_cache = {"path": input_path, "size": _file_size(input_path)}
+        cp = {"tag_key": tag_key, "value_prefix": value_prefix}
+        hit = cached_result(qualified, input_cache, cp, step_log)
+        if hit is not None:
+            return hit
+
+        if step_log:
+            step_log(
+                f"{facet_name}: filtering GeoJSON {input_path} where {tag_key} startswith {value_prefix!r}"
+            )
+        log.info(
+            "%s filtering GeoJSON %s where %s startswith %r",
+            facet_name,
+            input_path,
+            tag_key,
+            value_prefix,
+        )
+
+        if not input_path or not tag_key:
+            return {
+                "result": {
+                    "output_path": "",
+                    "feature_count": 0,
+                    "original_count": 0,
+                    "osm_type": "*",
+                    "filter_applied": f"{tag_key} startswith {value_prefix!r}",
+                    "dependencies_included": False,
+                    "dependency_count": 0,
+                    "format": "GeoJSON",
+                    "extraction_date": datetime.now(UTC).isoformat(),
+                }
+            }
+
+        result = filter_geojson_by_tag_prefix(
+            input_path,
+            tag_key=tag_key,
+            value_prefix=value_prefix,
+            heartbeat=payload.get("_task_heartbeat"),
+            task_uuid=payload.get("_task_uuid", ""),
+        )
+
+        if step_log:
+            step_log(
+                f"{facet_name}: {result.feature_count}/{result.original_count} matched "
+                f"({tag_key} startswith {value_prefix!r})",
+                level="success",
+            )
+        rv = {"result": _osm_result_to_dict(result)}
+        save_result_meta(qualified, input_cache, cp, rv)
+        return rv
+
+    return handler
+
+
 def _osm_result_to_dict(result: OSMFilteredFeatures) -> dict:
     """Convert an OSMFilteredFeatures to a dictionary."""
     return {
@@ -637,6 +707,7 @@ FILTER_FACETS = [
     ("FilterByOSMType", _make_osm_type_filter_handler),
     ("FilterByOSMTag", _make_osm_tag_filter_handler),
     ("FilterGeoJSONByOSMType", _make_geojson_osm_type_filter_handler),
+    ("FilterGeoJSONByTagPrefix", _make_geojson_tag_prefix_filter_handler),
 ]
 
 

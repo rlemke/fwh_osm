@@ -17,6 +17,7 @@ from osm_geocoder.handlers.filters.osm_type_filter import (
     OSMType,
     _describe_osm_filter,
     filter_geojson_by_osm_type,
+    filter_geojson_by_tag_prefix,
 )
 from osm_geocoder.handlers.filters.radius_filter import (
     HAS_SHAPELY,
@@ -765,6 +766,63 @@ class TestOSMTypeFilterHandlers:
 
         assert result["result"]["feature_count"] == 0
         assert result["result"]["osm_type"] == "node"
+
+
+class TestFilterGeoJSONByTagPrefix:
+    """Tests for filter_geojson_by_tag_prefix — ref-prefix selection (Interstates)."""
+
+    @staticmethod
+    def _write(path, refs):
+        feats = [
+            {
+                "type": "Feature",
+                "properties": {"ref": r, "highway": "motorway"},
+                "geometry": {"type": "LineString", "coordinates": [[0, 0], [1, 1]]},
+            }
+            for r in refs
+        ]
+        path.write_text(json.dumps({"type": "FeatureCollection", "features": feats}))
+
+    def test_prefix_keeps_only_interstates(self, tmp_path):
+        src = tmp_path / "motorways.geojson"
+        self._write(src, ["I 5", "US 101", "I 80", "CA 1"])
+        out = tmp_path / "interstates.geojson"
+
+        result = filter_geojson_by_tag_prefix(
+            src, tag_key="ref", value_prefix="I ", output_path=out
+        )
+
+        assert result.original_count == 4
+        assert result.feature_count == 2
+        kept = sorted(f["properties"]["ref"] for f in json.loads(out.read_text())["features"])
+        assert kept == ["I 5", "I 80"]
+        assert "ref startswith" in result.filter_applied
+
+    def test_no_matches(self, tmp_path):
+        src = tmp_path / "roads.geojson"
+        self._write(src, ["US 101", "CA 1"])
+        out = tmp_path / "out.geojson"
+        result = filter_geojson_by_tag_prefix(
+            src, tag_key="ref", value_prefix="I ", output_path=out
+        )
+        assert result.feature_count == 0
+        assert result.original_count == 2
+
+    def test_feature_missing_tag_is_dropped(self, tmp_path):
+        src = tmp_path / "mixed.geojson"
+        feats = [
+            {"type": "Feature", "properties": {"ref": "I 5"},
+             "geometry": {"type": "Point", "coordinates": [0, 0]}},
+            {"type": "Feature", "properties": {"name": "unref'd"},
+             "geometry": {"type": "Point", "coordinates": [1, 1]}},
+        ]
+        src.write_text(json.dumps({"type": "FeatureCollection", "features": feats}))
+        out = tmp_path / "out.geojson"
+        result = filter_geojson_by_tag_prefix(
+            src, tag_key="ref", value_prefix="I ", output_path=out
+        )
+        assert result.feature_count == 1
+        assert result.original_count == 2
 
 
 if __name__ == "__main__":
