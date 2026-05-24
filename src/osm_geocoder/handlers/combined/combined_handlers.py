@@ -18,7 +18,7 @@ EXTRACT_FACET = "ExtractCategoryResult"
 EXTRACT_QUALIFIED = f"{NAMESPACE}.{EXTRACT_FACET}"
 
 
-def ensure_scan(cache: dict, categories: list[str], step_log=None) -> dict:
+def ensure_scan(cache: dict, categories: list[str], step_log=None, heartbeat=None) -> dict:
     """Run (or reuse a cached) single-pass CombinedScan for ``categories``.
 
     Returns the CombinedScan return dict (``results`` JSON string + totals).
@@ -43,7 +43,7 @@ def ensure_scan(cache: dict, categories: list[str], step_log=None) -> dict:
         return _empty_result(categories)
 
     try:
-        result = combined_scan(pbf_path, categories, step_log=step_log)
+        result = combined_scan(pbf_path, categories, step_log=step_log, heartbeat=heartbeat)
 
         # Serialize per-category results to JSON string for AFL
         results_dict = {}
@@ -84,7 +84,9 @@ def _handler(payload: dict) -> dict:
     categories = payload.get("categories", [])
     if isinstance(categories, str):
         categories = [c.strip() for c in categories.split(",") if c.strip()]
-    return ensure_scan(cache, categories, payload.get("_step_log"))
+    return ensure_scan(
+        cache, categories, payload.get("_step_log"), payload.get("_task_heartbeat")
+    )
 
 
 def _extract_handler(payload: dict) -> dict:

@@ -90,12 +90,20 @@ class _CombinedHandler(osmium.SimpleHandler if HAS_OSMIUM else object):
         plugins: list[ExtractorPlugin],
         progress: ScanProgressTracker | None = None,
         step_log: Any = None,
+        heartbeat: Any = None,
     ):
         if HAS_OSMIUM:
             super().__init__()
         self._plugins = plugins
         self._progress = progress
         self._step_log = step_log
+        # A single osmium pass over a full-state PBF runs for many minutes with
+        # no return to the runner, so without this the task lease expires
+        # (default 5 min) and the scan is retried in a loop. Beat the runner's
+        # heartbeat on a time gate to renew the lease (cf. extract_roads).
+        self._heartbeat = heartbeat
+        self._hb_tick = 0
+        self._hb_last = time.monotonic()
 
         # Pre-partition plugins by element type for fast dispatch
         self._node_plugins = [p for p in plugins if ElementType.NODE in p.element_types]
@@ -105,10 +113,22 @@ class _CombinedHandler(osmium.SimpleHandler if HAS_OSMIUM else object):
 
         self._wkb_factory = osmium.geom.WKBFactory() if HAS_OSMIUM and HAS_SHAPELY else None
 
+    def _beat(self) -> None:
+        """Renew the task lease at most every ~15s, cheaply (gate the clock read)."""
+        if self._heartbeat is None:
+            return
+        self._hb_tick += 1
+        if self._hb_tick % 50000 == 0:
+            now = time.monotonic()
+            if now - self._hb_last >= 15.0:
+                self._heartbeat()
+                self._hb_last = now
+
     def _tags_to_dict(self, tags) -> dict[str, str]:
         return {t.k: t.v for t in tags}
 
     def node(self, n):
+        self._beat()
         if self._progress:
             self._progress.tick("node")
         if not self._node_plugins:
@@ -135,6 +155,7 @@ class _CombinedHandler(osmium.SimpleHandler if HAS_OSMIUM else object):
                         )
 
     def way(self, w):
+        self._beat()
         if self._progress:
             self._progress.tick("way")
         if not self._way_plugins:
@@ -169,6 +190,7 @@ class _CombinedHandler(osmium.SimpleHandler if HAS_OSMIUM else object):
                         )
 
     def area(self, a):
+        self._beat()
         if self._progress:
             self._progress.tick("area")
         if not self._area_plugins:
@@ -208,6 +230,7 @@ class _CombinedHandler(osmium.SimpleHandler if HAS_OSMIUM else object):
                         )
 
     def relation(self, r):
+        self._beat()
         if self._progress:
             self._progress.tick("relation")
         if not self._relation_plugins:
@@ -241,6 +264,7 @@ def combined_scan(
     categories: list[str],
     output_dir: str | None = None,
     step_log: Any = None,
+    heartbeat: Any = None,
 ) -> CombinedScanResult:
     """Run a combined single-pass extraction.
 
@@ -283,7 +307,7 @@ def combined_scan(
     )
 
     # Single-pass scan — features stream to disk via each plugin's writer
-    handler = _CombinedHandler(plugins, progress=progress, step_log=step_log)
+    handler = _CombinedHandler(plugins, progress=progress, step_log=step_log, heartbeat=heartbeat)
     t0 = time.monotonic()
     handler.apply_file(pbf_path, locations=True)
     scan_seconds = time.monotonic() - t0
