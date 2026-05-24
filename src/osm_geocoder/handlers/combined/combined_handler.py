@@ -300,6 +300,31 @@ def combined_scan(
     for plugin in plugins:
         plugin.begin(pbf_stem, output_dir)
 
+    # Node-location index + C-level pre-filter.
+    #
+    # Node-only scans (e.g. amenities/population — points) don't assemble way or
+    # area geometry, so they need neither the location index nor the untagged
+    # member nodes. For those we (a) skip the index (`locations=False`) and (b)
+    # push a `KeyFilter` for the union of the plugins' interest keys down to
+    # osmium's C layer, so the Python callback never fires for the ~99% of nodes
+    # that are untagged — the per-element Python loop, not the index, is the cost
+    # (a 264 MB region: 347s → seconds). A scan that includes any way/area/
+    # relation plugin must keep `locations=True` and no key filter, or the
+    # untagged member nodes geometry needs would be filtered away.
+    _GEOM_TYPES = ElementType.WAY | ElementType.AREA | ElementType.RELATION
+    needs_locations = any(bool(p.element_types & _GEOM_TYPES) for p in plugins)
+    filters: list = []
+    if not needs_locations:
+        keys: set[str] = set()
+        for p in plugins:
+            ti = p.tag_interest
+            keys |= set(ti.keys)
+            keys |= set(ti.key_values.keys())
+        if keys:
+            from osmium.filter import KeyFilter
+
+            filters = [KeyFilter(*sorted(keys))]
+
     # Progress tracker
     file_size = get_file_size(pbf_path)
     progress = ScanProgressTracker(
@@ -309,7 +334,7 @@ def combined_scan(
     # Single-pass scan — features stream to disk via each plugin's writer
     handler = _CombinedHandler(plugins, progress=progress, step_log=step_log, heartbeat=heartbeat)
     t0 = time.monotonic()
-    handler.apply_file(pbf_path, locations=True)
+    handler.apply_file(pbf_path, locations=needs_locations, filters=filters)
     scan_seconds = time.monotonic() - t0
     progress.finish()
 
