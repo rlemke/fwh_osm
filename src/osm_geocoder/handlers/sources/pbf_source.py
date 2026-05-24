@@ -553,13 +553,16 @@ def _empty_cache() -> dict:
 # Uniform cheap extract — the Extract(category) facade
 # ---------------------------------------------------------------------------
 
-# Common, cheap categories warmed together in ONE cached osmium pass: a single
-# pass extracts all of these for ~the cost of one (osmium reads every element
-# once regardless). The first ExtractCategory of any of these on a region pays
-# the pass; every later ExtractCategory on that region is an instant manifest
-# lookup. Heavier/structurally-different categories (buildings, routes,
-# boundaries) get their own cached single-category pass on demand.
-_WARM_CATEGORIES = ["amenities", "parks", "population", "roads"]
+# The cheap POINT categories — the "find a place/business" family — warmed
+# together in ONE cached osmium pass: a single pass extracts both for ~the cost
+# of one (osmium reads every element once regardless), and both are node-only so
+# the pass stays fast even on a full-state PBF. The first ExtractCategory of
+# either on a region pays the pass; every later one is an instant manifest
+# lookup. The heavier line/area families (roads, parks, buildings) and the
+# structurally-different ones (routes, boundaries) each get their own cached
+# single-category pass on demand — kept out of the warm set so a business query
+# never pays to extract GB-scale roads it doesn't use.
+_WARM_CATEGORIES = ["amenities", "population"]
 
 
 def _extract_category(payload: dict) -> dict:

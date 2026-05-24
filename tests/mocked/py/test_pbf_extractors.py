@@ -174,7 +174,13 @@ def test_extract_category_facade_warms_and_slices(synthetic_pbf):
     assert amenities["feature_count"] == 4  # restaurant, cafe, bench, shop=bakery (node-only)
     assert amenities["output_path"]
 
-    # "parks" is in the same warm set, so it is served from the same scan
+    # "population" is in the same warm set, so it is served from the same scan
+    population = _extract_category({"cache": cache, "category": "population"})
+    assert population["category"] == "population"
+    assert population["feature_count"] >= 1  # Testville (has a population tag)
+    assert population["output_path"]
+
+    # an out-of-warm category (parks) still works via its own cached single pass
     parks = _extract_category({"cache": cache, "category": "parks"})
     assert parks["category"] == "parks"
     assert parks["feature_count"] == 1
