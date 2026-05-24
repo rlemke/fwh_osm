@@ -103,6 +103,15 @@ filtering the full PBF per query.
   the runner's `_task_heartbeat` through `_CombinedHandler` and beats it on a
   time gate (≥15s) — without this the scan exceeds its lease and is retried in a
   loop. Any long handler added here must do the same (or register `timeout_ms=0`).
+- **Node-only scans get a C-level pre-filter.** When every active plugin is
+  node-only (no way/area/relation geometry — e.g. the amenities+population warm
+  set), `combined_scan` pushes a pyosmium `KeyFilter` (union of the plugins'
+  interest keys) down to osmium and drops the location index (`locations=False`),
+  so the Python callback fires only for tagged candidates, not the ~99% of nodes
+  that are untagged geometry. Benchmarked ~29× (264 MB region: 347s → 12s, counts
+  unchanged); the bottleneck was the per-element Python loop, *not* the index.
+  Scans that include a way/area/relation plugin keep `locations=True` and no
+  filter (member nodes are needed for geometry).
 
 ### PostGIS source
 
