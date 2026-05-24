@@ -50,9 +50,15 @@ downstream analysis facets work identically regardless of the source:
 | `osm.Source.PostGIS` | SQL queries against `osm_nodes` / `osm_ways` | `handlers/sources/postgis_source.py` |
 | `osm.Source.GeoJSON` | Existing GeoJSON files | `handlers/sources/geojson_source.py` |
 
-Each source provides 8 extraction facets (routes, amenities, roads, parks,
-buildings, boundaries, population, POIs) that produce category-specific
-output schemas (`RouteFeatures`, `AmenityFeatures`, …).
+Each source provides per-category extraction facets (routes, amenities, roads,
+parks, buildings, boundaries, population, POIs) that produce category-specific
+output schemas (`RouteFeatures`, `AmenityFeatures`, …). The PBF extractors for
+amenities, population (places), parks, and buildings are full osmium passes that
+preserve all tags as feature properties plus a derived class — they mirror the
+`extract_roads` contract (`localize` → stream via `GeoJSONStreamWriter` → atomic
+move; heartbeat every N features). For the common "find a place/business" case,
+prefer the cheap cached `ExtractCategory` facade below over a per-category full
+pass or a full-PBF tag filter.
 
 ```
 Source Layer                        Algorithm Layer (unchanged)
@@ -65,6 +71,38 @@ osm.Source.GeoJSON.LoadRoutes   ─┘
 Composed workflows in `osm.workflows.sourced` demonstrate the pattern:
 `BicycleRoutesPBF` / `BicycleRoutesPostGIS` / `BicycleRoutesGeoJSON` — same
 pipeline, different sources.
+
+### Cheap category extraction — the warm-cache path
+
+`osm.Source.PBF.ExtractCategory(cache, category) => (output_path, feature_count, category)`
+is the **uniform, cheap, cached** way to get one category of features. It is the
+preferred Extract primitive for composed workflows; reach for it instead of
+filtering the full PBF per query.
+
+- **One warm pass, then instant.** It runs (or reuses a cached) single-pass
+  `osm.Combined.CombinedScan` and returns the requested category's GeoJSON path.
+  The warm set is the cheap **point** categories `["amenities", "population"]`
+  (`_WARM_CATEGORIES` in `pbf_source.py`) — both extracted in one osmium pass for
+  ~the cost of one (osmium reads every element once regardless). The first
+  `ExtractCategory` on a region pays the pass; every later one — any business
+  type, the other warm category — is an **instant manifest lookup**.
+- **Heavier families warm on demand.** `roads` / `parks` / `buildings` /
+  `routes` / `boundaries` are not in the warm set (they are GB-scale lines/areas
+  or relation-shaped); each gets its own cached single-category scan when asked,
+  so a business query never pays to extract roads it doesn't use.
+- **Shared cache.** `ExtractCategory` and the `osm.Combined.CombinedScan` facet
+  hit the *same* per-`(region, categories)` scan sidecar (via the shared
+  `ensure_scan()` in `combined_handlers.py`), so they interoperate.
+- **The pattern to compose:** `CacheRegion → ExtractCategory(amenities) →
+  FilterGeoJSONByOSMType(tag=value) → RenderMap`. This is what `FindBusinessMap`
+  does. **Never** use `FilterByOSMTag` over the full PBF for this — that re-scans
+  the whole multi-GB dataset every query (the ~54-minute trap); the warm extract
+  is paid once and reused.
+- **CombinedScan heartbeats.** A single pass over a full-state PBF (e.g.
+  California) runs well past the 5-minute task lease, so `combined_scan` threads
+  the runner's `_task_heartbeat` through `_CombinedHandler` and beats it on a
+  time gate (≥15s) — without this the scan exceeds its lease and is retried in a
+  loop. Any long handler added here must do the same (or register `timeout_ms=0`).
 
 ### PostGIS source
 
