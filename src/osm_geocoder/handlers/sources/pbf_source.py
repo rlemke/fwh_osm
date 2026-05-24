@@ -550,6 +550,55 @@ def _empty_cache() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Uniform cheap extract — the Extract(category) facade
+# ---------------------------------------------------------------------------
+
+# Common, cheap categories warmed together in ONE cached osmium pass: a single
+# pass extracts all of these for ~the cost of one (osmium reads every element
+# once regardless). The first ExtractCategory of any of these on a region pays
+# the pass; every later ExtractCategory on that region is an instant manifest
+# lookup. Heavier/structurally-different categories (buildings, routes,
+# boundaries) get their own cached single-category pass on demand.
+_WARM_CATEGORIES = ["amenities", "parks", "population", "roads"]
+
+
+def _extract_category(payload: dict) -> dict:
+    """Cheap, cached single-category extract backed by a warm CombinedScan.
+
+    The uniform ``Extract(category)`` primitive: instead of scanning the full
+    PBF per query (the 54-minute ``FilterByOSMTag`` trap), it reuses a per-region
+    cached single-pass scan and returns the requested category's GeoJSON path.
+    Shares the exact scan cache used by ``osm.Combined.CombinedScan``.
+    """
+    import json as _json
+
+    from ..combined.combined_handlers import ensure_scan
+
+    category = payload.get("category", "")
+    cache = _cache_from_payload(payload)
+    step_log = payload.get("_step_log")
+
+    scan_categories = _WARM_CATEGORIES if category in _WARM_CATEGORIES else [category]
+    rv = ensure_scan(cache, scan_categories, step_log)
+
+    try:
+        results = _json.loads(rv.get("results", "{}"))
+    except (TypeError, ValueError):
+        results = {}
+    cat_data = results.get(category, {})
+    output_path = cat_data.get("output_path", "")
+    feature_count = cat_data.get("feature_count", 0)
+
+    if step_log:
+        step_log(
+            f"ExtractCategory: {category} → {feature_count} features "
+            f"at {output_path or '(none)'}",
+            level="success" if output_path else "warning",
+        )
+    return {"output_path": output_path, "feature_count": feature_count, "category": category}
+
+
+# ---------------------------------------------------------------------------
 # Dispatch table
 # ---------------------------------------------------------------------------
 
@@ -562,6 +611,7 @@ PBF_DISPATCH: dict[str, callable] = {
     f"{NAMESPACE}.ExtractBoundaries": _extract_boundaries,
     f"{NAMESPACE}.ExtractPopulation": _extract_population,
     f"{NAMESPACE}.ExtractPOIs": _extract_pois,
+    f"{NAMESPACE}.ExtractCategory": _extract_category,
 }
 
 

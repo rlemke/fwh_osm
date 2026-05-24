@@ -30,4 +30,14 @@ namespace osm.Source.PBF {
 
     /** Extracts points of interest from a PBF file. */
     event facet ExtractPOIs(cache: OSMCache) => (pois: OSMCache)
+
+    /** Cheap, cached single-category extract — the uniform Extract(category) primitive.
+     *
+     * Warms a standard category set (amenities, parks, population, roads) in ONE
+     * cached osmium pass and returns the requested category's GeoJSON path; repeat
+     * extracts on the same region are an instant manifest lookup. Heavier categories
+     * (buildings, routes, boundaries) get their own cached single-category pass.
+     * Use this instead of FilterByOSMTag over the full PBF — then filter the small
+     * per-category GeoJSON with the FilterGeoJSON* facets. */
+    event facet ExtractCategory(cache: OSMCache, category: String) => (output_path: String, feature_count: Long, category: String) with Timeout(minutes = 120)
 }

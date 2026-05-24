@@ -155,3 +155,27 @@ def test_extract_buildings_type_filter_excludes(synthetic_pbf, tmp_path):
         synthetic_pbf, building_type="commercial", output_path=str(tmp_path / "c.geojson")
     )
     assert r.feature_count == 0  # the only building is residential
+
+
+def test_extract_category_facade_warms_and_slices(synthetic_pbf):
+    """The uniform Extract(category) facade returns the right per-category slice.
+
+    A single warm pass extracts the standard category set; this asserts the
+    facade routes to the right slice with output_path + feature_count + category.
+    (The instant-cache-hit behavior on repeat calls is verified at integration
+    scale — a warm category returns in ~0s — not timed here.)
+    """
+    from osm_geocoder.handlers.sources.pbf_source import _extract_category
+
+    cache = {"path": synthetic_pbf, "region": "synth", "size": 0}
+
+    amenities = _extract_category({"cache": cache, "category": "amenities"})
+    assert amenities["category"] == "amenities"
+    assert amenities["feature_count"] == 4  # restaurant, cafe, bench, shop=bakery (node-only)
+    assert amenities["output_path"]
+
+    # "parks" is in the same warm set, so it is served from the same scan
+    parks = _extract_category({"cache": cache, "category": "parks"})
+    assert parks["category"] == "parks"
+    assert parks["feature_count"] == 1
+    assert parks["output_path"]

@@ -18,16 +18,18 @@ EXTRACT_FACET = "ExtractCategoryResult"
 EXTRACT_QUALIFIED = f"{NAMESPACE}.{EXTRACT_FACET}"
 
 
-def _handler(payload: dict) -> dict:
-    """Handle a CombinedScan event."""
-    cache = payload.get("cache", {})
+def ensure_scan(cache: dict, categories: list[str], step_log=None) -> dict:
+    """Run (or reuse a cached) single-pass CombinedScan for ``categories``.
+
+    Returns the CombinedScan return dict (``results`` JSON string + totals).
+    The scan manifest is cached per ``(region, sorted(categories))`` via the
+    output-cache sidecar, so a repeat call on the same region is an instant
+    lookup — a single osmium pass extracts many categories for ~the cost of one.
+
+    Shared by the ``osm.Combined.CombinedScan`` facet and the
+    ``osm.Source.PBF.ExtractCategory`` facade so both hit the same cache.
+    """
     pbf_path = cache.get("path", "")
-    categories = payload.get("categories", [])
-    step_log = payload.get("_step_log")
-
-    if isinstance(categories, str):
-        categories = [c.strip() for c in categories.split(",") if c.strip()]
-
     cache_params = {"categories": sorted(categories)}
     hit = cached_result(SCAN_QUALIFIED, cache, cache_params, step_log)
     if hit is not None:
@@ -74,6 +76,15 @@ def _handler(payload: dict) -> dict:
         if step_log:
             step_log(f"CombinedScan: failed: {e}", level="error")
         return _empty_result(categories)
+
+
+def _handler(payload: dict) -> dict:
+    """Handle a CombinedScan event."""
+    cache = payload.get("cache", {})
+    categories = payload.get("categories", [])
+    if isinstance(categories, str):
+        categories = [c.strip() for c in categories.split(",") if c.strip()]
+    return ensure_scan(cache, categories, payload.get("_step_log"))
 
 
 def _extract_handler(payload: dict) -> dict:
