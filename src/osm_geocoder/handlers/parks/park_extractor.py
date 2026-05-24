@@ -135,6 +135,101 @@ def parse_protect_classes(value: str) -> set[str]:
     return classes
 
 
+def extract_parks(
+    pbf_path: str | Path,
+    park_type: str | ParkType = "all",
+    protect_classes: str = "*",
+    output_path: str | Path | None = None,
+    heartbeat=None,
+    task_uuid: str = "",
+) -> ParkFeatures:
+    """Extract parks / protected areas from a PBF as GeoJSON Polygons.
+
+    Assembles closed ways and multipolygon relations into areas, keeps those
+    matching :func:`matches_park_type` (``leisure=park``/``nature_reserve``,
+    ``boundary=national_park``/``protected_area``, or any ``protect_class``),
+    narrowed to the requested ``park_type`` and ``protect_classes``. Every OSM
+    tag is preserved as a feature property plus a derived ``park_class``; the
+    total area in km² is summed across kept features.
+    """
+    import os
+    import shutil
+    import tempfile
+
+    import osmium
+    from facetwork.config import get_temp_dir
+    from facetwork.runtime.storage import localize
+    from shapely import wkb as shapely_wkb
+    from shapely.geometry import mapping as shapely_mapping
+
+    from ..shared._output import ensure_dir, resolve_output_dir
+    from ..shared.geojson_writer import GeoJSONStreamWriter
+
+    pbf_path = str(pbf_path)
+    ptype = ParkType.from_string(park_type) if isinstance(park_type, str) else park_type
+    protect_set = parse_protect_classes(protect_classes)
+
+    if output_path is None:
+        out_dir = resolve_output_dir("osm-parks")
+        output_path_str = f"{out_dir}/{uri_stem(pbf_path)}_parks_{ptype.value}.geojson"
+    else:
+        output_path_str = str(output_path)
+    ensure_dir(output_path_str)
+
+    local_pbf = localize(pbf_path)
+    wkbfab = osmium.geom.WKBFactory()
+
+    class _ParkHandler(osmium.SimpleHandler):
+        def __init__(self, writer):
+            super().__init__()
+            self.writer = writer
+            self.kept = 0
+            self.area_km2 = 0.0
+
+        def area(self, a) -> None:
+            tags = {t.k: t.v for t in a.tags}
+            if not matches_park_type(tags, ptype, protect_set):
+                return
+            try:
+                geom = shapely_mapping(
+                    shapely_wkb.loads(wkbfab.create_multipolygon(a), hex=True)
+                )
+            except Exception:
+                return  # incomplete geometry — skip
+            props = dict(tags)
+            props["osm_id"] = a.orig_id()
+            props["park_class"] = classify_park(tags)
+            self.writer.write_feature(
+                {"type": "Feature", "properties": props, "geometry": geom}
+            )
+            self.kept += 1
+            self.area_km2 += calculate_area_km2(geom)
+            if heartbeat and self.kept % 1000 == 0:
+                heartbeat()
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".geojson", dir=get_temp_dir())
+    os.close(tmp_fd)
+    try:
+        with GeoJSONStreamWriter(tmp_path) as writer:
+            handler = _ParkHandler(writer)
+            handler.apply_file(local_pbf, locations=True, idx="flex_mem")
+        ensure_dir(output_path_str)
+        shutil.move(tmp_path, output_path_str)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    return ParkFeatures(
+        output_path=output_path_str,
+        feature_count=handler.kept,
+        park_type=ptype.value,
+        protect_classes=protect_classes,
+        total_area_km2=round(handler.area_km2, 2),
+        extraction_date=datetime.now(UTC).isoformat(),
+    )
+
+
 def classify_park(tags: dict[str, str]) -> str:
     """Classify a park based on its OSM tags.
 

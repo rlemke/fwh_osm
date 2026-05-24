@@ -222,6 +222,118 @@ def parse_population(value: str | int | None) -> int | None:
         return None
 
 
+def extract_places_with_population(
+    pbf_path: str | Path,
+    place_type: str | PlaceType = "all",
+    min_population: int = 0,
+    output_path: str | Path | None = None,
+    heartbeat=None,
+    task_uuid: str = "",
+) -> PopulationFilteredFeatures:
+    """Extract populated places from a PBF as GeoJSON Points.
+
+    Walks nodes carrying a ``place`` or ``population`` tag, keeps those matching
+    the requested ``place_type`` (``city``/``town``/``village``/… or ``all``)
+    via :func:`matches_place_type`, and — when ``min_population > 0`` — only
+    those whose parsed ``population`` meets the threshold. Every OSM tag is
+    preserved (``name``, ``place``, ``population`` …). ``original_count`` is the
+    place candidates before the population filter; ``max_population`` is the
+    largest kept value.
+    """
+    import os
+    import re
+    import shutil
+    import tempfile
+
+    import osmium
+    from facetwork.config import get_temp_dir
+    from facetwork.runtime.storage import localize
+
+    from ..shared.geojson_writer import GeoJSONStreamWriter
+
+    pbf_path = str(pbf_path)
+    ptype = PlaceType.from_string(place_type) if isinstance(place_type, str) else place_type
+    min_pop = int(min_population or 0)
+
+    if output_path is None:
+        out_dir = resolve_output_dir("osm-population")
+        output_path_str = f"{out_dir}/{uri_stem(pbf_path)}_places_{ptype.value}.geojson"
+    else:
+        output_path_str = str(output_path)
+    ensure_dir(output_path_str)
+
+    local_pbf = localize(pbf_path)
+
+    def _parse_pop(value: str) -> int | None:
+        digits = re.sub(r"[^0-9]", "", value or "")
+        return int(digits) if digits else None
+
+    class _PlaceHandler(osmium.SimpleHandler):
+        def __init__(self, writer):
+            super().__init__()
+            self.writer = writer
+            self.kept = 0
+            self.original = 0
+            self.max_pop = 0
+
+        def node(self, n) -> None:
+            if not n.location.valid():
+                return
+            tags = {t.k: t.v for t in n.tags}
+            if "place" not in tags and "population" not in tags:
+                return
+            if not matches_place_type(tags, ptype):
+                return
+            self.original += 1
+            pop = _parse_pop(tags.get("population", ""))
+            if min_pop > 0 and (pop is None or pop < min_pop):
+                return
+            props = dict(tags)
+            props["osm_id"] = n.id
+            if pop is not None:
+                props["population_value"] = pop
+                self.max_pop = max(self.max_pop, pop)
+            self.writer.write_feature(
+                {
+                    "type": "Feature",
+                    "properties": props,
+                    "geometry": {"type": "Point", "coordinates": [n.location.lon, n.location.lat]},
+                }
+            )
+            self.kept += 1
+            if heartbeat and self.kept % 5000 == 0:
+                heartbeat()
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".geojson", dir=get_temp_dir())
+    os.close(tmp_fd)
+    try:
+        with GeoJSONStreamWriter(tmp_path) as writer:
+            handler = _PlaceHandler(writer)
+            handler.apply_file(local_pbf, locations=True, idx="flex_mem")
+        ensure_dir(output_path_str)
+        shutil.move(tmp_path, output_path_str)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    filter_applied = (
+        f"place_type={ptype.value}, population>={min_pop}"
+        if min_pop > 0
+        else f"place_type={ptype.value}"
+    )
+    return PopulationFilteredFeatures(
+        output_path=output_path_str,
+        feature_count=handler.kept,
+        original_count=handler.original,
+        place_type=ptype.value,
+        min_population=min_pop,
+        max_population=handler.max_pop,
+        filter_applied=filter_applied,
+        extraction_date=datetime.now(UTC).isoformat(),
+    )
+
+
 def matches_place_type(tags: dict[str, str], place_type: PlaceType) -> bool:
     """Check if tags match the specified place type."""
     if place_type == PlaceType.ALL:

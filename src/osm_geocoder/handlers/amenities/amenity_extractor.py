@@ -164,6 +164,124 @@ class AmenityStats:
     with_opening_hours: int
 
 
+def extract_amenities(
+    pbf_path: str | Path,
+    category: str = "all",
+    output_path: str | Path | None = None,
+    heartbeat=None,
+    task_uuid: str = "",
+) -> AmenityFeatures:
+    """Extract amenity / shop / tourism features from a PBF as GeoJSON Points.
+
+    Walks nodes and ways carrying an ``amenity`` or ``shop`` tag (or a
+    recognised ``tourism`` value), classifies each via :func:`classify_amenity`,
+    and — unless ``category`` is ``"all"``/``"*"`` — keeps only the requested
+    category (e.g. ``"food"``). Nodes become Points; closed ways become their
+    centroid Point, so the output is a uniform clickable point layer. Every OSM
+    tag is preserved as a feature property (``name``, ``cuisine``, ``brand`` …)
+    plus a derived ``category``. Streams to a temp file then moves into place
+    (multi-GB safe).
+    """
+    import os
+    import shutil
+    import tempfile
+
+    import osmium
+    from facetwork.config import get_temp_dir
+    from facetwork.runtime.storage import localize
+    from shapely import wkb as shapely_wkb
+
+    from ..shared._output import ensure_dir, resolve_output_dir
+    from ..shared.geojson_writer import GeoJSONStreamWriter
+
+    pbf_path = str(pbf_path)
+    cat = AmenityCategory.from_string(category)
+    target = None if cat == AmenityCategory.ALL else cat.value
+
+    if output_path is None:
+        out_dir = resolve_output_dir("osm-amenities")
+        output_path_str = f"{out_dir}/{uri_stem(pbf_path)}_amenities_{cat.value}.geojson"
+    else:
+        output_path_str = str(output_path)
+    ensure_dir(output_path_str)
+
+    local_pbf = localize(pbf_path)
+    wkbfab = osmium.geom.WKBFactory()
+
+    def _is_amenity(tags: dict[str, str]) -> bool:
+        return (
+            "amenity" in tags
+            or "shop" in tags
+            or tags.get("tourism", "")
+            in ("hotel", "motel", "hostel", "guest_house", "museum", "gallery", "zoo", "theme_park")
+        )
+
+    class _AmenityHandler(osmium.SimpleHandler):
+        def __init__(self, writer):
+            super().__init__()
+            self.writer = writer
+            self.kept = 0
+            self.types: set[str] = set()
+
+        def _emit(self, tags: dict[str, str], geom: dict, osm_id: int) -> None:
+            cls = classify_amenity(tags)
+            if target is not None and cls != target:
+                return
+            props = dict(tags)
+            props["osm_id"] = osm_id
+            props["category"] = cls
+            self.writer.write_feature(
+                {"type": "Feature", "properties": props, "geometry": geom}
+            )
+            self.kept += 1
+            atype = tags.get("amenity") or tags.get("shop") or tags.get("tourism")
+            if atype:
+                self.types.add(atype)
+            if heartbeat and self.kept % 5000 == 0:
+                heartbeat()
+
+        def node(self, n) -> None:
+            if not n.location.valid():
+                return
+            tags = {t.k: t.v for t in n.tags}
+            if not _is_amenity(tags):
+                return
+            self._emit(
+                tags, {"type": "Point", "coordinates": [n.location.lon, n.location.lat]}, n.id
+            )
+
+        def way(self, w) -> None:
+            tags = {t.k: t.v for t in w.tags}
+            if not _is_amenity(tags):
+                return
+            try:
+                centroid = shapely_wkb.loads(wkbfab.create_linestring(w), hex=True).centroid
+            except Exception:
+                return  # incomplete geometry (missing nodes) — skip
+            self._emit(tags, {"type": "Point", "coordinates": [centroid.x, centroid.y]}, w.id)
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".geojson", dir=get_temp_dir())
+    os.close(tmp_fd)
+    try:
+        with GeoJSONStreamWriter(tmp_path) as writer:
+            handler = _AmenityHandler(writer)
+            handler.apply_file(local_pbf, locations=True, idx="flex_mem")
+        ensure_dir(output_path_str)
+        shutil.move(tmp_path, output_path_str)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    return AmenityFeatures(
+        output_path=output_path_str,
+        feature_count=handler.kept,
+        amenity_category=cat.value,
+        amenity_types=",".join(sorted(handler.types)[:25]),
+        extraction_date=datetime.now(UTC).isoformat(),
+    )
+
+
 def classify_amenity(tags: dict[str, str]) -> str:
     """Classify an amenity based on its tags."""
     amenity = tags.get("amenity", "")

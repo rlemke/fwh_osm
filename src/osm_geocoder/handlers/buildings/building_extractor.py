@@ -141,6 +141,107 @@ class BuildingStats:
     with_height: int
 
 
+def extract_buildings(
+    pbf_path: str | Path,
+    building_type: str = "all",
+    output_path: str | Path | None = None,
+    heartbeat=None,
+    task_uuid: str = "",
+) -> BuildingFeatures:
+    """Extract buildings from a PBF as GeoJSON Polygons.
+
+    Assembles closed ways and multipolygon relations into areas, keeps those
+    carrying a ``building`` tag, and — unless ``building_type`` is ``"all"`` —
+    only those whose :func:`classify_building` class matches (e.g.
+    ``"residential"``, ``"commercial"``). Every OSM tag is preserved plus a
+    derived ``building_type``; total footprint area (km²) is summed and features
+    carrying ``height`` or ``building:levels`` are counted.
+
+    Note: a full-region building extract is large and slow (millions of areas);
+    prefer a ``building_type`` filter, and see the roadmap on category caches.
+    """
+    import os
+    import shutil
+    import tempfile
+    from datetime import UTC, datetime
+
+    import osmium
+    from facetwork.config import get_temp_dir
+    from facetwork.runtime.storage import localize
+    from shapely import wkb as shapely_wkb
+    from shapely.geometry import mapping as shapely_mapping
+
+    from ..shared._output import ensure_dir, resolve_output_dir, uri_stem
+    from ..shared.geojson_writer import GeoJSONStreamWriter
+
+    pbf_path = str(pbf_path)
+    if output_path is None:
+        out_dir = resolve_output_dir("osm-buildings")
+        output_path_str = f"{out_dir}/{uri_stem(pbf_path)}_buildings_{building_type}.geojson"
+    else:
+        output_path_str = str(output_path)
+    ensure_dir(output_path_str)
+
+    local_pbf = localize(pbf_path)
+    wkbfab = osmium.geom.WKBFactory()
+
+    class _BuildingHandler(osmium.SimpleHandler):
+        def __init__(self, writer):
+            super().__init__()
+            self.writer = writer
+            self.kept = 0
+            self.area_m2 = 0.0
+            self.with_height = 0
+
+        def area(self, a) -> None:
+            tags = {t.k: t.v for t in a.tags}
+            if "building" not in tags:
+                return
+            bt = classify_building(tags)
+            if building_type != "all" and bt != building_type:
+                return
+            try:
+                geom = shapely_mapping(
+                    shapely_wkb.loads(wkbfab.create_multipolygon(a), hex=True)
+                )
+            except Exception:
+                return  # incomplete geometry — skip
+            props = dict(tags)
+            props["osm_id"] = a.orig_id()
+            props["building_type"] = bt
+            self.writer.write_feature(
+                {"type": "Feature", "properties": props, "geometry": geom}
+            )
+            self.kept += 1
+            self.area_m2 += calculate_building_area(geom)
+            if "height" in tags or "building:levels" in tags:
+                self.with_height += 1
+            if heartbeat and self.kept % 5000 == 0:
+                heartbeat()
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".geojson", dir=get_temp_dir())
+    os.close(tmp_fd)
+    try:
+        with GeoJSONStreamWriter(tmp_path) as writer:
+            handler = _BuildingHandler(writer)
+            handler.apply_file(local_pbf, locations=True, idx="flex_mem")
+        ensure_dir(output_path_str)
+        shutil.move(tmp_path, output_path_str)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    return BuildingFeatures(
+        output_path=output_path_str,
+        feature_count=handler.kept,
+        building_type=building_type,
+        total_area_km2=round(handler.area_m2 / 1_000_000, 4),
+        with_height_data=handler.with_height,
+        extraction_date=datetime.now(UTC).isoformat(),
+    )
+
+
 def classify_building(tags: dict[str, str]) -> str:
     """Classify a building based on its OSM tags."""
     building_tag = tags.get("building", "yes")
