@@ -99,6 +99,7 @@ def _make_render_map_handler(facet_name: str):
                 style=style,
                 width=width,
                 height=height,
+                run_id=payload.get("_workflow_id", ""),
             )
             if step_log:
                 step_log(

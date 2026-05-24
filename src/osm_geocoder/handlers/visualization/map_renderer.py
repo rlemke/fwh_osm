@@ -180,6 +180,7 @@ def render_map_html(
     zoom: int | None = None,
     width: int = 800,
     height: int = 600,
+    run_id: str | None = None,
 ) -> MapResult:
     """Render a GeoJSON file as an interactive HTML map.
 
@@ -204,8 +205,16 @@ def render_map_html(
     geojson_path_str = str(geojson_path)
     local_geojson = localize(geojson_path_str)
     if output_path is None:
+        # The map name inherits the (already param-addressed) input GeoJSON stem,
+        # so distinct queries don't collide. When AFL_OUTPUT_PER_RUN is set and a
+        # run_id is supplied, isolate the map under maps/runs/<run_id>/.
+        from ..shared._output import _per_run_enabled
+
+        parts = ["maps"]
+        if run_id and _per_run_enabled():
+            parts += ["runs", run_id]
         output_path = os.path.join(
-            resolve_local_output_dir("maps"),
+            resolve_local_output_dir(*parts),
             uri_stem(geojson_path_str) + ".html",
         )
     output_path = str(output_path)
@@ -409,6 +418,8 @@ def render_map(
     if format.lower() == "html":
         return render_map_html(geojson_path, output_path, title, style, **kwargs)
     elif format.lower() == "png":
+        # render_map_png does not take run_id; drop it if present.
+        kwargs.pop("run_id", None)
         return render_map_png(geojson_path, output_path, title, style, **kwargs)
     else:
         raise ValueError(f"Unknown format: {format}. Use 'html' or 'png'.")

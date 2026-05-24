@@ -598,6 +598,7 @@ def _make_geojson_osm_type_filter_handler(facet_name: str):
             tag_value=tag_value if tag_value != "*" else None,
             heartbeat=payload.get("_task_heartbeat"),
             task_uuid=payload.get("_task_uuid", ""),
+            run_id=payload.get("_workflow_id", ""),
         )
 
         if step_log:
@@ -666,6 +667,7 @@ def _make_geojson_tag_prefix_filter_handler(facet_name: str):
             value_prefix=value_prefix,
             heartbeat=payload.get("_task_heartbeat"),
             task_uuid=payload.get("_task_uuid", ""),
+            run_id=payload.get("_workflow_id", ""),
         )
 
         if step_log:

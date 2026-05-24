@@ -51,6 +51,76 @@ def open_output(path: str, mode: str = "w") -> IO:
     return backend.open(path, mode)
 
 
+def _slugify_discriminators(discriminators: tuple) -> str:
+    """Build a deterministic, collision-safe slug from a tuple of discriminators.
+
+    The discriminators are the parameters that make one derived artifact distinct
+    from a sibling query on the same input (e.g. ``("amenity", "fast_food")``).
+    ``None``/``""``/``"*"`` (the "any" wildcard) are dropped — they are not
+    discriminating. The common case yields a short, human-readable slug
+    (``amenity-fast_food``); when the readable form would be long it falls back to
+    the first token plus a short stable hash of the full tuple, so the name stays
+    bounded and still deterministic.
+    """
+    # Keep raw values (no strip) so e.g. "I " and "I" stay distinct after
+    # sanitization ("I_" vs "I"); only the "any"/empty wildcards are dropped.
+    parts = [str(d) for d in discriminators if d not in (None, "", "*")]
+    if not parts:
+        return ""
+    import re
+
+    readable = "-".join(re.sub(r"[^A-Za-z0-9._]+", "_", p) for p in parts)
+    if len(readable) <= 48:
+        return readable
+    import hashlib
+
+    digest = hashlib.sha1("\x1f".join(parts).encode()).hexdigest()[:10]
+    head = re.sub(r"[^A-Za-z0-9._]+", "_", parts[0])[:16]
+    return f"{head}_{digest}"
+
+
+def _per_run_enabled() -> bool:
+    return os.environ.get("AFL_OUTPUT_PER_RUN", "").strip().lower() in ("1", "true", "yes")
+
+
+def derive_output_path(
+    category: str,
+    stem: str,
+    label: str,
+    *discriminators,
+    ext: str = "geojson",
+    run_id: str | None = None,
+) -> str:
+    """Build a collision-safe, deterministic output path for a *derived* artifact.
+
+    Names a per-query leaf artifact (a filtered GeoJSON, a rendered map) so two
+    different queries over the same input do not overwrite each other. The name
+    encodes the *discriminating parameters* rather than an execution id, so it is
+    idempotent (re-running the same query overwrites with identical content),
+    reproducible, human-meaningful, and bounded by the number of distinct queries:
+
+        <category-dir>/<stem>_<label>[_<slug>].<ext>
+
+    e.g. ``…/osm-filtered/california-latest.osm_amenities_filtered_amenity-fast_food.geojson``.
+
+    Do **not** use this for cacheable intermediates (category extracts, scan
+    manifests) — those are input-addressed and shared across runs by design.
+
+    Per-run isolation (opt-in): when ``AFL_OUTPUT_PER_RUN`` is set and ``run_id``
+    (the execution workflow id) is provided, the artifact lands under
+    ``<category-dir>/runs/<run_id>/`` instead — a retained, easily-cleaned
+    per-run output tree. The shared cache is untouched either way.
+    """
+    out_dir = resolve_output_dir(category)
+    if run_id and _per_run_enabled():
+        out_dir = f"{out_dir}/runs/{run_id}"
+    slug = _slugify_discriminators(discriminators)
+    suffix = f"_{slug}" if slug else ""
+    path = f"{out_dir}/{stem}_{label}{suffix}.{ext}"
+    ensure_dir(path)
+    return path
+
+
 def uri_stem(path: str) -> str:
     """Get the stem (filename without extension) from a path or HDFS URI.
 

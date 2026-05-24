@@ -15,7 +15,13 @@ from pathlib import Path
 
 from facetwork.runtime.storage import get_storage_backend, localize
 
-from ..shared._output import ensure_dir, open_output, resolve_output_dir, uri_stem
+from ..shared._output import (
+    derive_output_path,
+    ensure_dir,
+    open_output,
+    resolve_output_dir,
+    uri_stem,
+)
 from ..shared.scan_progress import ScanProgressTracker, get_file_size
 
 _storage = get_storage_backend()
@@ -388,6 +394,7 @@ def filter_geojson_by_osm_type(
     output_path: str | Path | None = None,
     heartbeat: callable | None = None,
     task_uuid: str = "",
+    run_id: str = "",
 ) -> OSMFilteredFeatures:
     """Filter a GeoJSON file by OSM element type and/or tags.
 
@@ -398,8 +405,12 @@ def filter_geojson_by_osm_type(
         osm_type: OSM element type to filter (node, way, relation, or *)
         tag_key: Optional tag key to filter by
         tag_value: Optional tag value (use "*" or None for any value)
-        output_path: Path to output GeoJSON file (default: adds _filtered suffix)
+        output_path: Path to output GeoJSON file (default: a collision-safe,
+            param-addressed name encoding osm_type/tag_key/tag_value, so distinct
+            queries on the same input do not overwrite each other)
         heartbeat: Optional callback to signal progress during long operations
+        run_id: Optional execution id; when AFL_OUTPUT_PER_RUN is set, isolates
+            the default output under a per-run subdirectory
 
     Returns:
         OSMFilteredFeatures with output path and counts
@@ -407,8 +418,17 @@ def filter_geojson_by_osm_type(
 
     input_path = str(input_path)
     if output_path is None:
-        out_dir = resolve_output_dir("osm-filtered")
-        output_path_str = f"{out_dir}/{uri_stem(input_path)}_filtered.geojson"
+        ot = osm_type.value if isinstance(osm_type, OSMType) else str(osm_type)
+        output_path_str = derive_output_path(
+            "osm-filtered",
+            uri_stem(input_path),
+            "filtered",
+            ot,
+            tag_key,
+            tag_value,
+            ext="geojson",
+            run_id=run_id or None,
+        )
     else:
         output_path_str = str(output_path)
     ensure_dir(output_path_str)
@@ -483,6 +503,7 @@ def filter_geojson_by_tag_prefix(
     output_path: str | Path | None = None,
     heartbeat: callable | None = None,
     task_uuid: str = "",
+    run_id: str = "",
 ) -> OSMFilteredFeatures:
     """Filter a GeoJSON file to features whose ``tag_key`` property value
     starts with ``value_prefix``.
@@ -512,8 +533,15 @@ def filter_geojson_by_tag_prefix(
 
     input_path = str(input_path)
     if output_path is None:
-        out_dir = resolve_output_dir("osm-filtered")
-        output_path_str = f"{out_dir}/{uri_stem(input_path)}_filtered.geojson"
+        output_path_str = derive_output_path(
+            "osm-filtered",
+            uri_stem(input_path),
+            "filtered",
+            tag_key,
+            value_prefix,
+            ext="geojson",
+            run_id=run_id or None,
+        )
     else:
         output_path_str = str(output_path)
     ensure_dir(output_path_str)
