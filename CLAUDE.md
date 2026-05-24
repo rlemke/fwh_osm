@@ -113,6 +113,27 @@ filtering the full PBF per query.
   Scans that include a way/area/relation plugin keep `locations=True` and no
   filter (member nodes are needed for geometry).
 
+### Output artifact naming
+
+Derived **leaf** artifacts (a filtered GeoJSON, a rendered map) are named by
+`derive_output_path()` in `handlers/shared/_output.py`, which encodes the
+*discriminating parameters* of the query rather than just the input stem:
+`…/osm-filtered/california-latest.osm_amenities_filtered_amenity-fast_food.geojson`.
+So two different queries over the same input (e.g. `fast_food` vs `cafe`) no
+longer overwrite each other, while the same query stays idempotent (same name →
+safe overwrite with identical content). Long/odd param sets fall back to a short
+stable hash; `*`/`None`/`""` wildcards are dropped. The rendered map inherits the
+now-unique GeoJSON stem, so it is unique too.
+
+**Do not** use `derive_output_path()` for *cacheable intermediates* (category
+extracts, scan manifests) — those are input-addressed and shared across runs by
+design (that sharing is what makes `ExtractCategory` cheap).
+
+Opt-in per-run isolation: set **`AFL_OUTPUT_PER_RUN=1`** and leaf artifacts land
+under `<category>/runs/<workflow_id>/` (handlers pass `run_id=payload["_workflow_id"]`,
+the execution id injected by the runner) — a retained, easily-cleaned per-run
+tree. Default (unset) keeps the shared, cache-friendly directory.
+
 ### PostGIS source
 
 Connects to the `osm` database (default: `AFL_POSTGIS_URL`). The
