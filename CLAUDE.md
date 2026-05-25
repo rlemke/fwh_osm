@@ -126,7 +126,7 @@ with **`osm.Vocab.ResolveTag`** (NL → `key=value`) — *lookup-then-compose*.
 | Source | `osm.ops`, `osm.Source.*` | `CacheRegion`, `ExtractCategory`, `Extract*` |
 | Clip | `osm.Clip` | `ClipByBBox`, `ClipByPolygon` (osmium extract → clipped `OSMCache`) |
 | Filter | `osm.Filters` | `FilterGeoJSONByOSMType` / `TagPrefix` / `TagContains` / `TagRegex`, radius, type |
-| Spatial | `osm.Spatial` | `WithinDistance`, `BeyondDistance`, `Nearest`, `SpatialJoin`, `Buffer`, `Intersect`, `Union` (shapely STRtree + local AEQD) |
+| Spatial | `osm.Spatial` | `WithinDistance`, `BeyondDistance`, `Nearest`, `SpatialJoin`, `Buffer`, `Intersect`, `Union`, `Centroid`, `Simplify` (shapely STRtree + local AEQD) |
 | Transform | `osm.Transform` | `MergeLayers`, `Summarize` (count/sum/avg/min/max), `Dissolve` |
 | Geocoding | `osm.geocode` | `Geocode`, `ReverseGeocode` (Nominatim) |
 | Vocabulary | `osm.Vocab` | `ResolveTag`, `ListTagValues` (NL term → OSM `key=value`) |

@@ -19,8 +19,10 @@ from .spatial_ops import (
     HAS_SHAPELY,
     beyond_distance,
     buffer,
+    centroid,
     intersect,
     nearest,
+    simplify,
     spatial_join,
     union,
     within_distance,
@@ -338,6 +340,70 @@ def _make_union_handler(facet_name: str):
     return handler
 
 
+def _make_centroid_handler(facet_name: str):
+    """Build a handler for Centroid (each feature -> its centroid Point)."""
+    qualified = f"{NAMESPACE}.{facet_name}"
+
+    def handler(payload: dict) -> dict:
+        input_path = payload.get("input_path", "")
+        step_log = payload.get("_step_log")
+
+        input_cache = {"path": input_path, "size": _file_size(input_path)}
+        cp = {"op": "centroid"}
+        hit = cached_result(qualified, input_cache, cp, step_log)
+        if hit is not None:
+            return hit
+
+        if step_log:
+            step_log(f"{facet_name}: centroids of {input_path}")
+        if not HAS_SHAPELY or not input_path:
+            return _empty_result("centroid", 0.0, "")
+
+        result = centroid(input_path, heartbeat=payload.get("_task_heartbeat"),
+                          run_id=payload.get("_workflow_id", ""))
+        if step_log:
+            step_log(f"{facet_name}: {result.feature_count} centroids", level="success")
+        rv = {"result": result.to_dict()}
+        save_result_meta(qualified, input_cache, cp, rv)
+        return rv
+
+    return handler
+
+
+def _make_simplify_handler(facet_name: str):
+    """Build a handler for Simplify (Douglas-Peucker by a metric tolerance)."""
+    qualified = f"{NAMESPACE}.{facet_name}"
+
+    def handler(payload: dict) -> dict:
+        input_path = payload.get("input_path", "")
+        tolerance = payload.get("tolerance", 0.0)
+        unit = payload.get("unit", "meters")
+        step_log = payload.get("_step_log")
+
+        input_cache = {"path": input_path, "size": _file_size(input_path)}
+        cp = {"tolerance": tolerance, "unit": unit}
+        hit = cached_result(qualified, input_cache, cp, step_log)
+        if hit is not None:
+            return hit
+
+        if step_log:
+            step_log(f"{facet_name}: simplifying {input_path} at {tolerance} {unit}")
+        if not HAS_SHAPELY or not HAS_PYPROJ or not input_path:
+            return _empty_result("simplify", tolerance, unit)
+
+        result = simplify(input_path, tolerance, unit=unit,
+                          heartbeat=payload.get("_task_heartbeat"),
+                          run_id=payload.get("_workflow_id", ""))
+        if step_log:
+            step_log(f"{facet_name}: simplified {result.feature_count} features "
+                     f"at {tolerance} {unit}", level="success")
+        rv = {"result": result.to_dict()}
+        save_result_meta(qualified, input_cache, cp, rv)
+        return rv
+
+    return handler
+
+
 # Event facet definitions for handler registration.
 SPATIAL_FACETS = [
     ("WithinDistance", lambda n: _make_distance_handler(n, within_distance)),
@@ -347,6 +413,8 @@ SPATIAL_FACETS = [
     ("Buffer", _make_buffer_handler),
     ("Intersect", _make_intersect_handler),
     ("Union", _make_union_handler),
+    ("Centroid", _make_centroid_handler),
+    ("Simplify", _make_simplify_handler),
 ]
 
 

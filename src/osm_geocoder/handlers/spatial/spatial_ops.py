@@ -787,3 +787,165 @@ def union(
         unit="",
         extraction_date=datetime.now(UTC).isoformat(),
     )
+
+
+# --- Centroid / Simplify: single-layer geometry reducers ----------------------
+
+
+def centroid(
+    input_path: str,
+    output_path: str | None = None,
+    heartbeat=None,
+    run_id: str = "",
+) -> SpatialResult:
+    """Replace each feature's geometry with its centroid Point (ST_Centroid).
+
+    Reduces polygons/lines to a representative point (properties preserved) — e.g.
+    label anchors, or to feed the point-based Spatial verbs. 1:1 feature count.
+    Centroids are computed in lon/lat space (fine for the regional extents these
+    compose at); points pass through unchanged.
+    """
+    if not HAS_SHAPELY:
+        raise RuntimeError("shapely>=2.0 is required for osm.Spatial operations")
+
+    input_path = str(input_path)
+    if output_path is None:
+        output_path = derive_output_path(
+            "osm-spatial", uri_stem(input_path), "centroid",
+            ext="geojson", run_id=run_id or None,
+        )
+    output_path = str(output_path)
+    ensure_dir(output_path)
+
+    from facetwork.config import get_temp_dir
+    from facetwork.runtime.storage import localize
+
+    local_input = localize(input_path)
+    original_count = 0
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".geojson", dir=get_temp_dir())
+    os.close(tmp_fd)
+    try:
+        with GeoJSONStreamWriter(tmp_path) as writer:
+            for feature in iter_geojson_features(local_input, heartbeat):
+                original_count += 1
+                geom_json = feature.get("geometry")
+                if not geom_json:
+                    continue
+                try:
+                    c = shape(geom_json).centroid
+                except Exception as exc:
+                    log.warning("spatial: centroid failed, skipping: %s", exc)
+                    continue
+                if c.is_empty:
+                    continue
+                feature["geometry"] = mapping(c)
+                writer.write_feature(feature)
+        ensure_dir(output_path)
+        shutil.move(tmp_path, output_path)
+        feature_count = writer.feature_count
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    return SpatialResult(
+        output_path=output_path,
+        feature_count=feature_count,
+        original_count=original_count,
+        reference_count=0,
+        operation="centroid",
+        distance=0.0,
+        unit="",
+        extraction_date=datetime.now(UTC).isoformat(),
+    )
+
+
+def simplify(
+    input_path: str,
+    tolerance: float,
+    unit: str = "meters",
+    output_path: str | None = None,
+    heartbeat=None,
+    run_id: str = "",
+) -> SpatialResult:
+    """Douglas-Peucker simplify each geometry at ``tolerance`` (ST_Simplify).
+
+    Drops vertices within ``tolerance`` (in ``unit``, default meters) of the
+    simplified line; topology-preserving. The tolerance is *metric*: geometries
+    are projected to a local azimuthal-equidistant CRS, simplified, and reprojected
+    to WGS84 — so the same tolerance behaves consistently regardless of latitude.
+    Properties preserved; points pass through unchanged.
+    """
+    if not HAS_SHAPELY or not HAS_PYPROJ:
+        raise RuntimeError("shapely>=2.0 and pyproj>=3.0 are required for osm.Spatial operations")
+    unit_enum = Unit.from_string(unit)
+    tol_m = to_meters(tolerance, unit_enum)
+
+    input_path = str(input_path)
+    if output_path is None:
+        output_path = derive_output_path(
+            "osm-spatial", uri_stem(input_path), "simplify",
+            f"{tolerance}{unit_enum.value}", ext="geojson", run_id=run_id or None,
+        )
+    output_path = str(output_path)
+    ensure_dir(output_path)
+
+    from facetwork.config import get_temp_dir
+    from facetwork.runtime.storage import localize
+
+    local_input = localize(input_path)
+    center = _layer_centroid(local_input, heartbeat)
+    if center is None:
+        with GeoJSONStreamWriter(output_path):
+            pass
+        return SpatialResult(
+            output_path=output_path, feature_count=0, original_count=0, reference_count=0,
+            operation="simplify", distance=tolerance, unit=unit_enum.value,
+            extraction_date=datetime.now(UTC).isoformat(),
+        )
+
+    aeqd = CRS.from_proj4(
+        f"+proj=aeqd +lat_0={center[1]} +lon_0={center[0]} +datum=WGS84 +units=m +no_defs"
+    )
+    wgs84 = CRS.from_epsg(4326)
+    fwd = Transformer.from_crs(wgs84, aeqd, always_xy=True).transform
+    inv = Transformer.from_crs(aeqd, wgs84, always_xy=True).transform
+
+    original_count = 0
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".geojson", dir=get_temp_dir())
+    os.close(tmp_fd)
+    try:
+        with GeoJSONStreamWriter(tmp_path) as writer:
+            for feature in iter_geojson_features(local_input, heartbeat):
+                original_count += 1
+                geom_json = feature.get("geometry")
+                if not geom_json:
+                    continue
+                try:
+                    projected = shapely_transform(fwd, shape(geom_json))
+                    reduced = shapely_transform(inv, projected.simplify(tol_m, preserve_topology=True))
+                except Exception as exc:
+                    log.warning("spatial: simplify failed, skipping: %s", exc)
+                    continue
+                if reduced.is_empty:
+                    continue
+                feature["geometry"] = mapping(reduced)
+                writer.write_feature(feature)
+        ensure_dir(output_path)
+        shutil.move(tmp_path, output_path)
+        feature_count = writer.feature_count
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    return SpatialResult(
+        output_path=output_path,
+        feature_count=feature_count,
+        original_count=original_count,
+        reference_count=0,
+        operation="simplify",
+        distance=tolerance,
+        unit=unit_enum.value,
+        extraction_date=datetime.now(UTC).isoformat(),
+    )

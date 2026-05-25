@@ -84,4 +84,16 @@ namespace osm.Spatial {
         layer's features. The whole-layer / two-layer merge, distinct from Dissolve
         (which unions per group). e.g. the combined footprint of many polygons. */
     event facet Union(input_path: String, other_path: String = "") => (result: SpatialResult)
+
+    /** Replaces each feature's geometry with its centroid Point (PostGIS
+        ST_Centroid / turf centroid), preserving properties — reduce polygons/lines
+        to label/anchor points (e.g. to feed the point-based Spatial verbs or
+        RenderMap markers). 1:1 feature count. */
+    event facet Centroid(input_path: String) => (result: SpatialResult)
+
+    /** Douglas-Peucker simplifies each geometry at `tolerance` (in `unit`, default
+        meters), dropping vertices within tolerance of the simplified line (PostGIS
+        ST_Simplify / turf simplify). Topology-preserving; computed in a local
+        equidistant projection so the tolerance is metric. Properties preserved. */
+    event facet Simplify(input_path: String, tolerance: Double, unit: String = "meters") => (result: SpatialResult)
 }

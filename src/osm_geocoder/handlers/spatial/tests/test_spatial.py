@@ -301,3 +301,46 @@ def test_intersect_empty_clip_keeps_nothing(tmp_path):
     subj = _write(tmp_path / "subj.geojson", _poly_fc((0, 0)))
     res = ops.intersect(subj, clip, output_path=str(tmp_path / "out.geojson"))
     assert res.feature_count == 0 and res.original_count == 1
+
+
+# --- Centroid / Simplify -------------------------------------------------------
+
+
+def test_centroid_reduces_polygon_to_point(tmp_path):
+    src = _write(tmp_path / "c.geojson", _poly_fc((0, 0, 2.0, {"id": "sq"})))  # (0,0)-(2,2)
+    res = ops.centroid(src, output_path=str(tmp_path / "out.geojson"))
+    assert res.operation == "centroid"
+    assert res.feature_count == res.original_count == 1
+    feat = _read_features(res.output_path)[0]
+    assert feat["geometry"]["type"] == "Point"
+    assert feat["geometry"]["coordinates"] == pytest.approx([1.0, 1.0])
+    assert feat["properties"]["id"] == "sq"          # properties preserved
+
+
+def _line_fc(coords, props=None):
+    return {"type": "FeatureCollection", "features": [{
+        "type": "Feature", "properties": props or {},
+        "geometry": {"type": "LineString", "coordinates": coords}}]}
+
+
+def test_simplify_drops_near_collinear_vertices(tmp_path):
+    # 3 points along the equator; the middle one is ~1.1 m off the straight line
+    # (0.00001 deg lat at lon 0.005 deg ≈ 556 m east).
+    line = [[0.0, 0.0], [0.005, 0.00001], [0.01, 0.0]]
+    src = _write(tmp_path / "l.geojson", _line_fc(line, {"id": "L"}))
+
+    coarse = ops.simplify(src, 100.0, unit="meters", output_path=str(tmp_path / "coarse.geojson"))
+    fine = ops.simplify(src, 0.2, unit="meters", output_path=str(tmp_path / "fine.geojson"))
+
+    n_coarse = len(_read_features(coarse.output_path)[0]["geometry"]["coordinates"])
+    n_fine = len(_read_features(fine.output_path)[0]["geometry"]["coordinates"])
+    assert n_coarse == 2          # 100 m tolerance drops the ~1 m jog
+    assert n_fine == 3            # 0.2 m tolerance keeps it
+    assert coarse.operation == "simplify" and coarse.unit == "meters"
+    assert _read_features(coarse.output_path)[0]["properties"]["id"] == "L"
+
+
+def test_simplify_empty_input(tmp_path):
+    src = _write(tmp_path / "e.geojson", _fc([]))
+    res = ops.simplify(src, 50.0, output_path=str(tmp_path / "out.geojson"))
+    assert res.feature_count == 0
