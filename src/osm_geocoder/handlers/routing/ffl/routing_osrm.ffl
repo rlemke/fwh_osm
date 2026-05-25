@@ -34,4 +34,16 @@ namespace osm.Routing.OSRM {
         time_minutes: Long = 15,
         profile: String = "car"
     ) => (result: IsochroneResult)
+
+    /** Compute an NxN travel-time/distance matrix between `points` (a JSON list of
+        {lon,lat,name} or a "lon,lat;lon,lat;…" string) via OSRM /table. */
+    event facet Matrix(points: String, profile: String = "car") => (result: MatrixResult)
+
+    /** Snap a coordinate to the nearest point on the road network via OSRM
+        /nearest, returning the snapped location, the snap distance, and street name. */
+    event facet Nearest(lat: Double, lon: Double, profile: String = "car", number: Long = 1) => (result: NearestResult)
+
+    /** Map-match a GPS `trace` (JSON list of {lon,lat} or "lon,lat;…") to the road
+        network via OSRM /match, returning the matched geometry + a confidence. */
+    event facet MapMatch(trace: String, profile: String = "car") => (result: MapMatchResult)
 }

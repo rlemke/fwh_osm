@@ -113,6 +113,39 @@ filtering the full PBF per query.
   Scans that include a way/area/relation plugin keep `locations=True` and no
   filter (member nodes are needed for geometry).
 
+### Composable facet library
+
+Beyond the source adapters, this package ships a layered library of orthogonal,
+path-composable primitives (design: facetwork's
+`docs/architecture/composable-facet-library.md`). Discover them at runtime with
+the **`fw_capabilities`** MCP tool (NL → facet) and resolve NL terms to OSM tags
+with **`osm.Vocab.ResolveTag`** (NL → `key=value`) — *lookup-then-compose*.
+
+| Layer | Namespace | Verbs |
+|-------|-----------|-------|
+| Source | `osm.ops`, `osm.Source.*` | `CacheRegion`, `ExtractCategory`, `Extract*` |
+| Clip | `osm.Clip` | `ClipByBBox`, `ClipByPolygon` (osmium extract → clipped `OSMCache`) |
+| Filter | `osm.Filters` | `FilterGeoJSONByOSMType` / `TagPrefix` / `TagContains` / `TagRegex`, radius, type |
+| Spatial | `osm.Spatial` | `WithinDistance`, `BeyondDistance`, `Nearest`, `SpatialJoin`, `Buffer` (shapely STRtree + local AEQD) |
+| Transform | `osm.Transform` | `MergeLayers`, `Summarize` (count/sum/avg/min/max), `Dissolve` |
+| Geocoding | `osm.geocode` | `Geocode`, `ReverseGeocode` (Nominatim) |
+| Vocabulary | `osm.Vocab` | `ResolveTag`, `ListTagValues` (NL term → OSM `key=value`) |
+| Routing | `osm.Routing.{OSRM,API}` | `Route`, `MultiStopRoute`, `Isochrone`, `Matrix`, `Nearest`, `MapMatch` |
+| Render / Tiles | `osm.viz`, `osm.Tiles` | `RenderMap`, `RenderLayers`, `BuildVectorTiles` (tippecanoe → MBTiles/PMTiles) |
+
+Everything operates on GeoJSON **paths** (or an `OSMCache` for Source/Clip), so
+steps chain: `CacheRegion → ExtractCategory → Filter* → Spatial/Transform →
+RenderMap/BuildVectorTiles`. New facets follow the established pattern: FFL under
+`handlers/<area>/ffl/`, a handler module + `register_*`/`register_handlers` wired
+into `handlers/__init__.py`, tool logic in `tools/_osm_tools/` reached via the
+`shared/pbf_convert.py` shim, and deterministic tests under `handlers/<area>/tests/`.
+
+**External-engine deps** (the only non-pure facets): Routing needs a running OSRM
+(`AFL_OSRM_URL`, default `http://localhost:5000`); `BuildVectorTiles` needs
+`tippecanoe` (+ `pmtiles` for PMTiles output); geocoding hits Nominatim
+(`AFL_NOMINATIM_URL`). Each degrades gracefully or fails explicitly when its
+engine is absent.
+
 ### Output artifact naming
 
 Derived **leaf** artifacts (a filtered GeoJSON, a rendered map) are named by

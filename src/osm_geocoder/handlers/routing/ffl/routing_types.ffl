@@ -52,4 +52,38 @@ namespace osm.Routing.Types {
         backend: String,
         format: String
     }
+
+    /** Result of an NxN duration/distance matrix. `durations`/`distances` are
+        JSON-encoded NxN arrays (seconds / meters); the full matrix is also
+        written to `output_path`. */
+    schema MatrixResult {
+        output_path: String,
+        point_count: Long,
+        durations: Json,
+        distances: Json,
+        profile: String,
+        backend: String,
+        format: String
+    }
+
+    /** Result of snapping a coordinate to the road network. */
+    schema NearestResult {
+        snapped_lat: Double,
+        snapped_lon: Double,
+        distance_m: Double,
+        name: String,
+        profile: String,
+        backend: String
+    }
+
+    /** Result of map-matching a GPS trace to the road network. */
+    schema MapMatchResult {
+        output_path: String,
+        matched_points: Long,
+        confidence: Double,
+        distance_km: Double,
+        profile: String,
+        backend: String,
+        format: String
+    }
 }

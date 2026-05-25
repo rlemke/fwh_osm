@@ -427,6 +427,200 @@ def _convex_hull(points: list[tuple[float, float] | list[float]]) -> list[list[f
 
 
 # ---------------------------------------------------------------------------
+# Matrix / Nearest / MapMatch handlers
+# ---------------------------------------------------------------------------
+
+
+def _parse_points(raw) -> list[dict]:
+    """Parse a points/trace argument: a JSON list of {lon,lat,name}, or a
+    ``"lon,lat;lon,lat;…"`` string."""
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+        pts = []
+        for pair in raw.split(";"):
+            parts = pair.strip().split(",")
+            if len(parts) >= 2:
+                pts.append({"lon": float(parts[0]), "lat": float(parts[1]), "name": ""})
+        return pts
+    return []
+
+
+def _haversine_seconds_meters(lon1, lat1, lon2, lat2, speed_kmh=80) -> tuple[float, float]:
+    est = _estimate_route(lon1, lat1, lon2, lat2)
+    meters = est["distance_km"] * 1000
+    return est["duration_min"] * 60, meters
+
+
+def _handle_matrix(payload: dict) -> dict:
+    """Handle osm.Routing.OSRM.Matrix — NxN duration/distance matrix via /table."""
+    points = _parse_points(payload.get("points", ""))
+    profile = payload.get("profile", "car")
+    step_log = payload.get("_step_log")
+    if len(points) < 2:
+        return {"result": _empty_matrix(profile)}
+
+    if step_log:
+        step_log(f"OSRM.Matrix: {len(points)}x{len(points)} ({profile})")
+
+    coords = [(p.get("lon", 0), p.get("lat", 0)) for p in points]
+    data = _osrm_request("table", coords, profile, annotations="duration,distance")
+
+    if data and data.get("durations"):
+        durations = data["durations"]
+        distances = data.get("distances", [])
+        backend = "osrm-local"
+    else:
+        # Great-circle fallback: full NxN matrix.
+        durations, distances = [], []
+        for a in coords:
+            drow, mrow = [], []
+            for b in coords:
+                secs, m = _haversine_seconds_meters(a[0], a[1], b[0], b[1])
+                drow.append(round(secs, 1))
+                mrow.append(round(m, 1))
+            durations.append(drow)
+            distances.append(mrow)
+        backend = "estimate"
+
+    labels = [p.get("name", f"p{i}") for i, p in enumerate(points)]
+    output_path = os.path.join(_output_dir(), f"osrm-matrix-{len(points)}pts-{profile}.json")
+    with open(output_path, "w") as f:
+        json.dump({"labels": labels, "durations": durations, "distances": distances,
+                   "profile": profile, "backend": backend}, f)
+
+    if step_log:
+        step_log(f"OSRM.Matrix: {len(points)}x{len(points)} computed ({backend})", level="success")
+
+    return {
+        "result": {
+            "output_path": output_path,
+            "point_count": len(points),
+            "durations": json.dumps(durations),
+            "distances": json.dumps(distances),
+            "profile": profile,
+            "backend": backend,
+            "format": "JSON",
+        }
+    }
+
+
+def _empty_matrix(profile: str) -> dict:
+    return {"output_path": "", "point_count": 0, "durations": "[]", "distances": "[]",
+            "profile": profile, "backend": "none", "format": "JSON"}
+
+
+def _handle_nearest(payload: dict) -> dict:
+    """Handle osm.Routing.OSRM.Nearest — snap a coordinate to the road network."""
+    lat = payload.get("lat", 0)
+    lon = payload.get("lon", 0)
+    profile = payload.get("profile", "car")
+    number = int(payload.get("number", 1))
+    step_log = payload.get("_step_log")
+
+    if step_log:
+        step_log(f"OSRM.Nearest: ({lat}, {lon}) ({profile})")
+
+    data = _osrm_request("nearest", [(lon, lat)], profile, number=number)
+
+    if data and data.get("waypoints"):
+        wp = data["waypoints"][0]
+        snapped_lon, snapped_lat = wp["location"]
+        distance_m = round(wp.get("distance", 0.0), 2)
+        name = wp.get("name", "")
+        backend = "osrm-local"
+    else:
+        snapped_lon, snapped_lat, distance_m, name, backend = lon, lat, 0.0, "", "estimate"
+
+    if step_log:
+        step_log(f"OSRM.Nearest: snapped to {name or '(road)'} {distance_m}m ({backend})", level="success")
+
+    return {
+        "result": {
+            "snapped_lat": snapped_lat,
+            "snapped_lon": snapped_lon,
+            "distance_m": distance_m,
+            "name": name,
+            "profile": profile,
+            "backend": backend,
+        }
+    }
+
+
+def _handle_map_match(payload: dict) -> dict:
+    """Handle osm.Routing.OSRM.MapMatch — snap a GPS trace to the road network."""
+    trace = _parse_points(payload.get("trace", ""))
+    profile = payload.get("profile", "car")
+    step_log = payload.get("_step_log")
+    if len(trace) < 2:
+        return {"result": _empty_match(profile)}
+
+    if step_log:
+        step_log(f"OSRM.MapMatch: {len(trace)}-point trace ({profile})")
+
+    coords = [(p.get("lon", 0), p.get("lat", 0)) for p in trace]
+    # A per-point search radius (meters) loosens matching so a noisy / sparse
+    # GPS trace still snaps; without it OSRM returns NoMatch on imperfect traces.
+    radius_m = int(payload.get("radius_m", 30))
+    radiuses = ";".join([str(radius_m)] * len(coords))
+    data = _osrm_request(
+        "match", coords, profile,
+        geometries="geojson", overview="full", radiuses=radiuses, tidy="true",
+    )
+
+    if data and data.get("matchings"):
+        m = data["matchings"][0]
+        matched_coords = m.get("geometry", {}).get("coordinates", [list(c) for c in coords])
+        confidence = round(m.get("confidence", 0.0), 3)
+        distance_km = round(m.get("distance", 0) / 1000, 2)
+        backend = "osrm-local"
+    else:
+        matched_coords = [list(c) for c in coords]
+        confidence = 0.0
+        distance_km = 0.0
+        backend = "estimate"
+
+    output_path = os.path.join(_output_dir(), f"osrm-match-{len(trace)}pts-{profile}.geojson")
+    geojson = {
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "geometry": {"type": "LineString", "coordinates": matched_coords},
+            "properties": {"trace_points": len(trace), "confidence": confidence,
+                           "distance_km": distance_km, "profile": profile},
+        }],
+    }
+    with open(output_path, "w") as f:
+        json.dump(geojson, f)
+
+    if step_log:
+        step_log(f"OSRM.MapMatch: matched {len(trace)} pts, conf {confidence} ({backend})", level="success")
+
+    return {
+        "result": {
+            "output_path": output_path,
+            "matched_points": len(matched_coords),
+            "confidence": confidence,
+            "distance_km": distance_km,
+            "profile": profile,
+            "backend": backend,
+            "format": "GeoJSON",
+        }
+    }
+
+
+def _empty_match(profile: str) -> dict:
+    return {"output_path": "", "matched_points": 0, "confidence": 0.0, "distance_km": 0.0,
+            "profile": profile, "backend": "none", "format": "GeoJSON"}
+
+
+# ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
 
@@ -434,6 +628,9 @@ OSRM_DISPATCH: dict[str, callable] = {
     f"{NAMESPACE}.Route": _handle_route,
     f"{NAMESPACE}.MultiStopRoute": _handle_multi_stop,
     f"{NAMESPACE}.Isochrone": _handle_isochrone,
+    f"{NAMESPACE}.Matrix": _handle_matrix,
+    f"{NAMESPACE}.Nearest": _handle_nearest,
+    f"{NAMESPACE}.MapMatch": _handle_map_match,
 }
 
 
