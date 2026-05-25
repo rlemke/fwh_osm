@@ -31,6 +31,7 @@ from .routing.routing_adapter_handlers import register_routing_adapter_handlers
 from .shared.pbf_cache import download_region  # noqa: F401
 from .sources.source_handlers import register_source_handlers
 from .spatial.spatial_handlers import register_spatial_handlers
+from .tiles.tile_handlers import register_tile_handlers
 from .transform.transform_handlers import register_transform_handlers
 from .valhalla.valhalla_handlers import register_valhalla_handlers
 from .visualization.html_map_handlers import register_html_map_handlers
@@ -69,6 +70,7 @@ __all__ = [
     "register_routing_adapter_handlers",
     "register_source_handlers",
     "register_spatial_handlers",
+    "register_tile_handlers",
     "register_transform_handlers",
     "register_valhalla_handlers",
     "register_vocab_handlers",
@@ -108,6 +110,7 @@ def register_all_handlers(poller) -> None:
     register_source_handlers(poller)
     register_routing_adapter_handlers(poller)
     register_spatial_handlers(poller)
+    register_tile_handlers(poller)
     register_transform_handlers(poller)
 
 
@@ -168,6 +171,7 @@ def register_all_registry_handlers(runner) -> None:
     from .routing.routing_adapter_handlers import register_handlers as reg_routing_adapter
     from .sources.source_handlers import register_handlers as reg_source
     from .spatial.spatial_handlers import register_handlers as reg_spatial
+    from .tiles.tile_handlers import register_handlers as reg_tile
     from .transform.transform_handlers import register_handlers as reg_transform
     from .vocab.vocab_handlers import register_handlers as reg_vocab
 
@@ -176,5 +180,6 @@ def register_all_registry_handlers(runner) -> None:
     reg_source(runner)
     reg_routing_adapter(runner)
     reg_spatial(runner)
+    reg_tile(runner)
     reg_transform(runner)
     reg_vocab(runner)

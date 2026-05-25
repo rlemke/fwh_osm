@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -334,7 +335,7 @@ def build_tiles(
             mbtiles_staging.unlink(missing_ok=True)
             raise BuildError(
                 f"'{pmtiles_bin}' not found. Install with: brew install pmtiles"
-            )
+            ) from None
         except subprocess.CalledProcessError as exc:
             mbtiles_staging.unlink(missing_ok=True)
             staging.unlink(missing_ok=True)
@@ -402,3 +403,87 @@ def build_tiles(
             source_sha256=src_sha,
             sidecar=side,
         )
+
+
+@dataclass
+class GeoJsonTileResult:
+    """Outcome of a path-based :func:`build_from_geojson` build."""
+
+    output_path: str
+    format: str          # "pmtiles" or "mbtiles"
+    size_bytes: int
+    min_zoom: int
+    max_zoom: int
+    layer: str
+    duration_seconds: float
+
+
+def build_from_geojson(
+    input_path: str,
+    output_path: str,
+    *,
+    min_zoom: int = DEFAULT_MIN_ZOOM,
+    max_zoom: int = DEFAULT_MAX_ZOOM,
+    layer_name: str = "features",
+    tippecanoe_bin: str = "tippecanoe",
+    pmtiles_bin: str = "pmtiles",
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+) -> GeoJsonTileResult:
+    """Build vector tiles directly from a GeoJSON / GeoJSONSeq *path*.
+
+    The composable, path-in/artifact-out counterpart to :func:`build_tiles`
+    (which is region/cache-coupled): tile any layer the Extract/Filter/Transform
+    facets produced. Produces MBTiles via ``tippecanoe``; if ``output_path`` ends
+    in ``.pmtiles`` it is converted with the ``pmtiles`` CLI. ``input_path`` must
+    be a local path (the caller localizes).
+    """
+    src = Path(input_path)
+    if not src.is_file():
+        raise BuildError(f"input GeoJSON not found: {input_path}")
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    want_pmtiles = out.suffix == ".pmtiles"
+
+    fd, tmp_mbtiles = tempfile.mkstemp(suffix=".mbtiles")
+    os.close(fd)
+    Path(tmp_mbtiles).unlink(missing_ok=True)
+
+    cmd = [
+        tippecanoe_bin, "-o", tmp_mbtiles,
+        "-Z", str(min_zoom), "-z", str(max_zoom),
+        "--force", "--layer", layer_name,
+        "--drop-densest-as-needed", "--coalesce-densest-as-needed", "--read-parallel",
+        str(src),
+    ]
+    start = time.monotonic()
+    try:
+        subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds, check=True)
+        if want_pmtiles:
+            subprocess.run(
+                [pmtiles_bin, "convert", tmp_mbtiles, str(out)],
+                capture_output=True, text=True, timeout=timeout_seconds, check=True,
+            )
+        else:
+            shutil.move(tmp_mbtiles, str(out))
+    except subprocess.CalledProcessError as exc:
+        Path(tmp_mbtiles).unlink(missing_ok=True)
+        raise BuildError(f"tile build failed: {(exc.stderr or '').strip() or exc}") from exc
+    except subprocess.TimeoutExpired as exc:
+        Path(tmp_mbtiles).unlink(missing_ok=True)
+        raise BuildError(f"tile build timed out after {timeout_seconds}s") from exc
+    except BaseException:
+        Path(tmp_mbtiles).unlink(missing_ok=True)
+        raise
+    finally:
+        if want_pmtiles:
+            Path(tmp_mbtiles).unlink(missing_ok=True)
+
+    return GeoJsonTileResult(
+        output_path=str(out),
+        format="pmtiles" if want_pmtiles else "mbtiles",
+        size_bytes=out.stat().st_size,
+        min_zoom=min_zoom,
+        max_zoom=max_zoom,
+        layer=layer_name,
+        duration_seconds=time.monotonic() - start,
+    )

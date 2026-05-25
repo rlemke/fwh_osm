@@ -36,3 +36,4 @@ from _osm_tools import pbf_extract as extract  # noqa: E402,F401
 from _osm_tools import pbf_geojson as geojson  # noqa: E402,F401
 from _osm_tools import pbf_shapefile as shapefile  # noqa: E402,F401
 from _osm_tools import valhalla_build as valhalla  # noqa: E402,F401
+from _osm_tools import vector_tiles_build as vector_tiles  # noqa: E402,F401

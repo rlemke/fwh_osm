@@ -1,0 +1,26 @@
+// Vector tiles — the scalable-visualization Render/Tiles primitive.
+//
+// Encodes a GeoJSON layer into vector tiles (MBTiles, or PMTiles when the
+// pmtiles CLI is present) via tippecanoe — the path-in/artifact-out counterpart
+// to RenderMap, for layers too large to draw as a single Leaflet GeoJSON. Feed
+// any Extract/Filter/Transform/Spatial output; serve the result with MapLibre.
+
+/** Vector-tile generation from GeoJSON via tippecanoe. */
+namespace osm.Tiles {
+
+    /** A built vector-tile artifact. `format` is "pmtiles" (preferred, when the
+        pmtiles CLI is available) or "mbtiles". */
+    schema TileResult {
+        output_path: String,
+        format: String,
+        size_bytes: Long,
+        min_zoom: Long,
+        max_zoom: Long,
+        layer: String
+    }
+
+    /** Builds vector tiles from a GeoJSON layer via tippecanoe. `layer_name` names
+        the tile layer; `min_zoom`/`max_zoom` set the zoom range. Output is PMTiles
+        when the pmtiles CLI is installed, else MBTiles. */
+    event facet BuildVectorTiles(geojson_path: String, layer_name: String = "features", min_zoom: Long = 0, max_zoom: Long = 14) => (result: TileResult) with Timeout(minutes = 60)
+}
