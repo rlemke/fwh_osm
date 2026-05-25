@@ -140,6 +140,14 @@ RenderMap/BuildVectorTiles`. New facets follow the established pattern: FFL unde
 into `handlers/__init__.py`, tool logic in `tools/_osm_tools/` reached via the
 `shared/pbf_convert.py` shim, and deterministic tests under `handlers/<area>/tests/`.
 
+**Effect/cost annotations.** Facets may declare `with Effect(kind = "pure"|"external"|"io")` and
+`with Cost(tier = "free"|"cheap"|"moderate"|"expensive")` after the `=> (...)` return clause (cost is
+also inferred from an existing `with Timeout(minutes = …)`). `fw_capabilities` surfaces + filters on
+these so the composer prefers pure/cheap primitives. Annotated so far: `osm.Spatial`/`osm.Transform`
+(pure/cheap), `osm.geocode` (external/cheap), `ExtractCategory`/`osm.Clip`/`osm.Tiles`
+(external/expensive). When adding a facet, tag it: pure + cheap if it's in-process GeoJSON
+compute, external if it hits a server/DB/subprocess.
+
 **External-engine deps** (the only non-pure facets): Routing needs a running OSRM
 (`AFL_OSRM_URL`, default `http://localhost:5000`); `BuildVectorTiles` needs
 `tippecanoe` (+ `pmtiles` for PMTiles output); geocoding hits Nominatim

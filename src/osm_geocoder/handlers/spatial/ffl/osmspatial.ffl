@@ -37,14 +37,14 @@ namespace osm.Spatial {
         The "Overpass around" / PostGIS ST_DWithin primitive — e.g. addresses
         within 1 km of a transit stop. */
     event facet WithinDistance(subject_path: String, reference_path: String,
-        distance: Double, unit: String = "miles") => (result: SpatialResult)
+        distance: Double, unit: String = "miles") => (result: SpatialResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Keeps SUBJECT features beyond `distance` from EVERY REFERENCE feature —
         the complement of WithinDistance. The "food desert" primitive: population
         points more than `distance` from any supermarket (or any hospital, school,
         pharmacy — whatever the reference layer holds). */
     event facet BeyondDistance(subject_path: String, reference_path: String,
-        distance: Double, unit: String = "miles") => (result: SpatialResult)
+        distance: Double, unit: String = "miles") => (result: SpatialResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Annotates every SUBJECT feature with the distance to its nearest REFERENCE
         feature (`nearest_distance_m` / `nearest_distance`, plus `nearest_ref_name`
@@ -53,7 +53,7 @@ namespace osm.Spatial {
         caps the search radius (features with no reference within it get a null
         annotation). */
     event facet Nearest(subject_path: String, reference_path: String,
-        unit: String = "miles", distance: Double = 0.0) => (result: SpatialResult)
+        unit: String = "miles", distance: Double = 0.0) => (result: SpatialResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Attaches matching REFERENCE-layer properties onto each SUBJECT feature by
         a topological predicate (`intersects` | `within` | `contains`) — the
@@ -62,14 +62,14 @@ namespace osm.Spatial {
         `<prefix>joined_count`). `how="inner"` keeps only matched subjects;
         `how="left"` keeps all. e.g. tag each business point with the census tract
         (`within`) it falls inside. */
-    event facet SpatialJoin(subject_path: String, reference_path: String, predicate: String = "intersects", prefix: String = "ref_", how: String = "left") => (result: SpatialResult)
+    event facet SpatialJoin(subject_path: String, reference_path: String, predicate: String = "intersects", prefix: String = "ref_", how: String = "left") => (result: SpatialResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Buffers every feature by `distance` (in `unit`) into polygons — the area
         within `distance` of each feature (PostGIS ST_Buffer / turf buffer). Tags
         preserved; feed the result to SpatialJoin / WithinDistance or RenderMap
         (e.g. supermarket service-area coverage). Buffered in a local
         azimuthal-equidistant projection, reprojected to WGS84. */
-    event facet Buffer(input_path: String, distance: Double, unit: String = "miles") => (result: SpatialResult)
+    event facet Buffer(input_path: String, distance: Double, unit: String = "miles") => (result: SpatialResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Clips each SUBJECT feature to the CLIP layer's geometry (PostGIS
         ST_Intersection / turf intersect) — the clip layer is unioned into one
@@ -77,23 +77,23 @@ namespace osm.Spatial {
         part is kept (subject properties preserved); non-overlapping features are
         dropped. The geometric cookie-cutter, distinct from SpatialJoin (which
         attaches attributes without cutting geometry). e.g. parks within a city. */
-    event facet Intersect(subject_path: String, clip_path: String) => (result: SpatialResult)
+    event facet Intersect(subject_path: String, clip_path: String) => (result: SpatialResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Unions all geometries into ONE merged feature (PostGIS ST_Union aggregate
         / turf union). With `other_path`, merges both layers; else the single
         layer's features. The whole-layer / two-layer merge, distinct from Dissolve
         (which unions per group). e.g. the combined footprint of many polygons. */
-    event facet Union(input_path: String, other_path: String = "") => (result: SpatialResult)
+    event facet Union(input_path: String, other_path: String = "") => (result: SpatialResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Replaces each feature's geometry with its centroid Point (PostGIS
         ST_Centroid / turf centroid), preserving properties — reduce polygons/lines
         to label/anchor points (e.g. to feed the point-based Spatial verbs or
         RenderMap markers). 1:1 feature count. */
-    event facet Centroid(input_path: String) => (result: SpatialResult)
+    event facet Centroid(input_path: String) => (result: SpatialResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Douglas-Peucker simplifies each geometry at `tolerance` (in `unit`, default
         meters), dropping vertices within tolerance of the simplified line (PostGIS
         ST_Simplify / turf simplify). Topology-preserving; computed in a local
         equidistant projection so the tolerance is metric. Properties preserved. */
-    event facet Simplify(input_path: String, tolerance: Double, unit: String = "meters") => (result: SpatialResult)
+    event facet Simplify(input_path: String, tolerance: Double, unit: String = "meters") => (result: SpatialResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 }

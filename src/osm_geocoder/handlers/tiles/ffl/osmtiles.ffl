@@ -22,5 +22,5 @@ namespace osm.Tiles {
     /** Builds vector tiles from a GeoJSON layer via tippecanoe. `layer_name` names
         the tile layer; `min_zoom`/`max_zoom` set the zoom range. Output is PMTiles
         when the pmtiles CLI is installed, else MBTiles. */
-    event facet BuildVectorTiles(geojson_path: String, layer_name: String = "features", min_zoom: Long = 0, max_zoom: Long = 14) => (result: TileResult) with Timeout(minutes = 60)
+    event facet BuildVectorTiles(geojson_path: String, layer_name: String = "features", min_zoom: Long = 0, max_zoom: Long = 14) => (result: TileResult) with Timeout(minutes = 60) with Effect(kind = "external")
 }

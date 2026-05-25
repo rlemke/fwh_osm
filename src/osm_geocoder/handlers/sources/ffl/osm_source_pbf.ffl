@@ -40,5 +40,5 @@ namespace osm.Source.PBF {
      * single-category pass on demand. Use this instead of FilterByOSMTag over the
      * full PBF — then filter the small per-category GeoJSON with the FilterGeoJSON*
      * facets. */
-    event facet ExtractCategory(cache: OSMCache, category: String) => (output_path: String, feature_count: Long, category: String) with Timeout(minutes = 120)
+    event facet ExtractCategory(cache: OSMCache, category: String) => (output_path: String, feature_count: Long, category: String) with Timeout(minutes = 120) with Effect(kind = "external")
 }

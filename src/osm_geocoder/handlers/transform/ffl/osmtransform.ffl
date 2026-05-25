@@ -26,16 +26,16 @@ namespace osm.Transform {
     /** Concatenates several GeoJSON layers into one FeatureCollection — the
         foreach-fanout aggregator (collect per-region/category layers -> merge ->
         render/analyze). Properties preserved; missing inputs skipped. */
-    event facet MergeLayers(inputs: [String]) => (result: TransformResult)
+    event facet MergeLayers(inputs: [String]) => (result: TransformResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Reduces a GeoJSON layer to an aggregate, optionally grouped by `group_by`
         tag, with `op` ∈ count|sum|avg|min|max over `measure` (count ignores
         measure). The generic Count/Summarize — no `group_by` gives a plain count.
         Writes the per-group breakdown as JSON (result.output_path). */
-    event facet Summarize(input_path: String, group_by: String = "", measure: String = "", op: String = "count") => (result: TransformResult)
+    event facet Summarize(input_path: String, group_by: String = "", measure: String = "", op: String = "count") => (result: TransformResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Dissolves features by `group_by` tag value, unioning each group's
         geometries into one feature (PostGIS ST_Union GROUP BY / turf dissolve) —
         one output feature per group with a `dissolved_count`. */
-    event facet Dissolve(input_path: String, group_by: String) => (result: TransformResult)
+    event facet Dissolve(input_path: String, group_by: String) => (result: TransformResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 }

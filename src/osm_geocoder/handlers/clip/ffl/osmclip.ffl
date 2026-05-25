@@ -21,10 +21,10 @@ namespace osm.Clip {
         in WGS84 degrees) via `osmium extract`, returning a new OSMCache over the
         clipped PBF. Compose Extract/Filter/Spatial on the result for cheap
         metro-scale queries. Idempotent and cached per (source PBF, bbox). */
-    event facet ClipByBBox(cache: OSMCache, west: Double, south: Double, east: Double, north: Double) => (cache: OSMCache) with Timeout(minutes = 30)
+    event facet ClipByBBox(cache: OSMCache, west: Double, south: Double, east: Double, north: Double) => (cache: OSMCache) with Timeout(minutes = 30) with Effect(kind = "external")
 
     /** Clips the region in `cache` to a polygon (path to a GeoJSON or osmium
         `.poly` file) via `osmium extract`, returning a new OSMCache over the
         clipped PBF. Idempotent and cached per (source PBF, polygon content). */
-    event facet ClipByPolygon(cache: OSMCache, polygon_path: String) => (cache: OSMCache) with Timeout(minutes = 30)
+    event facet ClipByPolygon(cache: OSMCache, polygon_path: String) => (cache: OSMCache) with Timeout(minutes = 30) with Effect(kind = "external")
 }
