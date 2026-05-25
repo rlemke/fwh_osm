@@ -1,7 +1,8 @@
 """Routing adapter handler registration.
 
-Registers all osm.Routing.API and osm.Routing.OSRM event facet handlers
-with both AgentPoller and RegistryRunner.
+Registers all osm.Routing.{API,OSRM,Valhalla,GraphHopper} event facet handlers
+with both AgentPoller and RegistryRunner. The adapters share result schemas
+(osm.Routing.Types), so a workflow swaps routing engines by namespace alone.
 """
 
 import logging
@@ -13,27 +14,32 @@ log = logging.getLogger(__name__)
 def register_routing_adapter_handlers(poller) -> None:
     """Register all routing adapter handlers with the poller."""
     from .api_router import API_DISPATCH
+    from .graphhopper_router import GRAPHHOPPER_DISPATCH
     from .osrm_router import OSRM_DISPATCH
+    from .valhalla_router import VALHALLA_DISPATCH
 
-    for facet_name, handler in API_DISPATCH.items():
-        poller.register(facet_name, handler)
-        log.debug("Registered API routing handler: %s", facet_name)
-
-    for facet_name, handler in OSRM_DISPATCH.items():
-        poller.register(facet_name, handler)
-        log.debug("Registered OSRM routing handler: %s", facet_name)
+    for label, dispatch in (("API", API_DISPATCH), ("OSRM", OSRM_DISPATCH),
+                            ("Valhalla", VALHALLA_DISPATCH), ("GraphHopper", GRAPHHOPPER_DISPATCH)):
+        for facet_name, handler in dispatch.items():
+            poller.register(facet_name, handler)
+            log.debug("Registered %s routing handler: %s", label, facet_name)
 
 
 def register_handlers(runner) -> None:
     """Register all routing adapter handlers with a RegistryRunner."""
     from .api_router import API_DISPATCH
+    from .graphhopper_router import GRAPHHOPPER_DISPATCH
     from .osrm_router import OSRM_DISPATCH
+    from .valhalla_router import VALHALLA_DISPATCH
 
-    api_uri = f"file://{os.path.abspath(os.path.join(os.path.dirname(__file__), 'api_router.py'))}"
-    osrm_uri = f"file://{os.path.abspath(os.path.join(os.path.dirname(__file__), 'osrm_router.py'))}"
+    here = os.path.dirname(__file__)
 
-    for facet_name in API_DISPATCH:
-        runner.register_handler(facet_name=facet_name, module_uri=api_uri, entrypoint="handle")
+    def _uri(module: str) -> str:
+        return f"file://{os.path.abspath(os.path.join(here, module))}"
 
-    for facet_name in OSRM_DISPATCH:
-        runner.register_handler(facet_name=facet_name, module_uri=osrm_uri, entrypoint="handle")
+    for dispatch, module in ((API_DISPATCH, "api_router.py"), (OSRM_DISPATCH, "osrm_router.py"),
+                             (VALHALLA_DISPATCH, "valhalla_router.py"),
+                             (GRAPHHOPPER_DISPATCH, "graphhopper_router.py")):
+        uri = _uri(module)
+        for facet_name in dispatch:
+            runner.register_handler(facet_name=facet_name, module_uri=uri, entrypoint="handle")

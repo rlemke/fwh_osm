@@ -1,0 +1,34 @@
+// Routing Adapter: local Valhalla server
+//
+// Routes via a locally running Valhalla instance (POST + JSON). Same result
+// schemas as the OSRM / API backends, so a workflow swaps engines by namespace.
+// Set AFL_VALHALLA_URL (default http://localhost:8002).
+
+/** Valhalla routing adapter — routes via a self-hosted Valhalla server. */
+namespace osm.Routing.Valhalla {
+    use osm.Routing.Types
+
+    /** Point-to-point route between two waypoints via Valhalla /route. */
+    event facet Route(
+        from_lat: Double,
+        from_lon: Double,
+        from_name: String = "",
+        to_lat: Double,
+        to_lon: Double,
+        to_name: String = "",
+        profile: String = "car"
+    ) => (result: PointToPointResult)
+
+    /** NxN travel-time/distance matrix between `points` (JSON list of {lon,lat,name}
+        or "lon,lat;…") via Valhalla /sources_to_targets. */
+    event facet Matrix(points: String, profile: String = "car") => (result: MatrixResult)
+
+    /** Reachability polygon from a center point via Valhalla /isochrone. */
+    event facet Isochrone(
+        center_lat: Double,
+        center_lon: Double,
+        center_name: String = "",
+        time_minutes: Long = 15,
+        profile: String = "car"
+    ) => (result: IsochroneResult)
+}

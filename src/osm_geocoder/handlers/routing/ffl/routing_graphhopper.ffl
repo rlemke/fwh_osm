@@ -1,0 +1,32 @@
+// Routing Adapter: local GraphHopper server
+//
+// Routes via a locally running open-source GraphHopper instance (GET params).
+// Same result schemas as the OSRM / Valhalla / API backends. Covers the verbs
+// the OSS server reliably exposes (Route, Isochrone); Matrix / map-matching are
+// separate/commercial GraphHopper modules. Set AFL_GRAPHHOPPER_URL (default
+// http://localhost:8989).
+
+/** GraphHopper routing adapter — routes via a self-hosted GraphHopper server. */
+namespace osm.Routing.GraphHopper {
+    use osm.Routing.Types
+
+    /** Point-to-point route between two waypoints via GraphHopper /route. */
+    event facet Route(
+        from_lat: Double,
+        from_lon: Double,
+        from_name: String = "",
+        to_lat: Double,
+        to_lon: Double,
+        to_name: String = "",
+        profile: String = "car"
+    ) => (result: PointToPointResult)
+
+    /** Reachability polygon from a center point via GraphHopper /isochrone. */
+    event facet Isochrone(
+        center_lat: Double,
+        center_lon: Double,
+        center_name: String = "",
+        time_minutes: Long = 15,
+        profile: String = "car"
+    ) => (result: IsochroneResult)
+}
