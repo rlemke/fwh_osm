@@ -12,7 +12,7 @@ FFL, handlers, and tools. The two are wired together via the
 osm/
 ├── pyproject.toml                  # declares the facetwork.examples entry point
 ├── src/osm_geocoder/__init__.py    # exports `example: ExamplePackage`
-├── src/osm_geocoder/handlers/      # event-facet implementations (23 subpackages)
+├── src/osm_geocoder/handlers/      # event-facet implementations (27 subpackages; see the library catalog below)
 ├── src/osm_geocoder/ffl/           # top-level FFL workflows
 ├── src/osm_geocoder/handlers/<domain>/ffl/   # per-domain FFL (osm-geocoder convention)
 ├── tools/                          # CLI utilities (PBF → tiles → HTML)

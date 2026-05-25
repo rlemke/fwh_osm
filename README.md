@@ -1,14 +1,22 @@
 # osm-geocoder
 
-A standalone [Facetwork](https://github.com/rlemke/facetwork) example package
-providing FFL workflows and handlers for working with OpenStreetMap data:
+A standalone [Facetwork](https://github.com/rlemke/facetwork) example package for working with
+OpenStreetMap data. It is a **composable facet library**: an orthogonal, path-chaining set of
+primitives (`CacheRegion → Clip → ExtractCategory → Filter* → Spatial/Transform → Render/Tiles`)
+that an LLM can discover (`fw_capabilities`) and compose from a natural-language request. The layers:
 
 - **Source adapters** — extract GeoJSON features from `.osm.pbf`, PostGIS, or existing GeoJSON files
-- **Categorical extractors** — routes, amenities, roads, parks, buildings, boundaries, population, POIs
+- **Clip** (`osm.Clip`) — subset a region PBF to a bbox/polygon (osmium) for cheap metro-scale queries
+- **Categorical extraction** — `ExtractCategory` (cheap, cached, warm-pass) + routes / amenities / roads / parks / buildings / boundaries / population / POIs
+- **Filter** (`osm.Filters`) — by OSM type, tag exact / prefix / contains / regex, radius
+- **Spatial** (`osm.Spatial`, 9 verbs) — WithinDistance, BeyondDistance, Nearest, SpatialJoin, Buffer, Intersect, Union, Centroid, Simplify (shapely)
+- **Transform** (`osm.Transform`) — MergeLayers, Summarize, Dissolve
+- **Geocoding** (`osm.geocode`) — forward + reverse via Nominatim
+- **Routing** (`osm.Routing.{OSRM,API,Valhalla,GraphHopper,PgRouting}`) — Route, MultiStop, Isochrone, Matrix, Nearest, MapMatch, Trip across five swappable engines (uniform schemas)
+- **Vocabulary** (`osm.Vocab`) — natural-language term → OSM `key=value` (e.g. "pharmacy" → `amenity=pharmacy`)
+- **Visualization** — Folium/Leaflet HTML maps + vector tiles (`osm.Tiles`, tippecanoe → MBTiles/PMTiles)
 - **Bulk PostGIS imports** — multi-hour, local-first staged imports with autovacuum management
-- **Routing graphs** — GraphHopper, Valhalla, OSRM, and pgRouting
-- **Address geocoding** — Nominatim API
-- **Visualization** — Folium HTML maps and vector tiles
+- **Routing graph builders** — GraphHopper / Valhalla / OSRM graph + tile construction
 - **Voting / Census TIGER** — district boundaries and demographic overlays
 
 Discovered by the Facetwork runner via the `facetwork.examples` entry point
