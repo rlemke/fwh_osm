@@ -35,6 +35,7 @@ from .transform.transform_handlers import register_transform_handlers
 from .valhalla.valhalla_handlers import register_valhalla_handlers
 from .visualization.html_map_handlers import register_html_map_handlers
 from .visualization.visualization_handlers import register_visualization_handlers
+from .vocab.vocab_handlers import register_vocab_handlers
 from .voting.tiger_handlers import register_tiger_handlers
 
 __all__ = [
@@ -70,6 +71,7 @@ __all__ = [
     "register_spatial_handlers",
     "register_transform_handlers",
     "register_valhalla_handlers",
+    "register_vocab_handlers",
     "download_region",
 ]
 
@@ -100,6 +102,7 @@ def register_all_handlers(poller) -> None:
     register_visualization_handlers(poller)
     register_html_map_handlers(poller)
     register_zoom_handlers(poller)
+    register_vocab_handlers(poller)
     register_combined_handlers(poller)
     register_import_handlers(poller)
     register_source_handlers(poller)
@@ -166,6 +169,7 @@ def register_all_registry_handlers(runner) -> None:
     from .sources.source_handlers import register_handlers as reg_source
     from .spatial.spatial_handlers import register_handlers as reg_spatial
     from .transform.transform_handlers import register_handlers as reg_transform
+    from .vocab.vocab_handlers import register_handlers as reg_vocab
 
     reg_combined(runner)
     reg_db_import(runner)
@@ -173,3 +177,4 @@ def register_all_registry_handlers(runner) -> None:
     reg_routing_adapter(runner)
     reg_spatial(runner)
     reg_transform(runner)
+    reg_vocab(runner)

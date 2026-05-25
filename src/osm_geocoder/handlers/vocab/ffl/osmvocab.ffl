@@ -1,0 +1,31 @@
+// OSM tag vocabulary — the domain ontology / semantic lookup.
+//
+// The semantic half of the discovery layer (the facet capability index is the
+// other half): resolve a natural-language term to the OSM (key, value) tag it
+// denotes, so "find a pharmacy" becomes amenity=pharmacy deterministically.
+// Feed the resolved key/value into ExtractCategory + FilterGeoJSONByOSMType to
+// turn an NL request into a runnable pipeline without memorising tags.
+
+/** Natural-language term -> OSM (key, value) tag resolution. */
+namespace osm.Vocab {
+
+    /** A resolved tag, with the best (key, value), a confidence in [0,1], the
+        vocabulary term that matched, and JSON `alternatives` (other candidates).
+        confidence 0 with empty key/value means the term is not in the vocabulary. */
+    schema TagResolution {
+        osm_key: String,
+        osm_value: String,
+        confidence: Double,
+        matched_term: String,
+        alternatives: Json
+    }
+
+    /** Resolves a natural-language `term` (e.g. "gas station", "grocery store",
+        "freeway") to its OSM tag. Optionally constrain to a tag `key`
+        (amenity/shop/highway/…). Returns the best match plus ranked alternatives. */
+    event facet ResolveTag(term: String, key: String = "") => (result: TagResolution)
+
+    /** Lists the known OSM values for a tag `key` (e.g. all `amenity` values the
+        vocabulary covers) as a JSON array — discovery of what a key can hold. */
+    event facet ListTagValues(key: String) => (values: Json, count: Long)
+}
