@@ -576,6 +576,125 @@ def filter_geojson_by_tag_prefix(
     )
 
 
+def _filter_geojson_by_predicate(
+    input_path: str | Path,
+    tag_key: str,
+    predicate,
+    label: str,
+    discriminator: str,
+    output_path: str | Path | None = None,
+    heartbeat: callable | None = None,
+    run_id: str = "",
+) -> OSMFilteredFeatures:
+    """Stream a GeoJSON layer, keeping features where ``predicate(value)`` is True.
+
+    Shared core for the contains / regex tag filters — same streaming, temp-file,
+    collision-safe-naming contract as :func:`filter_geojson_by_tag_prefix`.
+    """
+    import os
+    import shutil
+    import tempfile
+
+    from facetwork.config import get_temp_dir
+
+    from ..shared.geojson_writer import GeoJSONStreamWriter, iter_geojson_features
+
+    input_path = str(input_path)
+    if output_path is None:
+        output_path_str = derive_output_path(
+            "osm-filtered",
+            uri_stem(input_path),
+            "filtered",
+            tag_key,
+            discriminator,
+            ext="geojson",
+            run_id=run_id or None,
+        )
+    else:
+        output_path_str = str(output_path)
+    ensure_dir(output_path_str)
+
+    local_path = localize(input_path)
+    original_count = 0
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".geojson", dir=get_temp_dir())
+    os.close(tmp_fd)
+    try:
+        with GeoJSONStreamWriter(tmp_path) as writer:
+            for feature in iter_geojson_features(local_path, heartbeat):
+                original_count += 1
+                value = feature.get("properties", {}).get(tag_key)
+                if isinstance(value, str) and predicate(value):
+                    writer.write_feature(feature)
+        ensure_dir(output_path_str)
+        shutil.move(tmp_path, output_path_str)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    return OSMFilteredFeatures(
+        output_path=output_path_str,
+        feature_count=writer.feature_count,
+        original_count=original_count,
+        osm_type="*",
+        filter_applied=label,
+        dependencies_included=False,
+        extraction_date=datetime.now(UTC).isoformat(),
+    )
+
+
+def filter_geojson_by_tag_contains(
+    input_path: str | Path,
+    tag_key: str,
+    substring: str,
+    case_sensitive: bool = False,
+    output_path: str | Path | None = None,
+    heartbeat: callable | None = None,
+    task_uuid: str = "",
+    run_id: str = "",
+) -> OSMFilteredFeatures:
+    """Keep features whose ``tag_key`` value *contains* ``substring``.
+
+    Complements the exact (:func:`filter_geojson_by_osm_type`) and prefix
+    (:func:`filter_geojson_by_tag_prefix`) filters — e.g. ``tag_key="name",
+    substring="Starbucks"``. Case-insensitive unless ``case_sensitive``.
+    """
+    needle = substring if case_sensitive else substring.lower()
+
+    def _contains(value: str) -> bool:
+        return needle in (value if case_sensitive else value.lower())
+
+    label = f"{tag_key} contains {substring!r}" + ("" if case_sensitive else " (ci)")
+    return _filter_geojson_by_predicate(
+        input_path, tag_key, _contains, label,
+        f"contains-{substring}", output_path, heartbeat, run_id,
+    )
+
+
+def filter_geojson_by_tag_regex(
+    input_path: str | Path,
+    tag_key: str,
+    pattern: str,
+    output_path: str | Path | None = None,
+    heartbeat: callable | None = None,
+    task_uuid: str = "",
+    run_id: str = "",
+) -> OSMFilteredFeatures:
+    """Keep features whose ``tag_key`` value matches the regex ``pattern``.
+
+    Uses :func:`re.search` (a partial match anywhere in the value) — e.g.
+    ``tag_key="cuisine", pattern="pizza|italian"``. Raises ``re.error`` on an
+    invalid pattern so the failure is explicit, not silent.
+    """
+    import re
+
+    compiled = re.compile(pattern)
+    return _filter_geojson_by_predicate(
+        input_path, tag_key, lambda v: compiled.search(v) is not None,
+        f"{tag_key} matches /{pattern}/", f"regex-{pattern}", output_path, heartbeat, run_id,
+    )
+
+
 def _describe_osm_filter(
     osm_type: OSMType,
     tag_key: str | None,

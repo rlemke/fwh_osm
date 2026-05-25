@@ -17,7 +17,6 @@ from .filters.filter_handlers import register_filter_handlers
 from .filters.osmose_handlers import register_osmose_handlers
 from .filters.validation_handlers import register_validation_handlers
 from .graphhopper.graphhopper_handlers import register_graphhopper_handlers
-from .valhalla.valhalla_handlers import register_valhalla_handlers
 from .parks.park_handlers import register_park_handlers
 from .poi.poi_handlers import register_poi_handlers
 from .population.population_handlers import register_population_handlers
@@ -27,10 +26,12 @@ from .routes.elevation_handlers import register_elevation_handlers
 from .routes.gtfs_handlers import register_gtfs_handlers
 from .routes.route_handlers import register_route_handlers
 from .routes.routing_handlers import register_routing_handlers
-from .shared.pbf_cache import download_region  # noqa: F401
 from .routing.routing_adapter_handlers import register_routing_adapter_handlers
+from .shared.pbf_cache import download_region  # noqa: F401
 from .sources.source_handlers import register_source_handlers
 from .spatial.spatial_handlers import register_spatial_handlers
+from .transform.transform_handlers import register_transform_handlers
+from .valhalla.valhalla_handlers import register_valhalla_handlers
 from .visualization.html_map_handlers import register_html_map_handlers
 from .visualization.visualization_handlers import register_visualization_handlers
 from .voting.tiger_handlers import register_tiger_handlers
@@ -65,6 +66,7 @@ __all__ = [
     "register_routing_adapter_handlers",
     "register_source_handlers",
     "register_spatial_handlers",
+    "register_transform_handlers",
     "register_valhalla_handlers",
     "download_region",
 ]
@@ -100,6 +102,7 @@ def register_all_handlers(poller) -> None:
     register_source_handlers(poller)
     register_routing_adapter_handlers(poller)
     register_spatial_handlers(poller)
+    register_transform_handlers(poller)
 
 
 def register_all_registry_handlers(runner) -> None:
@@ -114,7 +117,6 @@ def register_all_registry_handlers(runner) -> None:
     from .filters.osmose_handlers import register_handlers as reg_osmose
     from .filters.validation_handlers import register_handlers as reg_validation
     from .graphhopper.graphhopper_handlers import register_handlers as reg_graphhopper
-    from .valhalla.valhalla_handlers import register_handlers as reg_valhalla
     from .parks.park_handlers import register_handlers as reg_park
     from .poi.poi_handlers import register_handlers as reg_poi
     from .population.population_handlers import register_handlers as reg_population
@@ -124,8 +126,9 @@ def register_all_registry_handlers(runner) -> None:
     from .routes.gtfs_handlers import register_handlers as reg_gtfs
     from .routes.route_handlers import register_handlers as reg_route
     from .routes.routing_handlers import register_handlers as reg_routing
-    from .visualization.visualization_handlers import register_handlers as reg_visualization
+    from .valhalla.valhalla_handlers import register_handlers as reg_valhalla
     from .visualization.html_map_handlers import register_handlers as reg_html_map
+    from .visualization.visualization_handlers import register_handlers as reg_visualization
     from .voting.tiger_handlers import register_handlers as reg_tiger
 
     reg_airquality(runner)
@@ -157,9 +160,11 @@ def register_all_registry_handlers(runner) -> None:
     from .routing.routing_adapter_handlers import register_handlers as reg_routing_adapter
     from .sources.source_handlers import register_handlers as reg_source
     from .spatial.spatial_handlers import register_handlers as reg_spatial
+    from .transform.transform_handlers import register_handlers as reg_transform
 
     reg_combined(runner)
     reg_db_import(runner)
     reg_source(runner)
     reg_routing_adapter(runner)
     reg_spatial(runner)
+    reg_transform(runner)

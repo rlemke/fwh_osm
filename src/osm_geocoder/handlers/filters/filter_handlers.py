@@ -17,7 +17,9 @@ from .osm_type_filter import (
 from .osm_type_filter import (
     OSMFilteredFeatures,
     filter_geojson_by_osm_type,
+    filter_geojson_by_tag_contains,
     filter_geojson_by_tag_prefix,
+    filter_geojson_by_tag_regex,
     filter_pbf_by_type,
 )
 from .radius_filter import (
@@ -683,6 +685,100 @@ def _make_geojson_tag_prefix_filter_handler(facet_name: str):
     return handler
 
 
+def _make_geojson_tag_contains_filter_handler(facet_name: str):
+    """Create a handler for FilterGeoJSONByTagContains (substring match on a tag)."""
+    qualified = f"{NAMESPACE}.{facet_name}"
+
+    def handler(payload: dict) -> dict:
+        input_path = payload.get("input_path", "")
+        tag_key = payload.get("tag_key", "")
+        substring = payload.get("substring", "")
+        case_sensitive = payload.get("case_sensitive", False)
+        step_log = payload.get("_step_log")
+
+        input_cache = {"path": input_path, "size": _file_size(input_path)}
+        cp = {"tag_key": tag_key, "substring": substring, "case_sensitive": case_sensitive}
+        hit = cached_result(qualified, input_cache, cp, step_log)
+        if hit is not None:
+            return hit
+
+        if step_log:
+            step_log(f"{facet_name}: GeoJSON {input_path} where {tag_key} contains {substring!r}")
+        if not input_path or not tag_key:
+            return {"result": _empty_osm_result(f"{tag_key} contains {substring!r}")}
+
+        result = filter_geojson_by_tag_contains(
+            input_path, tag_key=tag_key, substring=substring, case_sensitive=case_sensitive,
+            heartbeat=payload.get("_task_heartbeat"), task_uuid=payload.get("_task_uuid", ""),
+            run_id=payload.get("_workflow_id", ""),
+        )
+        if step_log:
+            step_log(
+                f"{facet_name}: {result.feature_count}/{result.original_count} matched "
+                f"({tag_key} contains {substring!r})",
+                level="success",
+            )
+        rv = {"result": _osm_result_to_dict(result)}
+        save_result_meta(qualified, input_cache, cp, rv)
+        return rv
+
+    return handler
+
+
+def _make_geojson_tag_regex_filter_handler(facet_name: str):
+    """Create a handler for FilterGeoJSONByTagRegex (regex match on a tag)."""
+    qualified = f"{NAMESPACE}.{facet_name}"
+
+    def handler(payload: dict) -> dict:
+        input_path = payload.get("input_path", "")
+        tag_key = payload.get("tag_key", "")
+        pattern = payload.get("pattern", "")
+        step_log = payload.get("_step_log")
+
+        input_cache = {"path": input_path, "size": _file_size(input_path)}
+        cp = {"tag_key": tag_key, "pattern": pattern}
+        hit = cached_result(qualified, input_cache, cp, step_log)
+        if hit is not None:
+            return hit
+
+        if step_log:
+            step_log(f"{facet_name}: GeoJSON {input_path} where {tag_key} matches /{pattern}/")
+        if not input_path or not tag_key:
+            return {"result": _empty_osm_result(f"{tag_key} matches /{pattern}/")}
+
+        result = filter_geojson_by_tag_regex(
+            input_path, tag_key=tag_key, pattern=pattern,
+            heartbeat=payload.get("_task_heartbeat"), task_uuid=payload.get("_task_uuid", ""),
+            run_id=payload.get("_workflow_id", ""),
+        )
+        if step_log:
+            step_log(
+                f"{facet_name}: {result.feature_count}/{result.original_count} matched "
+                f"({tag_key} ~ /{pattern}/)",
+                level="success",
+            )
+        rv = {"result": _osm_result_to_dict(result)}
+        save_result_meta(qualified, input_cache, cp, rv)
+        return rv
+
+    return handler
+
+
+def _empty_osm_result(filter_applied: str) -> dict:
+    """A zero-feature OSMFilteredFeatures payload (missing inputs)."""
+    return {
+        "output_path": "",
+        "feature_count": 0,
+        "original_count": 0,
+        "osm_type": "*",
+        "filter_applied": filter_applied,
+        "dependencies_included": False,
+        "dependency_count": 0,
+        "format": "GeoJSON",
+        "extraction_date": datetime.now(UTC).isoformat(),
+    }
+
+
 def _osm_result_to_dict(result: OSMFilteredFeatures) -> dict:
     """Convert an OSMFilteredFeatures to a dictionary."""
     return {
@@ -710,6 +806,8 @@ FILTER_FACETS = [
     ("FilterByOSMTag", _make_osm_tag_filter_handler),
     ("FilterGeoJSONByOSMType", _make_geojson_osm_type_filter_handler),
     ("FilterGeoJSONByTagPrefix", _make_geojson_tag_prefix_filter_handler),
+    ("FilterGeoJSONByTagContains", _make_geojson_tag_contains_filter_handler),
+    ("FilterGeoJSONByTagRegex", _make_geojson_tag_regex_filter_handler),
 ]
 
 

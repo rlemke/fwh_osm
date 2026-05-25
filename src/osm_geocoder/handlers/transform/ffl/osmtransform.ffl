@@ -1,0 +1,41 @@
+// Generic GeoJSON transforms — the Transform/Analyze layer.
+//
+// Category-agnostic reductions that complement the category-specific statistics
+// facets (AmenityStatistics, ParkStatistics, …) and close item 3 of the
+// composable-library design: combine, reduce, dissolve. All operate on the
+// GeoJSON-path I/O the Extract/Filter/Spatial layers already produce, so they
+// compose freely (e.g. foreach-fanout -> MergeLayers -> Summarize).
+
+/** Generic combine / reduce / dissolve over GeoJSON layers. */
+namespace osm.Transform {
+
+    /** Result of a generic transform. `output_path` is the produced artifact
+        (merged/dissolved GeoJSON, or a summary JSON); `detail` is a short
+        human-readable headline. */
+    schema TransformResult {
+        output_path: String,
+        feature_count: Long,
+        original_count: Long,
+        group_count: Long,
+        operation: String,
+        detail: String,
+        format: String,
+        extraction_date: String
+    }
+
+    /** Concatenates several GeoJSON layers into one FeatureCollection — the
+        foreach-fanout aggregator (collect per-region/category layers -> merge ->
+        render/analyze). Properties preserved; missing inputs skipped. */
+    event facet MergeLayers(inputs: [String]) => (result: TransformResult)
+
+    /** Reduces a GeoJSON layer to an aggregate, optionally grouped by `group_by`
+        tag, with `op` ∈ count|sum|avg|min|max over `measure` (count ignores
+        measure). The generic Count/Summarize — no `group_by` gives a plain count.
+        Writes the per-group breakdown as JSON (result.output_path). */
+    event facet Summarize(input_path: String, group_by: String = "", measure: String = "", op: String = "count") => (result: TransformResult)
+
+    /** Dissolves features by `group_by` tag value, unioning each group's
+        geometries into one feature (PostGIS ST_Union GROUP BY / turf dissolve) —
+        one output feature per group with a `dissolved_count`. */
+    event facet Dissolve(input_path: String, group_by: String) => (result: TransformResult)
+}
