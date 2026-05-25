@@ -86,4 +86,20 @@ namespace osm.Routing.Types {
         backend: String,
         format: String
     }
+
+    /** Result of a Trip (TSP) optimization. `order`/`ordered_names` are
+        JSON-encoded arrays giving the optimal visit sequence (input indices /
+        names); the optimized route geometry is written to `output_path`. */
+    schema TripResult {
+        output_path: String,
+        waypoint_count: Long,
+        order: Json,
+        ordered_names: Json,
+        total_distance_km: Double,
+        total_duration_min: Double,
+        roundtrip: Boolean,
+        profile: String,
+        backend: String,
+        format: String
+    }
 }

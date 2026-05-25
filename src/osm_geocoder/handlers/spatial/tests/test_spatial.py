@@ -243,3 +243,61 @@ def test_buffer_empty_input(tmp_path):
     src = _write(tmp_path / "empty.geojson", _fc([]))
     res = ops.buffer(src, 5.0, unit="kilometers", output_path=str(tmp_path / "e.geojson"))
     assert res.feature_count == 0
+
+
+# --- Intersect / Union ---------------------------------------------------------
+
+
+def _poly_fc(*squares):
+    """FeatureCollection of unit-side squares: each arg is (x, y[, side], props?)."""
+    feats = []
+    for sq in squares:
+        x, y = sq[0], sq[1]
+        side = sq[2] if len(sq) > 2 else 1.0
+        props = sq[3] if len(sq) > 3 else {}
+        feats.append({"type": "Feature", "properties": props, "geometry": {
+            "type": "Polygon",
+            "coordinates": [[[x, y], [x + side, y], [x + side, y + side], [x, y + side], [x, y]]]}})
+    return {"type": "FeatureCollection", "features": feats}
+
+
+def test_union_merges_overlapping_into_one(tmp_path):
+    # Two unit squares overlapping by half -> union area 1.5, one feature.
+    src = _write(tmp_path / "u.geojson", _poly_fc((0, 0), (0.5, 0)))
+    res = ops.union(src, output_path=str(tmp_path / "out.geojson"))
+    assert res.operation == "union"
+    assert res.feature_count == 1 and res.original_count == 2
+    feats = _read_features(res.output_path)
+    assert len(feats) == 1
+    assert feats[0]["properties"]["merged_count"] == 2
+    assert shp(feats[0]["geometry"]).area == pytest.approx(1.5)
+
+
+def test_union_of_two_layers(tmp_path):
+    a = _write(tmp_path / "a.geojson", _poly_fc((0, 0)))
+    b = _write(tmp_path / "b.geojson", _poly_fc((5, 5)))
+    res = ops.union(a, other_path=b, output_path=str(tmp_path / "out.geojson"))
+    assert res.original_count == 1 and res.reference_count == 1
+    # Two disjoint squares -> a MultiPolygon of total area 2.
+    assert shp(_read_features(res.output_path)[0]["geometry"]).area == pytest.approx(2.0)
+
+
+def test_intersect_clips_subject_to_mask(tmp_path):
+    # clip mask = unit square at origin; subject A overlaps it, subject B does not.
+    clip = _write(tmp_path / "clip.geojson", _poly_fc((0, 0)))
+    subj = _write(tmp_path / "subj.geojson",
+                  _poly_fc((0.5, 0.5, 1.0, {"id": "A"}), (5, 5, 1.0, {"id": "B"})))
+    res = ops.intersect(subj, clip, output_path=str(tmp_path / "out.geojson"))
+    assert res.operation == "intersect"
+    assert res.original_count == 2
+    feats = _read_features(res.output_path)
+    assert {f["properties"]["id"] for f in feats} == {"A"}        # B dropped (no overlap)
+    # A (0.5..1.5) clipped to (0..1) -> 0.5 x 0.5 = 0.25, props preserved.
+    assert shp(feats[0]["geometry"]).area == pytest.approx(0.25)
+
+
+def test_intersect_empty_clip_keeps_nothing(tmp_path):
+    clip = _write(tmp_path / "clip.geojson", _poly_fc())  # empty mask
+    subj = _write(tmp_path / "subj.geojson", _poly_fc((0, 0)))
+    res = ops.intersect(subj, clip, output_path=str(tmp_path / "out.geojson"))
+    assert res.feature_count == 0 and res.original_count == 1

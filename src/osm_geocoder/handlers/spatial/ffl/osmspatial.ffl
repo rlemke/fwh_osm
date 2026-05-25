@@ -70,4 +70,18 @@ namespace osm.Spatial {
         (e.g. supermarket service-area coverage). Buffered in a local
         azimuthal-equidistant projection, reprojected to WGS84. */
     event facet Buffer(input_path: String, distance: Double, unit: String = "miles") => (result: SpatialResult)
+
+    /** Clips each SUBJECT feature to the CLIP layer's geometry (PostGIS
+        ST_Intersection / turf intersect) — the clip layer is unioned into one
+        mask, each subject geometry is intersected with it, and the overlapping
+        part is kept (subject properties preserved); non-overlapping features are
+        dropped. The geometric cookie-cutter, distinct from SpatialJoin (which
+        attaches attributes without cutting geometry). e.g. parks within a city. */
+    event facet Intersect(subject_path: String, clip_path: String) => (result: SpatialResult)
+
+    /** Unions all geometries into ONE merged feature (PostGIS ST_Union aggregate
+        / turf union). With `other_path`, merges both layers; else the single
+        layer's features. The whole-layer / two-layer merge, distinct from Dissolve
+        (which unions per group). e.g. the combined footprint of many polygons. */
+    event facet Union(input_path: String, other_path: String = "") => (result: SpatialResult)
 }

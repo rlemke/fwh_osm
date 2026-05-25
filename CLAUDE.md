@@ -126,11 +126,11 @@ with **`osm.Vocab.ResolveTag`** (NL → `key=value`) — *lookup-then-compose*.
 | Source | `osm.ops`, `osm.Source.*` | `CacheRegion`, `ExtractCategory`, `Extract*` |
 | Clip | `osm.Clip` | `ClipByBBox`, `ClipByPolygon` (osmium extract → clipped `OSMCache`) |
 | Filter | `osm.Filters` | `FilterGeoJSONByOSMType` / `TagPrefix` / `TagContains` / `TagRegex`, radius, type |
-| Spatial | `osm.Spatial` | `WithinDistance`, `BeyondDistance`, `Nearest`, `SpatialJoin`, `Buffer` (shapely STRtree + local AEQD) |
+| Spatial | `osm.Spatial` | `WithinDistance`, `BeyondDistance`, `Nearest`, `SpatialJoin`, `Buffer`, `Intersect`, `Union` (shapely STRtree + local AEQD) |
 | Transform | `osm.Transform` | `MergeLayers`, `Summarize` (count/sum/avg/min/max), `Dissolve` |
 | Geocoding | `osm.geocode` | `Geocode`, `ReverseGeocode` (Nominatim) |
 | Vocabulary | `osm.Vocab` | `ResolveTag`, `ListTagValues` (NL term → OSM `key=value`) |
-| Routing | `osm.Routing.{OSRM,API}` | `Route`, `MultiStopRoute`, `Isochrone`, `Matrix`, `Nearest`, `MapMatch` |
+| Routing | `osm.Routing.{OSRM,API}` | `Route`, `MultiStopRoute`, `Isochrone`, `Matrix`, `Nearest`, `MapMatch`, `Trip` |
 | Render / Tiles | `osm.viz`, `osm.Tiles` | `RenderMap`, `RenderLayers`, `BuildVectorTiles` (tippecanoe → MBTiles/PMTiles) |
 
 Everything operates on GeoJSON **paths** (or an `OSMCache` for Source/Clip), so

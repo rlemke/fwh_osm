@@ -45,6 +45,7 @@ log = logging.getLogger(__name__)
 try:
     from shapely.geometry import mapping, shape
     from shapely.ops import transform as shapely_transform
+    from shapely.ops import unary_union
     from shapely.strtree import STRtree
 
     HAS_SHAPELY = True
@@ -609,5 +610,180 @@ def buffer(
         operation="buffer",
         distance=distance,
         unit=unit_enum.value,
+        extraction_date=datetime.now(UTC).isoformat(),
+    )
+
+
+# --- Intersect / Union: geometric set operations ------------------------------
+#
+# Boolean overlay ops are projection-invariant for the geometry result, so these
+# operate on WGS84 geometries directly (no AEQD needed, unlike Buffer/distance).
+
+
+def _collect_geoms(path: str, heartbeat=None) -> list:
+    """Load all non-empty shapely geometries from a GeoJSON layer (WGS84)."""
+    from facetwork.runtime.storage import localize
+
+    geoms = []
+    for feature in iter_geojson_features(localize(str(path)), heartbeat):
+        geom_json = feature.get("geometry")
+        if not geom_json:
+            continue
+        try:
+            geom = shape(geom_json)
+        except Exception as exc:
+            log.warning("spatial: skipping malformed geometry: %s", exc)
+            continue
+        if not geom.is_empty:
+            geoms.append(geom)
+    return geoms
+
+
+def intersect(
+    subject_path: str,
+    clip_path: str,
+    output_path: str | None = None,
+    heartbeat=None,
+    run_id: str = "",
+) -> SpatialResult:
+    """Clip each SUBJECT feature to the CLIP layer's geometry (ST_Intersection).
+
+    The clip layer's features are unioned into one mask; each subject geometry is
+    intersected with it, and the overlapping part is kept (with the subject's
+    properties). Features that don't intersect are dropped — the geometric
+    "cookie-cutter" (turf intersect / PostGIS ST_Intersection), distinct from
+    SpatialJoin (which attaches attributes without cutting geometry).
+    """
+    if not HAS_SHAPELY:
+        raise RuntimeError("shapely>=2.0 is required for osm.Spatial operations")
+
+    subject_path = str(subject_path)
+    if output_path is None:
+        output_path = derive_output_path(
+            "osm-spatial", uri_stem(subject_path), "intersect",
+            uri_stem(str(clip_path)), ext="geojson", run_id=run_id or None,
+        )
+    output_path = str(output_path)
+    ensure_dir(output_path)
+
+    clip_geoms = _collect_geoms(clip_path, heartbeat)
+    reference_count = len(clip_geoms)
+    mask = unary_union(clip_geoms) if clip_geoms else None
+
+    from facetwork.config import get_temp_dir
+    from facetwork.runtime.storage import localize
+
+    local_subject = localize(subject_path)
+    original_count = 0
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".geojson", dir=get_temp_dir())
+    os.close(tmp_fd)
+    try:
+        with GeoJSONStreamWriter(tmp_path) as writer:
+            if mask is not None and not mask.is_empty:
+                for feature in iter_geojson_features(local_subject, heartbeat):
+                    original_count += 1
+                    geom_json = feature.get("geometry")
+                    if not geom_json:
+                        continue
+                    try:
+                        clipped = shape(geom_json).intersection(mask)
+                    except Exception as exc:
+                        log.warning("spatial: intersection failed, skipping: %s", exc)
+                        continue
+                    if clipped.is_empty:
+                        continue
+                    feature["geometry"] = mapping(clipped)
+                    writer.write_feature(feature)
+            else:
+                # Empty clip mask -> nothing intersects; still count the subject.
+                for _ in iter_geojson_features(local_subject, heartbeat):
+                    original_count += 1
+        ensure_dir(output_path)
+        shutil.move(tmp_path, output_path)
+        feature_count = writer.feature_count
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    return SpatialResult(
+        output_path=output_path,
+        feature_count=feature_count,
+        original_count=original_count,
+        reference_count=reference_count,
+        operation="intersect",
+        distance=0.0,
+        unit="",
+        extraction_date=datetime.now(UTC).isoformat(),
+    )
+
+
+def union(
+    input_path: str,
+    other_path: str = "",
+    output_path: str | None = None,
+    heartbeat=None,
+    run_id: str = "",
+) -> SpatialResult:
+    """Union all geometries into one merged feature (ST_Union aggregate).
+
+    Merges every feature of ``input_path`` (and ``other_path`` if given) into a
+    single (multi)geometry — the whole-layer / two-layer dissolve, distinct from
+    ``Dissolve`` (which unions *per group*). The output is one feature carrying a
+    ``merged_count`` of how many input geometries went in.
+    """
+    if not HAS_SHAPELY:
+        raise RuntimeError("shapely>=2.0 is required for osm.Spatial operations")
+
+    input_path = str(input_path)
+    if output_path is None:
+        output_path = derive_output_path(
+            "osm-spatial", uri_stem(input_path), "union",
+            uri_stem(str(other_path)) if other_path else None,
+            ext="geojson", run_id=run_id or None,
+        )
+    output_path = str(output_path)
+    ensure_dir(output_path)
+
+    geoms = _collect_geoms(input_path, heartbeat)
+    original_count = len(geoms)
+    reference_count = 0
+    if other_path:
+        other_geoms = _collect_geoms(other_path, heartbeat)
+        reference_count = len(other_geoms)
+        geoms = geoms + other_geoms
+
+    from facetwork.config import get_temp_dir
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".geojson", dir=get_temp_dir())
+    os.close(tmp_fd)
+    feature_count = 0
+    try:
+        with GeoJSONStreamWriter(tmp_path) as writer:
+            if geoms:
+                merged = unary_union(geoms)
+                if not merged.is_empty:
+                    writer.write_feature({
+                        "type": "Feature",
+                        "properties": {"operation": "union",
+                                       "merged_count": original_count + reference_count},
+                        "geometry": mapping(merged),
+                    })
+        ensure_dir(output_path)
+        shutil.move(tmp_path, output_path)
+        feature_count = writer.feature_count
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    return SpatialResult(
+        output_path=output_path,
+        feature_count=feature_count,
+        original_count=original_count,
+        reference_count=reference_count,
+        operation="union",
+        distance=0.0,
+        unit="",
         extraction_date=datetime.now(UTC).isoformat(),
     )

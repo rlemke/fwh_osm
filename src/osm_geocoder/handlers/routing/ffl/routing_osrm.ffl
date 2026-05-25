@@ -46,4 +46,9 @@ namespace osm.Routing.OSRM {
     /** Map-match a GPS `trace` (JSON list of {lon,lat} or "lon,lat;…") to the road
         network via OSRM /match, returning the matched geometry + a confidence. */
     event facet MapMatch(trace: String, profile: String = "car") => (result: MapMatchResult)
+
+    /** Optimize the visit order of `waypoints` (the travelling-salesman problem)
+        via OSRM /trip, returning the optimal sequence and the tour geometry.
+        `roundtrip=true` returns to the start. JSON list or "lon,lat;…" input. */
+    event facet Trip(waypoints: String, profile: String = "car", roundtrip: Boolean = true) => (result: TripResult)
 }

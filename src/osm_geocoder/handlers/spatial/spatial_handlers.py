@@ -19,8 +19,10 @@ from .spatial_ops import (
     HAS_SHAPELY,
     beyond_distance,
     buffer,
+    intersect,
     nearest,
     spatial_join,
+    union,
     within_distance,
 )
 
@@ -270,6 +272,72 @@ def _make_buffer_handler(facet_name: str):
     return handler
 
 
+def _make_intersect_handler(facet_name: str):
+    """Build a handler for Intersect (clip subject geometry to a mask layer)."""
+    qualified = f"{NAMESPACE}.{facet_name}"
+
+    def handler(payload: dict) -> dict:
+        subject_path = payload.get("subject_path", "")
+        clip_path = payload.get("clip_path", "")
+        step_log = payload.get("_step_log")
+
+        input_cache = {"path": subject_path, "size": _file_size(subject_path)}
+        cp = {"clip_path": clip_path, "clip_size": _file_size(clip_path)}
+        hit = cached_result(qualified, input_cache, cp, step_log)
+        if hit is not None:
+            return hit
+
+        if step_log:
+            step_log(f"{facet_name}: clipping {subject_path} to {clip_path}")
+        if not HAS_SHAPELY or not subject_path or not clip_path:
+            return _empty_result("intersect", 0.0, "")
+
+        result = intersect(subject_path, clip_path,
+                           heartbeat=payload.get("_task_heartbeat"),
+                           run_id=payload.get("_workflow_id", ""))
+        if step_log:
+            step_log(f"{facet_name}: {result.feature_count}/{result.original_count} subject "
+                     f"features clipped (vs {result.reference_count} clip features)", level="success")
+        rv = {"result": result.to_dict()}
+        save_result_meta(qualified, input_cache, cp, rv)
+        return rv
+
+    return handler
+
+
+def _make_union_handler(facet_name: str):
+    """Build a handler for Union (aggregate-merge geometries into one feature)."""
+    qualified = f"{NAMESPACE}.{facet_name}"
+
+    def handler(payload: dict) -> dict:
+        input_path = payload.get("input_path", "")
+        other_path = payload.get("other_path", "")
+        step_log = payload.get("_step_log")
+
+        input_cache = {"path": input_path, "size": _file_size(input_path)}
+        cp = {"other_path": other_path, "other_size": _file_size(other_path)}
+        hit = cached_result(qualified, input_cache, cp, step_log)
+        if hit is not None:
+            return hit
+
+        if step_log:
+            step_log(f"{facet_name}: unioning {input_path}" + (f" + {other_path}" if other_path else ""))
+        if not HAS_SHAPELY or not input_path:
+            return _empty_result("union", 0.0, "")
+
+        result = union(input_path, other_path=other_path,
+                       heartbeat=payload.get("_task_heartbeat"),
+                       run_id=payload.get("_workflow_id", ""))
+        if step_log:
+            step_log(f"{facet_name}: merged {result.original_count + result.reference_count} "
+                     f"geometries -> {result.feature_count} feature", level="success")
+        rv = {"result": result.to_dict()}
+        save_result_meta(qualified, input_cache, cp, rv)
+        return rv
+
+    return handler
+
+
 # Event facet definitions for handler registration.
 SPATIAL_FACETS = [
     ("WithinDistance", lambda n: _make_distance_handler(n, within_distance)),
@@ -277,6 +345,8 @@ SPATIAL_FACETS = [
     ("Nearest", _make_nearest_handler),
     ("SpatialJoin", _make_join_handler),
     ("Buffer", _make_buffer_handler),
+    ("Intersect", _make_intersect_handler),
+    ("Union", _make_union_handler),
 ]
 
 

@@ -98,3 +98,39 @@ def test_map_match_fallback(monkeypatch):
 def test_map_match_too_few_points():
     rv = R.handle({"_facet_name": "osm.Routing.OSRM.MapMatch", "trace": "-122.4,37.7"})["result"]
     assert rv["matched_points"] == 0 and rv["backend"] == "none"
+
+
+# --- Trip (TSP) ----------------------------------------------------------------
+
+
+def test_trip_optimizes_order(monkeypatch):
+    # 3 inputs; OSRM reorders them: input 0->tour pos 0, input 1->pos 2, input 2->pos 1.
+    monkeypatch.setattr(R, "_osrm_request", lambda *a, **k: {
+        "code": "Ok",
+        "trips": [{"distance": 30000, "duration": 1800,
+                   "geometry": {"coordinates": [[-122.4, 37.7], [-122.0, 37.4]]}}],
+        "waypoints": [{"waypoint_index": 0}, {"waypoint_index": 2}, {"waypoint_index": 1}],
+    })
+    rv = R.handle({"_facet_name": "osm.Routing.OSRM.Trip",
+                   "waypoints": '[{"lon":-122.4,"lat":37.7,"name":"A"},'
+                                '{"lon":-122.0,"lat":37.4,"name":"B"},'
+                                '{"lon":-122.2,"lat":37.8,"name":"C"}]'})["result"]
+    assert rv["waypoint_count"] == 3
+    assert rv["backend"] == "osrm-local"
+    assert json.loads(rv["order"]) == [0, 2, 1]          # by waypoint_index
+    assert json.loads(rv["ordered_names"]) == ["A", "C", "B"]
+    assert rv["total_distance_km"] == 30.0
+
+
+def test_trip_fallback_keeps_input_order(monkeypatch):
+    _no_osrm(monkeypatch)
+    rv = R.handle({"_facet_name": "osm.Routing.OSRM.Trip",
+                   "waypoints": "-122.4,37.7;-122.0,37.4;-122.2,37.8"})["result"]
+    assert rv["backend"] == "estimate"
+    assert json.loads(rv["order"]) == [0, 1, 2]
+    assert rv["total_distance_km"] > 0
+
+
+def test_trip_too_few_points():
+    rv = R.handle({"_facet_name": "osm.Routing.OSRM.Trip", "waypoints": "-122.4,37.7"})["result"]
+    assert rv["waypoint_count"] == 0 and rv["backend"] == "none"

@@ -620,6 +620,89 @@ def _empty_match(profile: str) -> dict:
             "profile": profile, "backend": "none", "format": "GeoJSON"}
 
 
+def _handle_trip(payload: dict) -> dict:
+    """Handle osm.Routing.OSRM.Trip — optimal visit order (TSP) via /trip."""
+    waypoints = _parse_points(payload.get("waypoints", ""))
+    profile = payload.get("profile", "car")
+    roundtrip = payload.get("roundtrip", True)
+    if isinstance(roundtrip, str):
+        roundtrip = roundtrip.strip().lower() in ("1", "true", "yes")
+    step_log = payload.get("_step_log")
+    if len(waypoints) < 2:
+        return {"result": _empty_trip(profile, roundtrip)}
+
+    if step_log:
+        step_log(f"OSRM.Trip: optimizing {len(waypoints)} stops ({profile}, roundtrip={roundtrip})")
+
+    coords = [(w.get("lon", 0), w.get("lat", 0)) for w in waypoints]
+    data = _osrm_request(
+        "trip", coords, profile,
+        roundtrip="true" if roundtrip else "false",
+        source="first", geometries="geojson", overview="full",
+    )
+
+    if data and data.get("trips"):
+        trip = data["trips"][0]
+        total_distance = round(trip.get("distance", 0) / 1000, 2)
+        total_duration = round(trip.get("duration", 0) / 60, 1)
+        route_coords = trip.get("geometry", {}).get("coordinates", [list(c) for c in coords])
+        # waypoints[i].waypoint_index gives the position of input i in the tour.
+        order = sorted(range(len(coords)),
+                       key=lambda i: data["waypoints"][i].get("waypoint_index", i))
+        backend = "osrm-local"
+    else:
+        # Fallback: keep input order, great-circle leg sum.
+        order = list(range(len(coords)))
+        total_distance = total_duration = 0.0
+        for i in range(len(coords) - 1):
+            est = _estimate_route(coords[i][0], coords[i][1], coords[i + 1][0], coords[i + 1][1])
+            total_distance += est["distance_km"]
+            total_duration += est["duration_min"]
+        total_distance = round(total_distance, 2)
+        total_duration = round(total_duration, 1)
+        route_coords = [list(c) for c in coords]
+        backend = "estimate"
+
+    ordered_names = [waypoints[i].get("name", f"stop-{i}") for i in order]
+    output_path = os.path.join(_output_dir(), f"osrm-trip-{len(waypoints)}pts-{profile}.geojson")
+    geojson = {
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "geometry": {"type": "LineString", "coordinates": route_coords},
+            "properties": {"order": ordered_names, "roundtrip": roundtrip,
+                           "distance_km": total_distance, "duration_min": total_duration,
+                           "profile": profile},
+        }],
+    }
+    with open(output_path, "w") as f:
+        json.dump(geojson, f)
+
+    if step_log:
+        step_log(f"OSRM.Trip: {total_distance} km tour, order {ordered_names} ({backend})", level="success")
+
+    return {
+        "result": {
+            "output_path": output_path,
+            "waypoint_count": len(waypoints),
+            "order": json.dumps(order),
+            "ordered_names": json.dumps(ordered_names),
+            "total_distance_km": total_distance,
+            "total_duration_min": total_duration,
+            "roundtrip": roundtrip,
+            "profile": profile,
+            "backend": backend,
+            "format": "GeoJSON",
+        }
+    }
+
+
+def _empty_trip(profile: str, roundtrip: bool) -> dict:
+    return {"output_path": "", "waypoint_count": 0, "order": "[]", "ordered_names": "[]",
+            "total_distance_km": 0.0, "total_duration_min": 0.0, "roundtrip": roundtrip,
+            "profile": profile, "backend": "none", "format": "GeoJSON"}
+
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
@@ -631,6 +714,7 @@ OSRM_DISPATCH: dict[str, callable] = {
     f"{NAMESPACE}.Matrix": _handle_matrix,
     f"{NAMESPACE}.Nearest": _handle_nearest,
     f"{NAMESPACE}.MapMatch": _handle_map_match,
+    f"{NAMESPACE}.Trip": _handle_trip,
 }
 
 
