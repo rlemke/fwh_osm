@@ -1,0 +1,77 @@
+// Worked compositions over the osm.Spatial primitives.
+//
+// These prove the library-design claim that a compound spatial request is
+// *composed* from orthogonal primitives, not hand-coded. Each is the exact
+// decomposition from docs/architecture/composable-facet-library.md §7:
+//
+//     Cache(region)
+//       -> ExtractCategory(amenities) -> Filter(tag=value)   [reference layer]
+//       -> ExtractCategory(population)                        [subject layer]
+//       -> BeyondDistance(population, reference, d)           [the spatial verb]
+//       -> RenderMap                                          [artifact]
+//
+// PlacesBeyondReach is parameterized for a whole request *family*: any
+// amenity/shop value (hospital, pharmacy, school, supermarket) at any radius
+// over any region. "Food deserts" is the (shop, supermarket) instance;
+// "healthcare deserts" is (amenity, hospital).
+
+/** Composed spatial workflows: population centers beyond reach of an amenity. */
+namespace osm.Spatial.workflows {
+    use osm.types
+
+    /** Maps the populated places of `region` that lie beyond `distance_miles`
+        of the nearest matching amenity/shop — a parameterized "X desert" map.
+        Defaults map California's hospital deserts (places > 10 mi from any
+        hospital). Set tag_key="shop", tag_value="supermarket" for food deserts. */
+    workflow PlacesBeyondReach(region: String = "California", tag_key: String = "amenity",
+        tag_value: String = "hospital", distance_miles: Double = 10.0) => (map_path: String, beyond_count: Long, place_count: Long, target_count: Long) andThen {
+            cache = osm.ops.CacheRegion(region = $.region)
+            f = PlacesBeyondReachFromCache(
+                cache = cache.cache,
+                tag_key = $.tag_key,
+                tag_value = $.tag_value,
+                distance_miles = $.distance_miles
+            )
+            yield PlacesBeyondReach(
+                map_path = f.map_path,
+                beyond_count = f.beyond_count,
+                place_count = f.place_count,
+                target_count = f.target_count
+            )
+        }
+
+    /** Cache-dependent body for PlacesBeyondReach (one region per leaf; fan out
+        across regions with `andThen foreach` at the workflow when needed). */
+    facet PlacesBeyondReachFromCache(cache: OSMCache, tag_key: String = "amenity",
+        tag_value: String = "hospital", distance_miles: Double = 10.0) => (map_path: String, beyond_count: Long, place_count: Long, target_count: Long) andThen {
+            // Reference layer: warm the cheap amenities extract, then narrow to
+            // the target tag — the proven FindBusinessMapCheap path.
+            amenities = osm.Source.PBF.ExtractCategory(cache = $.cache, category = "amenities")
+            targets = osm.Filters.FilterGeoJSONByOSMType(
+                input_path = amenities.output_path,
+                osm_type = "*",
+                tag_key = $.tag_key,
+                tag_value = $.tag_value
+            )
+            // Subject layer: populated places.
+            places = osm.Source.PBF.ExtractCategory(cache = $.cache, category = "population")
+            // The spatial verb: places beyond `distance_miles` of every target.
+            deserts = osm.Spatial.BeyondDistance(
+                subject_path = places.output_path,
+                reference_path = targets.result.output_path,
+                distance = $.distance_miles,
+                unit = "miles"
+            )
+            map = osm.viz.RenderMap(
+                geojson_path = deserts.result.output_path,
+                title = "Places beyond reach",
+                color = "#c0392b"
+            )
+            yield PlacesBeyondReachFromCache(
+                map_path = map.result.output_path,
+                beyond_count = deserts.result.feature_count,
+                place_count = places.feature_count,
+                target_count = targets.result.feature_count
+            )
+        }
+}

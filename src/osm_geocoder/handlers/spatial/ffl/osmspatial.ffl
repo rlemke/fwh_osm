@@ -1,0 +1,57 @@
+// Spatial relation facets — relate two GeoJSON layers by distance.
+//
+// The "universal verb" of the OSM toolchain: keep or annotate the features of a
+// SUBJECT layer by their distance to a REFERENCE layer. The same operation
+// appears as Overpass `around`, the routing engines' table/isochrone, turf's
+// nearestPoint/pointsWithinPolygon, and PostGIS ST_DWithin / ST_Distance / KNN.
+// It is what unlocks compound requests like "food deserts" (population points
+// beyond 1 mi of any supermarket) or "schools without a pharmacy within 1 mi".
+//
+// Contract (uniform with the Extract/Filter layers):
+//   subject GeoJSON path + reference GeoJSON path + distance -> GeoJSON path.
+// Tags are preserved, so a spatial result feeds any downstream Filter/Render.
+//
+// Distances are computed in a local azimuthal-equidistant projection centered on
+// the combined data centroid — accurate at the regional (state / metro) extents
+// these primitives compose at. For continental inputs, Clip first (see the
+// library roadmap), then relate.
+
+/** Distance relations between two GeoJSON layers (within / beyond / nearest). */
+namespace osm.Spatial {
+
+    /** Result of a spatial-distance operation over two GeoJSON layers. */
+    schema SpatialResult {
+        output_path: String,
+        feature_count: Long,
+        original_count: Long,
+        reference_count: Long,
+        operation: String,
+        distance: Double,
+        unit: String,
+        format: String,
+        extraction_date: String
+    }
+
+    /** Keeps SUBJECT features within `distance` of ANY REFERENCE feature; each
+        kept feature is annotated with `nearest_distance_m` / `nearest_distance`.
+        The "Overpass around" / PostGIS ST_DWithin primitive — e.g. addresses
+        within 1 km of a transit stop. */
+    event facet WithinDistance(subject_path: String, reference_path: String,
+        distance: Double, unit: String = "miles") => (result: SpatialResult)
+
+    /** Keeps SUBJECT features beyond `distance` from EVERY REFERENCE feature —
+        the complement of WithinDistance. The "food desert" primitive: population
+        points more than `distance` from any supermarket (or any hospital, school,
+        pharmacy — whatever the reference layer holds). */
+    event facet BeyondDistance(subject_path: String, reference_path: String,
+        distance: Double, unit: String = "miles") => (result: SpatialResult)
+
+    /** Annotates every SUBJECT feature with the distance to its nearest REFERENCE
+        feature (`nearest_distance_m` / `nearest_distance`, plus `nearest_ref_name`
+        when the reference carries a `name`). Keeps all subject features — the
+        PostGIS `<->` KNN / turf nearestPoint primitive. `distance`, when > 0,
+        caps the search radius (features with no reference within it get a null
+        annotation). */
+    event facet Nearest(subject_path: String, reference_path: String,
+        unit: String = "miles", distance: Double = 0.0) => (result: SpatialResult)
+}

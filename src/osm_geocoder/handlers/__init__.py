@@ -29,6 +29,7 @@ from .routes.routing_handlers import register_routing_handlers
 from .shared.pbf_cache import download_region  # noqa: F401
 from .routing.routing_adapter_handlers import register_routing_adapter_handlers
 from .sources.source_handlers import register_source_handlers
+from .spatial.spatial_handlers import register_spatial_handlers
 from .visualization.html_map_handlers import register_html_map_handlers
 from .visualization.visualization_handlers import register_visualization_handlers
 from .voting.tiger_handlers import register_tiger_handlers
@@ -61,6 +62,7 @@ __all__ = [
     "register_zoom_handlers",
     "register_routing_adapter_handlers",
     "register_source_handlers",
+    "register_spatial_handlers",
     "register_valhalla_handlers",
     "download_region",
 ]
@@ -94,6 +96,7 @@ def register_all_handlers(poller) -> None:
     register_import_handlers(poller)
     register_source_handlers(poller)
     register_routing_adapter_handlers(poller)
+    register_spatial_handlers(poller)
 
 
 def register_all_registry_handlers(runner) -> None:
@@ -148,8 +151,10 @@ def register_all_registry_handlers(runner) -> None:
     from .db.import_handlers import register_handlers as reg_db_import
     from .routing.routing_adapter_handlers import register_handlers as reg_routing_adapter
     from .sources.source_handlers import register_handlers as reg_source
+    from .spatial.spatial_handlers import register_handlers as reg_spatial
 
     reg_combined(runner)
     reg_db_import(runner)
     reg_source(runner)
     reg_routing_adapter(runner)
+    reg_spatial(runner)
