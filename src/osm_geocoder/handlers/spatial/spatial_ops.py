@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 # runner missing the extras degrades to an explicit error instead of ImportError
 # at module load (matching the radius_filter / osm_type_filter pattern).
 try:
-    from shapely.geometry import shape
+    from shapely.geometry import mapping, shape
     from shapely.ops import transform as shapely_transform
     from shapely.strtree import STRtree
 
@@ -375,4 +375,239 @@ def nearest(
     return _relate(
         subject_path, reference_path, distance, unit, _Mode.NEAREST,
         output_path, heartbeat, run_id,
+    )
+
+
+# --- SpatialJoin: attach reference attributes by a topological predicate -------
+
+_JOIN_PREDICATES = {"intersects", "within", "contains"}
+
+
+def _load_reference_geoms(reference_path: str, heartbeat=None):
+    """Load reference (geometry, properties) pairs in WGS84 + an STRtree.
+
+    Topological predicates (intersects/within/contains) are projection-invariant,
+    so SpatialJoin indexes the *unprojected* reference geometries directly.
+    Returns ``(tree, geoms, props, count)``; ``tree`` is None for an empty layer.
+    """
+    from facetwork.runtime.storage import localize
+
+    local_ref = localize(str(reference_path))
+    geoms = []
+    props: list[dict] = []
+    for feature in iter_geojson_features(local_ref, heartbeat):
+        geom_json = feature.get("geometry")
+        if not geom_json:
+            continue
+        try:
+            geom = shape(geom_json)
+        except Exception as exc:
+            log.warning("spatial: skipping malformed reference geometry: %s", exc)
+            continue
+        if geom.is_empty:
+            continue
+        geoms.append(geom)
+        props.append(feature.get("properties") or {})
+    if not geoms:
+        return None, [], [], 0
+    return STRtree(geoms), geoms, props, len(geoms)
+
+
+def spatial_join(
+    subject_path: str,
+    reference_path: str,
+    predicate: str = "intersects",
+    prefix: str = "ref_",
+    how: str = "left",
+    output_path: str | None = None,
+    heartbeat=None,
+    run_id: str = "",
+) -> SpatialResult:
+    """Attach matching reference-layer properties onto each subject feature.
+
+    For each subject feature, finds reference features satisfying ``predicate``
+    (``intersects`` | ``within`` | ``contains``) and copies the *first* match's
+    properties onto the subject under ``prefix`` (plus ``<prefix>joined_count``).
+    The point-in-polygon join (PostGIS ``ST_Within`` join / GeoPandas ``sjoin``).
+    ``how="inner"`` keeps only matched subjects; ``how="left"`` keeps all.
+    """
+    if not HAS_SHAPELY or not HAS_PYPROJ:
+        raise RuntimeError("shapely>=2.0 and pyproj>=3.0 are required for osm.Spatial operations")
+    if predicate not in _JOIN_PREDICATES:
+        raise ValueError(f"predicate must be one of {sorted(_JOIN_PREDICATES)}; got {predicate!r}")
+    if how not in ("left", "inner"):
+        raise ValueError(f"how must be 'left' or 'inner'; got {how!r}")
+
+    subject_path = str(subject_path)
+    if output_path is None:
+        output_path = derive_output_path(
+            "osm-spatial", uri_stem(subject_path), "join",
+            uri_stem(str(reference_path)), predicate, ext="geojson", run_id=run_id or None,
+        )
+    output_path = str(output_path)
+    ensure_dir(output_path)
+
+    tree, geoms, ref_props, reference_count = _load_reference_geoms(reference_path, heartbeat)
+
+    from facetwork.config import get_temp_dir
+    from facetwork.runtime.storage import localize
+
+    local_subject = localize(subject_path)
+    original_count = 0
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".geojson", dir=get_temp_dir())
+    os.close(tmp_fd)
+    try:
+        with GeoJSONStreamWriter(tmp_path) as writer:
+            for feature in iter_geojson_features(local_subject, heartbeat):
+                original_count += 1
+                geom_json = feature.get("geometry")
+                matches = []
+                if tree is not None and geom_json:
+                    try:
+                        g = shape(geom_json)
+                        matches = sorted(int(i) for i in tree.query(g, predicate=predicate))
+                    except Exception as exc:
+                        log.warning("spatial: skipping malformed subject geometry: %s", exc)
+                        matches = []
+                if not matches and how == "inner":
+                    continue
+                props = feature.setdefault("properties", {})
+                props[f"{prefix}joined_count"] = len(matches)
+                if matches:
+                    for k, v in ref_props[matches[0]].items():
+                        props[f"{prefix}{k}"] = v
+                writer.write_feature(feature)
+        ensure_dir(output_path)
+        shutil.move(tmp_path, output_path)
+        feature_count = writer.feature_count
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    return SpatialResult(
+        output_path=output_path,
+        feature_count=feature_count,
+        original_count=original_count,
+        reference_count=reference_count,
+        operation="join",
+        distance=0.0,
+        unit="",
+        extraction_date=datetime.now(UTC).isoformat(),
+    )
+
+
+# --- Buffer: expand each feature by a distance into polygons -------------------
+
+
+def _layer_centroid(path: str, heartbeat=None) -> tuple[float, float] | None:
+    """Center (lon, lat) of a layer's bounding box, or None if empty."""
+    min_lon = min_lat = math.inf
+    max_lon = max_lat = -math.inf
+    seen = False
+    for feature in iter_geojson_features(path, heartbeat):
+        geom_json = feature.get("geometry")
+        if not geom_json:
+            continue
+        try:
+            b = shape(geom_json).bounds
+        except Exception:
+            continue
+        seen = True
+        min_lon, min_lat = min(min_lon, b[0]), min(min_lat, b[1])
+        max_lon, max_lat = max(max_lon, b[2]), max(max_lat, b[3])
+    if not seen:
+        return None
+    return (min_lon + max_lon) / 2.0, (min_lat + max_lat) / 2.0
+
+
+def buffer(
+    input_path: str,
+    distance: float,
+    unit: str = "miles",
+    output_path: str | None = None,
+    heartbeat=None,
+    run_id: str = "",
+) -> SpatialResult:
+    """Buffer every feature by ``distance`` (in ``unit``), producing polygons.
+
+    The "area within ``distance`` of each feature" — PostGIS ``ST_Buffer`` / turf
+    buffer. Geometries are buffered in a local azimuthal-equidistant projection
+    (metric, centered on the layer) and reprojected to WGS84; properties are
+    preserved. Feature count is unchanged. Feed the result to SpatialJoin /
+    WithinDistance or RenderMap (e.g. service-area coverage).
+    """
+    if not HAS_SHAPELY or not HAS_PYPROJ:
+        raise RuntimeError("shapely>=2.0 and pyproj>=3.0 are required for osm.Spatial operations")
+    unit_enum = Unit.from_string(unit)
+    dist_m = to_meters(distance, unit_enum)
+
+    input_path = str(input_path)
+    if output_path is None:
+        output_path = derive_output_path(
+            "osm-spatial", uri_stem(input_path), "buffer",
+            f"{distance}{unit_enum.value}", ext="geojson", run_id=run_id or None,
+        )
+    output_path = str(output_path)
+    ensure_dir(output_path)
+
+    from facetwork.config import get_temp_dir
+    from facetwork.runtime.storage import localize
+
+    local_input = localize(input_path)
+    center = _layer_centroid(local_input, heartbeat)
+    if center is None:
+        # Empty input — write an empty FeatureCollection.
+        with GeoJSONStreamWriter(output_path) as writer:
+            pass
+        return SpatialResult(
+            output_path=output_path, feature_count=0, original_count=0, reference_count=0,
+            operation="buffer", distance=distance, unit=unit_enum.value,
+            extraction_date=datetime.now(UTC).isoformat(),
+        )
+
+    aeqd = CRS.from_proj4(
+        f"+proj=aeqd +lat_0={center[1]} +lon_0={center[0]} +datum=WGS84 +units=m +no_defs"
+    )
+    wgs84 = CRS.from_epsg(4326)
+    fwd = Transformer.from_crs(wgs84, aeqd, always_xy=True).transform
+    inv = Transformer.from_crs(aeqd, wgs84, always_xy=True).transform
+
+    original_count = 0
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".geojson", dir=get_temp_dir())
+    os.close(tmp_fd)
+    try:
+        with GeoJSONStreamWriter(tmp_path) as writer:
+            for feature in iter_geojson_features(local_input, heartbeat):
+                original_count += 1
+                geom_json = feature.get("geometry")
+                if not geom_json:
+                    continue
+                try:
+                    projected = shapely_transform(fwd, shape(geom_json))
+                    buffered = shapely_transform(inv, projected.buffer(dist_m))
+                except Exception as exc:
+                    log.warning("spatial: skipping malformed geometry in buffer: %s", exc)
+                    continue
+                if buffered.is_empty:
+                    continue
+                feature["geometry"] = mapping(buffered)
+                writer.write_feature(feature)
+        ensure_dir(output_path)
+        shutil.move(tmp_path, output_path)
+        feature_count = writer.feature_count
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    return SpatialResult(
+        output_path=output_path,
+        feature_count=feature_count,
+        original_count=original_count,
+        reference_count=0,
+        operation="buffer",
+        distance=distance,
+        unit=unit_enum.value,
+        extraction_date=datetime.now(UTC).isoformat(),
     )

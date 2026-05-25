@@ -18,7 +18,9 @@ from .spatial_ops import (
     HAS_PYPROJ,
     HAS_SHAPELY,
     beyond_distance,
+    buffer,
     nearest,
+    spatial_join,
     within_distance,
 )
 
@@ -172,11 +174,109 @@ def _make_nearest_handler(facet_name: str):
     return handler
 
 
+def _make_join_handler(facet_name: str):
+    """Build a handler for SpatialJoin (attach reference props by predicate)."""
+    qualified = f"{NAMESPACE}.{facet_name}"
+
+    def handler(payload: dict) -> dict:
+        subject_path = payload.get("subject_path", "")
+        reference_path = payload.get("reference_path", "")
+        predicate = payload.get("predicate", "intersects")
+        prefix = payload.get("prefix", "ref_")
+        how = payload.get("how", "left")
+        step_log = payload.get("_step_log")
+
+        input_cache = {"path": subject_path, "size": _file_size(subject_path)}
+        cp = {
+            "reference_path": reference_path,
+            "reference_size": _file_size(reference_path),
+            "predicate": predicate,
+            "prefix": prefix,
+            "how": how,
+        }
+        hit = cached_result(qualified, input_cache, cp, step_log)
+        if hit is not None:
+            return hit
+
+        if step_log:
+            step_log(f"{facet_name}: joining {subject_path} <- {reference_path} ({predicate}, {how})")
+        log.info("%s joining %s <- %s (%s, %s)", facet_name, subject_path, reference_path, predicate, how)
+
+        if not HAS_SHAPELY or not HAS_PYPROJ or not subject_path or not reference_path:
+            rv = _empty_result("join", 0.0, "")
+            return rv
+
+        result = spatial_join(
+            subject_path,
+            reference_path,
+            predicate=predicate,
+            prefix=prefix,
+            how=how,
+            heartbeat=payload.get("_task_heartbeat"),
+            run_id=payload.get("_workflow_id", ""),
+        )
+        if step_log:
+            step_log(
+                f"{facet_name}: {result.feature_count}/{result.original_count} subject features "
+                f"({predicate} join vs {result.reference_count} reference features)",
+                level="success",
+            )
+        rv = {"result": result.to_dict()}
+        save_result_meta(qualified, input_cache, cp, rv)
+        return rv
+
+    return handler
+
+
+def _make_buffer_handler(facet_name: str):
+    """Build a handler for Buffer (expand each feature into polygons)."""
+    qualified = f"{NAMESPACE}.{facet_name}"
+
+    def handler(payload: dict) -> dict:
+        input_path = payload.get("input_path", "")
+        distance = payload.get("distance", 0.0)
+        unit = payload.get("unit", "miles")
+        step_log = payload.get("_step_log")
+
+        input_cache = {"path": input_path, "size": _file_size(input_path)}
+        cp = {"distance": distance, "unit": unit}
+        hit = cached_result(qualified, input_cache, cp, step_log)
+        if hit is not None:
+            return hit
+
+        if step_log:
+            step_log(f"{facet_name}: buffering {input_path} by {distance} {unit}")
+        log.info("%s buffering %s by %s %s", facet_name, input_path, distance, unit)
+
+        if not HAS_SHAPELY or not HAS_PYPROJ or not input_path:
+            return _empty_result("buffer", distance, unit)
+
+        result = buffer(
+            input_path,
+            distance,
+            unit=unit,
+            heartbeat=payload.get("_task_heartbeat"),
+            run_id=payload.get("_workflow_id", ""),
+        )
+        if step_log:
+            step_log(
+                f"{facet_name}: buffered {result.feature_count} features by {distance} {unit}",
+                level="success",
+            )
+        rv = {"result": result.to_dict()}
+        save_result_meta(qualified, input_cache, cp, rv)
+        return rv
+
+    return handler
+
+
 # Event facet definitions for handler registration.
 SPATIAL_FACETS = [
     ("WithinDistance", lambda n: _make_distance_handler(n, within_distance)),
     ("BeyondDistance", lambda n: _make_distance_handler(n, beyond_distance)),
     ("Nearest", _make_nearest_handler),
+    ("SpatialJoin", _make_join_handler),
+    ("Buffer", _make_buffer_handler),
 ]
 
 

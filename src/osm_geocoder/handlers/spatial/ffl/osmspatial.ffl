@@ -54,4 +54,20 @@ namespace osm.Spatial {
         annotation). */
     event facet Nearest(subject_path: String, reference_path: String,
         unit: String = "miles", distance: Double = 0.0) => (result: SpatialResult)
+
+    /** Attaches matching REFERENCE-layer properties onto each SUBJECT feature by
+        a topological predicate (`intersects` | `within` | `contains`) — the
+        point-in-polygon join (PostGIS ST_Within join / GeoPandas sjoin / turf).
+        The first match's properties are copied under `prefix` (plus
+        `<prefix>joined_count`). `how="inner"` keeps only matched subjects;
+        `how="left"` keeps all. e.g. tag each business point with the census tract
+        (`within`) it falls inside. */
+    event facet SpatialJoin(subject_path: String, reference_path: String, predicate: String = "intersects", prefix: String = "ref_", how: String = "left") => (result: SpatialResult)
+
+    /** Buffers every feature by `distance` (in `unit`) into polygons — the area
+        within `distance` of each feature (PostGIS ST_Buffer / turf buffer). Tags
+        preserved; feed the result to SpatialJoin / WithinDistance or RenderMap
+        (e.g. supermarket service-area coverage). Buffered in a local
+        azimuthal-equidistant projection, reprojected to WGS84. */
+    event facet Buffer(input_path: String, distance: Double, unit: String = "miles") => (result: SpatialResult)
 }

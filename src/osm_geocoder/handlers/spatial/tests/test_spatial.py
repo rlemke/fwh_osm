@@ -17,6 +17,8 @@ pytest.importorskip("shapely")
 pytest.importorskip("pyproj")
 
 from pyproj import Geod
+from shapely.geometry import Point
+from shapely.geometry import shape as shp
 
 from osm_geocoder.handlers.spatial import spatial_ops as ops
 
@@ -163,3 +165,81 @@ def test_unit_conversion_threshold(layers, tmp_path):
     kept_ids = {f["properties"]["id"] for f in _read_features(res.output_path)}
     assert kept_ids == {"A", "B"}
     assert res.unit == "miles"
+
+
+# --- SpatialJoin ---------------------------------------------------------------
+
+
+def _square_fc(props):
+    """A FeatureCollection with one unit square polygon (0,0)-(1,1)."""
+    return {
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature", "properties": props,
+            "geometry": {"type": "Polygon",
+                         "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]},
+        }],
+    }
+
+
+@pytest.fixture
+def join_layers(tmp_path):
+    """A zone polygon as reference; two subject points (one inside, one outside)."""
+    ref = _write(tmp_path / "zone.geojson", _square_fc({"name": "ZoneA", "pop": 500}))
+    subj = _write(tmp_path / "pts.geojson",
+                  _fc([(0.5, 0.5, {"id": "in"}), (5.0, 5.0, {"id": "out"})]))
+    return ref, subj
+
+
+def test_spatial_join_left_attaches_ref_props(join_layers, tmp_path):
+    ref, subj = join_layers
+    res = ops.spatial_join(subj, ref, predicate="intersects", how="left",
+                           output_path=str(tmp_path / "j.geojson"))
+    assert res.operation == "join"
+    assert res.feature_count == 2          # left join keeps all subjects
+    by = {f["properties"]["id"]: f["properties"] for f in _read_features(res.output_path)}
+    # The inside point gets the zone's attributes; the outside point does not.
+    assert by["in"]["ref_name"] == "ZoneA"
+    assert by["in"]["ref_pop"] == 500
+    assert by["in"]["ref_joined_count"] == 1
+    assert by["out"]["ref_joined_count"] == 0
+    assert "ref_name" not in by["out"]
+
+
+def test_spatial_join_inner_drops_unmatched(join_layers, tmp_path):
+    ref, subj = join_layers
+    res = ops.spatial_join(subj, ref, predicate="within", how="inner",
+                           output_path=str(tmp_path / "ji.geojson"))
+    feats = _read_features(res.output_path)
+    assert {f["properties"]["id"] for f in feats} == {"in"}   # only the point within the zone
+    assert feats[0]["properties"]["ref_name"] == "ZoneA"
+
+
+def test_spatial_join_rejects_bad_predicate(join_layers, tmp_path):
+    ref, subj = join_layers
+    with pytest.raises(ValueError, match="predicate must be one of"):
+        ops.spatial_join(subj, ref, predicate="near", output_path=str(tmp_path / "x.geojson"))
+
+
+# --- Buffer --------------------------------------------------------------------
+
+
+def test_buffer_produces_polygon_covering_nearby_points(tmp_path):
+    src = _write(tmp_path / "pt.geojson", _fc([(0.0, 0.0, {"name": "hub"})]))
+    res = ops.buffer(src, 100.0, unit="kilometers", output_path=str(tmp_path / "buf.geojson"))
+
+    assert res.operation == "buffer"
+    assert res.feature_count == res.original_count == 1   # buffer is 1:1
+    feats = _read_features(res.output_path)
+    poly = shp(feats[0]["geometry"])
+    assert poly.geom_type == "Polygon"
+    assert feats[0]["properties"]["name"] == "hub"        # props preserved
+    # ~55 km east is inside the 100 km buffer; ~222 km east is outside.
+    assert poly.contains(Point(0.5, 0.0))
+    assert not poly.contains(Point(2.0, 0.0))
+
+
+def test_buffer_empty_input(tmp_path):
+    src = _write(tmp_path / "empty.geojson", _fc([]))
+    res = ops.buffer(src, 5.0, unit="kilometers", output_path=str(tmp_path / "e.geojson"))
+    assert res.feature_count == 0
