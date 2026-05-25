@@ -25,8 +25,11 @@ if str(_TOOLS_ROOT) not in sys.path:
 # Re-export both conversion libraries. Callers use aliased names to avoid
 # name collisions between the two ``convert_region`` / ``ConvertResult`` /
 # ``to_osm_cache`` / ``ConversionError`` symbols.
+from _osm_tools import (
+    geocode,  # noqa: E402,F401
+    html_render,  # noqa: E402,F401
+)
 from _osm_tools import graphhopper_build as graphhopper  # noqa: E402,F401
-from _osm_tools import html_render  # noqa: E402,F401
 from _osm_tools import pbf_clip as clip  # noqa: E402,F401
 from _osm_tools import pbf_extract as extract  # noqa: E402,F401
 from _osm_tools import pbf_geojson as geojson  # noqa: E402,F401

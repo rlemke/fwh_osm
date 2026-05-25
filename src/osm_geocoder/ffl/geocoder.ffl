@@ -14,8 +14,20 @@ namespace osm.geocode {
         display_name: String
     }
 
-    /** Resolves a street address to geographic coordinates via an external geocoding agent. */
+    /** Resolves a street address / place name to geographic coordinates via OSM
+        Nominatim (forward geocoding). Returns the best-ranked match. */
     event facet Geocode(address: String) => (result: GeoCoordinate)
+
+    /** Resolves geographic coordinates to the nearest address / place via OSM
+        Nominatim (reverse geocoding). `zoom` (0–18) sets address granularity
+        (18 ≈ building, 10 ≈ city). */
+    event facet ReverseGeocode(lat: Double, lon: Double, zoom: Long = 18) => (result: GeoCoordinate)
+
+    /** Reverse-geocodes a coordinate to its nearest address / place. */
+    workflow ReverseGeocodePoint(lat: Double, lon: Double, zoom: Long = 18) => (location: GeoCoordinate) andThen {
+        geo = ReverseGeocode(lat = $.lat, lon = $.lon, zoom = $.zoom)
+        yield ReverseGeocodePoint(location = geo.result)
+    }
 
     /** Geocodes a single address and returns its coordinates. */
     workflow GeocodeAddress(address: String) => (location: GeoCoordinate) andThen {
