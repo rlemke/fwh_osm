@@ -124,7 +124,8 @@ class TestOSRMRouterDispatch:
     def test_dispatch_keys(self):
         from osm_geocoder.handlers.routing.osrm_router import NAMESPACE, OSRM_DISPATCH
 
-        assert len(OSRM_DISPATCH) == 3
+        # Route, MultiStopRoute, Isochrone, Matrix, Nearest, MapMatch, Trip.
+        assert len(OSRM_DISPATCH) == 7
         for key in OSRM_DISPATCH:
             assert key.startswith(NAMESPACE)
 
@@ -172,17 +173,29 @@ class TestOSRMRouterDispatch:
 
 
 class TestRoutingAdapterRegistration:
+    @staticmethod
+    def _expected_count():
+        # Derive from the dispatch tables so adding verbs/engines never makes
+        # these registration tests stale (API + OSRM + Valhalla + GraphHopper).
+        from osm_geocoder.handlers.routing.api_router import API_DISPATCH
+        from osm_geocoder.handlers.routing.graphhopper_router import GRAPHHOPPER_DISPATCH
+        from osm_geocoder.handlers.routing.osrm_router import OSRM_DISPATCH
+        from osm_geocoder.handlers.routing.valhalla_router import VALHALLA_DISPATCH
+
+        return len(API_DISPATCH) + len(OSRM_DISPATCH) + len(VALHALLA_DISPATCH) + len(GRAPHHOPPER_DISPATCH)
+
     def test_register_poller(self):
-        from osm_geocoder.handlers.routing.routing_adapter_handlers import register_routing_adapter_handlers
+        from osm_geocoder.handlers.routing.routing_adapter_handlers import (
+            register_routing_adapter_handlers,
+        )
 
         poller = MagicMock()
         register_routing_adapter_handlers(poller)
-        # 3 API + 3 OSRM = 6 handlers
-        assert poller.register.call_count == 6
+        assert poller.register.call_count == self._expected_count()
 
     def test_register_runner(self):
         from osm_geocoder.handlers.routing.routing_adapter_handlers import register_handlers
 
         runner = MagicMock()
         register_handlers(runner)
-        assert runner.register_handler.call_count == 6
+        assert runner.register_handler.call_count == self._expected_count()
