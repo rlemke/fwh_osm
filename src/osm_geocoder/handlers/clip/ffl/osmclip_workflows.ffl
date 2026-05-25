@@ -1,0 +1,20 @@
+// Worked composition demonstrating the Clip payoff: clip a region to a metro
+// bbox, then run the (cheap) category extract on the much smaller clipped PBF
+// instead of scanning the full state. This is the "cheap sub-region query" the
+// library design calls for — the clipped OSMCache flows into ExtractCategory
+// exactly like a full-region cache because every extractor reads `cache.path`.
+
+/** Clip-then-extract composition: cheap metro-scale category extraction. */
+namespace osm.Clip.workflows {
+    use osm.types
+
+    /** Clips `region` to a bounding box, then extracts `category` from the clip.
+        Defaults clip California to the San Francisco Bay Area and extract
+        amenities — seconds on the ~tens-of-MB clip vs a full-state scan. */
+    workflow ClipAndExtract(region: String = "California", west: Double = -122.6, south: Double = 37.2, east: Double = -121.7, north: Double = 38.0, category: String = "amenities") => (clipped_path: String, clipped_size: Long, feature_count: Long) andThen {
+        cache = osm.ops.CacheRegion(region = $.region)
+        clip = osm.Clip.ClipByBBox(cache = cache.cache, west = $.west, south = $.south, east = $.east, north = $.north)
+        ext = osm.Source.PBF.ExtractCategory(cache = clip.cache, category = $.category)
+        yield ClipAndExtract(clipped_path = clip.cache.path, clipped_size = clip.cache.size, feature_count = ext.feature_count)
+    }
+}

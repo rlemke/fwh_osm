@@ -1,0 +1,30 @@
+// Clip facets — spatially subset a cached region PBF, the Source-layer primitive.
+//
+// Clip is the "cheap sub-region" verb of the OSM toolchain (osmium extract,
+// osmconvert -b, ogr2ogr, Overpass bbox). It takes a region handle (OSMCache)
+// plus a bounding box or polygon and produces a NEW, much smaller handle over
+// the clipped PBF — written via `osmium extract` into the `pbf-clips` cache
+// with SHA-validity sidecars (idempotent: same source + same spec = cache hit).
+//
+// Why it matters: every Extract* handler reads the PBF from `cache.path`, so a
+// clipped OSMCache flows straight into ExtractCategory / the Spatial family.
+// Clip a 1.2 GB state down to a metro bbox first and the downstream extract +
+// distance work runs on megabytes, not gigabytes — what makes continental-scale
+// spatial queries tractable. One region per leaf; fan out across clips with
+// `andThen foreach` at the workflow.
+
+/** Spatially subset a cached region PBF to a bbox or polygon (Source layer). */
+namespace osm.Clip {
+    use osm.types
+
+    /** Clips the region in `cache` to a bounding box (west, south, east, north
+        in WGS84 degrees) via `osmium extract`, returning a new OSMCache over the
+        clipped PBF. Compose Extract/Filter/Spatial on the result for cheap
+        metro-scale queries. Idempotent and cached per (source PBF, bbox). */
+    event facet ClipByBBox(cache: OSMCache, west: Double, south: Double, east: Double, north: Double) => (cache: OSMCache) with Timeout(minutes = 30)
+
+    /** Clips the region in `cache` to a polygon (path to a GeoJSON or osmium
+        `.poly` file) via `osmium extract`, returning a new OSMCache over the
+        clipped PBF. Idempotent and cached per (source PBF, polygon content). */
+    event facet ClipByPolygon(cache: OSMCache, polygon_path: String) => (cache: OSMCache) with Timeout(minutes = 30)
+}

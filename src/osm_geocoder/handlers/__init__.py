@@ -10,6 +10,7 @@ from .amenities.amenity_handlers import register_amenity_handlers
 from .boundaries.boundary_handlers import register_boundary_handlers
 from .buildings.building_handlers import register_building_handlers
 from .cache.region_handlers import register_region_handlers
+from .clip.clip_handlers import register_clip_handlers
 from .combined.combined_handlers import register_combined_handlers
 from .db.import_handlers import register_import_handlers
 from .filters.filter_handlers import register_filter_handlers
@@ -43,6 +44,7 @@ __all__ = [
     "register_amenity_handlers",
     "register_boundary_handlers",
     "register_building_handlers",
+    "register_clip_handlers",
     "register_elevation_handlers",
     "register_filter_handlers",
     "register_graphhopper_handlers",
@@ -74,6 +76,7 @@ def register_all_handlers(poller) -> None:
     register_amenity_handlers(poller)
     register_boundary_handlers(poller)
     register_building_handlers(poller)
+    register_clip_handlers(poller)
     register_elevation_handlers(poller)
     register_filter_handlers(poller)
     register_graphhopper_handlers(poller)
@@ -106,6 +109,7 @@ def register_all_registry_handlers(runner) -> None:
     from .boundaries.boundary_handlers import register_handlers as reg_boundary
     from .buildings.building_handlers import register_handlers as reg_building
     from .cache.region_handlers import register_handlers as reg_region
+    from .clip.clip_handlers import register_handlers as reg_clip
     from .filters.filter_handlers import register_handlers as reg_filter
     from .filters.osmose_handlers import register_handlers as reg_osmose
     from .filters.validation_handlers import register_handlers as reg_validation
@@ -128,6 +132,7 @@ def register_all_registry_handlers(runner) -> None:
     reg_amenity(runner)
     reg_boundary(runner)
     reg_building(runner)
+    reg_clip(runner)
     reg_elevation(runner)
     reg_filter(runner)
     reg_graphhopper(runner)

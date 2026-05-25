@@ -74,7 +74,7 @@ class ClipSpec:
         return d
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "ClipSpec":
+    def from_dict(cls, d: dict[str, Any]) -> ClipSpec:
         return cls(
             kind=d.get("kind", ""),
             bbox=tuple(d["bbox"]) if d.get("bbox") else None,  # type: ignore[arg-type]
@@ -309,7 +309,11 @@ def clip_pbf(
         if staged_pbf.exists():
             staged_pbf.unlink()
 
-        cmd = [osmium_bin, "extract", "--overwrite", "-o", str(staged_pbf)]
+        # Force PBF output: the staging file ends in ``.staging`` (so osmium
+        # cannot infer the format from the extension), and the final artifact is
+        # always a .osm.pbf — without this osmium errors "Could not detect file
+        # format".
+        cmd = [osmium_bin, "extract", "--overwrite", "--output-format", "pbf", "-o", str(staged_pbf)]
         if spec.kind == "bbox":
             assert spec.bbox is not None
             cmd += ["--bbox", ",".join(f"{x}" for x in spec.bbox)]
