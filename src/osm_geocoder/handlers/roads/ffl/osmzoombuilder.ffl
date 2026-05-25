@@ -104,7 +104,7 @@ namespace osm.Roads.ZoomBuilder {
         edge_count: Long,
         node_count: Long,
         graph_path: String
-    )
+    ) with Effect(kind = "pure") with Cost(tier = "moderate")
 
     /** Builds anchor node sets for a given zoom level. */
     event facet BuildAnchors(
@@ -114,7 +114,7 @@ namespace osm.Roads.ZoomBuilder {
     ) => (
         anchors_path: String,
         anchor_count: Long
-    )
+    ) with Effect(kind = "pure") with Cost(tier = "moderate")
 
     /** Computes structural betweenness sampling for a zoom level. */
     event facet ComputeSBS(
@@ -126,7 +126,7 @@ namespace osm.Roads.ZoomBuilder {
     ) => (
         sbs_path: String,
         route_count: Long
-    )
+    ) with Effect(kind = "pure") with Cost(tier = "moderate")
 
     /** Computes per-zoom scores from SBS data. */
     event facet ComputeScores(
@@ -134,7 +134,7 @@ namespace osm.Roads.ZoomBuilder {
         sbs_paths: String
     ) => (
         scores_path: String
-    )
+    ) with Effect(kind = "pure") with Cost(tier = "moderate")
 
     /** Detects bypass roads around settlements. */
     event facet DetectBypasses(
@@ -144,7 +144,7 @@ namespace osm.Roads.ZoomBuilder {
     ) => (
         bypasses_path: String,
         bypass_count: Long
-    )
+    ) with Effect(kind = "pure") with Cost(tier = "moderate")
 
     /** Detects ring roads around large settlements. */
     event facet DetectRings(
@@ -154,7 +154,7 @@ namespace osm.Roads.ZoomBuilder {
     ) => (
         rings_path: String,
         ring_count: Long
-    )
+    ) with Effect(kind = "pure") with Cost(tier = "moderate")
 
     /** Selects edges with budgeted greedy selection and backbone repair. */
     event facet SelectEdges(
@@ -166,7 +166,7 @@ namespace osm.Roads.ZoomBuilder {
     ) => (
         assignments_path: String,
         selected_count: Long
-    )
+    ) with Effect(kind = "pure") with Cost(tier = "moderate")
 
     /** Exports final zoom layer assignments. */
     event facet ExportZoomLayers(
@@ -175,7 +175,7 @@ namespace osm.Roads.ZoomBuilder {
         output_dir: String
     ) => (
         result: ZoomBuilderResult
-    )
+    ) with Effect(kind = "pure") with Cost(tier = "moderate")
 
     /** Orchestrates the full zoom builder pipeline end-to-end. */
     event facet BuildZoomLayers(
@@ -187,5 +187,5 @@ namespace osm.Roads.ZoomBuilder {
     ) => (
         result: ZoomBuilderResult,
         metrics: ZoomBuilderMetrics
-    )
+    ) with Effect(kind = "pure") with Cost(tier = "moderate")
 }

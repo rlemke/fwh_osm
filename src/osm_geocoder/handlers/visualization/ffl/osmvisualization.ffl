@@ -26,22 +26,22 @@ namespace osm.viz {
     /** Generates an interactive HTML or static PNG map from GeoJSON. */
     event facet RenderMap(geojson_path: String, title: String = "Map",
         format: String = "html", width: Long = 800, height: Long = 600,
-        color: String = "#3388ff") => (result: MapResult)
+        color: String = "#3388ff") => (result: MapResult) with Effect(kind = "io") with Cost(tier = "cheap")
 
     /** Renders a map centered on specific coordinates with a zoom level. */
     event facet RenderMapAt(geojson_path: String, lat: Double, lon: Double,
-        zoom: Long = 10, title: String = "Map") => (result: MapResult)
+        zoom: Long = 10, title: String = "Map") => (result: MapResult) with Effect(kind = "io") with Cost(tier = "cheap")
 
     /** Renders multiple GeoJSON files as color-coded layers. */
     event facet RenderLayers(layers: [String], colors: [String],
-        title: String = "Map", format: String = "html") => (result: MapResult)
+        title: String = "Map", format: String = "html") => (result: MapResult) with Effect(kind = "io") with Cost(tier = "cheap")
 
     /** Renders a map with custom layer styling. */
     event facet RenderStyledMap(geojson_path: String, style: LayerStyle,
-        title: String = "Map") => (result: MapResult)
+        title: String = "Map") => (result: MapResult) with Effect(kind = "io") with Cost(tier = "cheap")
 
     /** Opens a quick browser preview of GeoJSON data. */
-    event facet PreviewMap(geojson_path: String) => (result: MapResult)
+    event facet PreviewMap(geojson_path: String) => (result: MapResult) with Effect(kind = "io") with Cost(tier = "cheap")
 
     /** Formatted text output from GeoJSON features. */
     schema FormatResult {
@@ -54,5 +54,5 @@ namespace osm.viz {
 
     /** Formats GeoJSON features as text or other output formats. */
     event facet FormatGeoJSON(input_path: String, title: String = "Features",
-        format: String = "text") => (result: FormatResult)
+        format: String = "text") => (result: FormatResult) with Effect(kind = "io") with Cost(tier = "cheap")
 }

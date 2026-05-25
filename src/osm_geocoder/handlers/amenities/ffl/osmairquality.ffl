@@ -45,7 +45,7 @@ namespace osm.AirQuality {
      */
     event facet FetchAirQuality(bbox: String,
         parameter: String = "pm25",
-        radius_m: Long = 25000) => (result: AirQualityResult)
+        radius_m: Long = 25000) => (result: AirQualityResult) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Correlates schools with nearest air quality sensor.
      * Classifies exposure: high >= 35, medium 15-35, low < 15 ug/m3 (WHO PM2.5).
@@ -56,13 +56,13 @@ namespace osm.AirQuality {
      */
     event facet CorrelateSchoolAirQuality(schools_path: String,
         air_quality_path: String,
-        max_distance_km: Double = 10) => (result: ExposureCorrelationResult)
+        max_distance_km: Double = 10) => (result: ExposureCorrelationResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Computes aggregate exposure statistics from correlated school-sensor data.
      * @param input_path Path to the correlated exposure GeoJSON file
      * @returns stats Aggregate statistics including counts and percentages by exposure level
      */
-    event facet ExposureStatistics(input_path: String) => (stats: ExposureStats)
+    event facet ExposureStatistics(input_path: String) => (stats: ExposureStats) with Effect(kind = "pure") with Cost(tier = "cheap")
 }
 
 /** School air quality exposure pipeline combining OSM schools with OpenAQ sensor data. */

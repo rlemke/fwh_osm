@@ -53,26 +53,26 @@ namespace osm.ops.OSMOSE {
         check_references: Boolean = true,
         check_coordinates: Boolean = true,
         check_duplicates: Boolean = true
-    ) => (result: VerifyResult, summary: VerifySummary)
+    ) => (result: VerifyResult, summary: VerifySummary) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Verifies geometry only (degenerate ways, unclosed polygons). */
     event facet VerifyGeometry(
         cache: OSMCache
-    ) => (result: VerifyResult, summary: VerifySummary)
+    ) => (result: VerifyResult, summary: VerifySummary) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Verifies tag completeness with optional required-tag list. */
     event facet VerifyTags(
         cache: OSMCache,
         required_tags: String = "name"
-    ) => (result: VerifyResult, summary: VerifySummary)
+    ) => (result: VerifyResult, summary: VerifySummary) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Verifies an existing GeoJSON file for structure, geometry, and coordinates. */
     event facet VerifyGeoJSON(
         input_path: String
-    ) => (result: VerifyResult, summary: VerifySummary)
+    ) => (result: VerifyResult, summary: VerifySummary) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Reads verification output and computes aggregate statistics. */
     event facet ComputeVerifySummary(
         input_path: String
-    ) => (summary: VerifySummary)
+    ) => (summary: VerifySummary) with Effect(kind = "pure") with Cost(tier = "cheap")
 }

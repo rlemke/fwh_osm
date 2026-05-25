@@ -143,10 +143,12 @@ into `handlers/__init__.py`, tool logic in `tools/_osm_tools/` reached via the
 **Effect/cost annotations.** Facets may declare `with Effect(kind = "pure"|"external"|"io")` and
 `with Cost(tier = "free"|"cheap"|"moderate"|"expensive")` after the `=> (...)` return clause (cost is
 also inferred from an existing `with Timeout(minutes = …)`). `fw_capabilities` surfaces + filters on
-these so the composer prefers pure/cheap primitives. Annotated so far: `osm.Spatial`/`osm.Transform`
-(pure/cheap), `osm.geocode` (external/cheap), `ExtractCategory`/`osm.Clip`/`osm.Tiles`
-(external/expensive). When adding a facet, tag it: pure + cheap if it's in-process GeoJSON
-compute, external if it hits a server/DB/subprocess.
+these so the composer prefers pure/cheap primitives. **All event facets are annotated** (classified
+by parameter type + namespace): PBF extractors / builds / imports / downloads → external/expensive;
+PostGIS + routing engines → external/moderate; GeoJSON filters / stats / Spatial / Transform →
+pure/cheap; `Load*` + render → io/cheap; vocab → pure/free. When adding a facet, tag it the same way:
+a facet taking `cache: OSMCache` scans the PBF (external/expensive); one taking `input_path` (GeoJSON)
+is in-process (pure/cheap); anything hitting a server/DB/subprocess is external.
 
 **External-engine deps** (the only non-pure facets): Routing needs a running OSRM
 (`AFL_OSRM_URL`, default `http://localhost:5000`); `BuildVectorTiles` needs

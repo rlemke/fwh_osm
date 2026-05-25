@@ -23,9 +23,9 @@ namespace osm.Vocab {
     /** Resolves a natural-language `term` (e.g. "gas station", "grocery store",
         "freeway") to its OSM tag. Optionally constrain to a tag `key`
         (amenity/shop/highway/…). Returns the best match plus ranked alternatives. */
-    event facet ResolveTag(term: String, key: String = "") => (result: TagResolution)
+    event facet ResolveTag(term: String, key: String = "") => (result: TagResolution) with Effect(kind = "pure") with Cost(tier = "free")
 
     /** Lists the known OSM values for a tag `key` (e.g. all `amenity` values the
         vocabulary covers) as a JSON array — discovery of what a key can hold. */
-    event facet ListTagValues(key: String) => (values: Json, count: Long)
+    event facet ListTagValues(key: String) => (values: Json, count: Long) with Effect(kind = "pure") with Cost(tier = "free")
 }

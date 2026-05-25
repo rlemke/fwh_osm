@@ -19,11 +19,11 @@ namespace osm.Routing.PgRouting {
         to_lon: Double,
         to_name: String = "",
         profile: String = "car"
-    ) => (result: PointToPointResult)
+    ) => (result: PointToPointResult) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** NxN travel-time/distance matrix between `points` (JSON list of {lon,lat,name}
         or "lon,lat;…") via pgr_dijkstraCostMatrix. */
-    event facet Matrix(points: String, profile: String = "car") => (result: MatrixResult)
+    event facet Matrix(points: String, profile: String = "car") => (result: MatrixResult) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Reachability polygon from a center point via pgr_drivingDistance + convex hull. */
     event facet Isochrone(
@@ -32,5 +32,5 @@ namespace osm.Routing.PgRouting {
         center_name: String = "",
         time_minutes: Long = 15,
         profile: String = "car"
-    ) => (result: IsochroneResult)
+    ) => (result: IsochroneResult) with Effect(kind = "external") with Cost(tier = "moderate")
 }

@@ -6,14 +6,14 @@ namespace osm.ops.Valhalla {
     use osm.types
 
     /** Builds (or returns cached) Valhalla tileset for a region. Valhalla tiles are profile-agnostic — one build serves auto/bicycle/pedestrian/truck/etc. at query time. */
-    event facet BuildTiles(cache: OSMCache, recreate: Boolean = false) => (tiles: ValhallaCache)
+    event facet BuildTiles(cache: OSMCache, recreate: Boolean = false) => (tiles: ValhallaCache) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Bulk-mode equivalent of BuildTiles for FFL batch loops. */
-    event facet BuildTilesBatch(cache: OSMCache, recreate: Boolean = false) => (tiles: ValhallaCache)
+    event facet BuildTilesBatch(cache: OSMCache, recreate: Boolean = false) => (tiles: ValhallaCache) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Validates an existing tileset: confirms it exists and returns tile count. */
-    event facet ValidateTiles(tiles: ValhallaCache) => (valid: Boolean, tileCount: Long)
+    event facet ValidateTiles(tiles: ValhallaCache) => (valid: Boolean, tileCount: Long) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Deletes a built tileset directory. */
-    event facet CleanTiles(tiles: ValhallaCache) => (deleted: Boolean)
+    event facet CleanTiles(tiles: ValhallaCache) => (deleted: Boolean) with Effect(kind = "external") with Cost(tier = "expensive")
 }

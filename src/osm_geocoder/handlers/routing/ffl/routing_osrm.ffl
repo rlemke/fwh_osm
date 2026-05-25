@@ -18,13 +18,13 @@ namespace osm.Routing.OSRM {
         to_lon: Double,
         to_name: String = "",
         profile: String = "car"
-    ) => (result: PointToPointResult)
+    ) => (result: PointToPointResult) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Compute a multi-stop route through an ordered list of waypoints via local OSRM. */
     event facet MultiStopRoute(
         waypoints: String,
         profile: String = "car"
-    ) => (result: MultiStopResult)
+    ) => (result: MultiStopResult) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Compute an isochrone (reachability polygon) from a center point via local OSRM. */
     event facet Isochrone(
@@ -33,22 +33,22 @@ namespace osm.Routing.OSRM {
         center_name: String = "",
         time_minutes: Long = 15,
         profile: String = "car"
-    ) => (result: IsochroneResult)
+    ) => (result: IsochroneResult) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Compute an NxN travel-time/distance matrix between `points` (a JSON list of
         {lon,lat,name} or a "lon,lat;lon,lat;…" string) via OSRM /table. */
-    event facet Matrix(points: String, profile: String = "car") => (result: MatrixResult)
+    event facet Matrix(points: String, profile: String = "car") => (result: MatrixResult) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Snap a coordinate to the nearest point on the road network via OSRM
         /nearest, returning the snapped location, the snap distance, and street name. */
-    event facet Nearest(lat: Double, lon: Double, profile: String = "car", number: Long = 1) => (result: NearestResult)
+    event facet Nearest(lat: Double, lon: Double, profile: String = "car", number: Long = 1) => (result: NearestResult) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Map-match a GPS `trace` (JSON list of {lon,lat} or "lon,lat;…") to the road
         network via OSRM /match, returning the matched geometry + a confidence. */
-    event facet MapMatch(trace: String, profile: String = "car") => (result: MapMatchResult)
+    event facet MapMatch(trace: String, profile: String = "car") => (result: MapMatchResult) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Optimize the visit order of `waypoints` (the travelling-salesman problem)
         via OSRM /trip, returning the optimal sequence and the tour geometry.
         `roundtrip=true` returns to the start. JSON list or "lon,lat;…" input. */
-    event facet Trip(waypoints: String, profile: String = "car", roundtrip: Boolean = true) => (result: TripResult)
+    event facet Trip(waypoints: String, profile: String = "car", roundtrip: Boolean = true) => (result: TripResult) with Effect(kind = "external") with Cost(tier = "moderate")
 }

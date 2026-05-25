@@ -36,49 +36,49 @@ namespace osm.Filters {
 
     /** Filters GeoJSON features by equivalent circular radius with comparison operator. */
     event facet FilterByRadius(input_path: String, radius: Double,
-        unit: String = "kilometers", operator: String = "gte") => (result: FilteredFeatures)
+        unit: String = "kilometers", operator: String = "gte") => (result: FilteredFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Filters GeoJSON features by inclusive radius range. */
     event facet FilterByRadiusRange(input_path: String, min_radius: Double,
-        max_radius: Double, unit: String = "kilometers") => (result: FilteredFeatures)
+        max_radius: Double, unit: String = "kilometers") => (result: FilteredFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Filters GeoJSON features by boundary type combined with radius threshold. */
     event facet FilterByTypeAndRadius(input_path: String, boundary_type: String,
-        radius: Double, unit: String = "kilometers", operator: String = "gte") => (result: FilteredFeatures)
+        radius: Double, unit: String = "kilometers", operator: String = "gte") => (result: FilteredFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Extracts boundaries from PBF and filters by radius in a single operation. */
     event facet ExtractAndFilterByRadius(cache: OSMCache, admin_levels: [Long],
         natural_types: [String], radius: Double, unit: String = "kilometers",
-        operator: String = "gte") => (result: FilteredFeatures)
+        operator: String = "gte") => (result: FilteredFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Filters PBF by OSM element type (node, way, relation) with optional dependency inclusion. */
     event facet FilterByOSMType(input_path: String, osm_type: String,
-        include_dependencies: Boolean = false) => (result: OSMFilteredFeatures)
+        include_dependencies: Boolean = false) => (result: OSMFilteredFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Filters PBF by OSM tag key/value pair, optionally restricted to an element type. */
     event facet FilterByOSMTag(input_path: String, tag_key: String,
         tag_value: String = "*", osm_type: String = "*",
-        include_dependencies: Boolean = false) => (result: OSMFilteredFeatures)
+        include_dependencies: Boolean = false) => (result: OSMFilteredFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Filters pre-extracted GeoJSON by OSM type stored in feature properties. */
     event facet FilterGeoJSONByOSMType(input_path: String, osm_type: String,
-        tag_key: String = "", tag_value: String = "*") => (result: OSMFilteredFeatures)
+        tag_key: String = "", tag_value: String = "*") => (result: OSMFilteredFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Filters pre-extracted GeoJSON to features whose tag value starts with a
         prefix. Complements FilterByOSMTag (exact match): a prefix on the `ref`
         tag selects a route family, e.g. tag_key="ref", value_prefix="I " keeps
         Interstate freeways (I 5, I 80) and drops US/state routes (US 101, CA 1). */
     event facet FilterGeoJSONByTagPrefix(input_path: String, tag_key: String,
-        value_prefix: String) => (result: OSMFilteredFeatures)
+        value_prefix: String) => (result: OSMFilteredFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Filters pre-extracted GeoJSON to features whose `tag_key` value CONTAINS
         `substring` (case-insensitive unless `case_sensitive`). Completes the
         exact / prefix / contains / regex match family — e.g. tag_key="name",
         substring="Starbucks". */
-    event facet FilterGeoJSONByTagContains(input_path: String, tag_key: String, substring: String, case_sensitive: Boolean = false) => (result: OSMFilteredFeatures)
+    event facet FilterGeoJSONByTagContains(input_path: String, tag_key: String, substring: String, case_sensitive: Boolean = false) => (result: OSMFilteredFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Filters pre-extracted GeoJSON to features whose `tag_key` value matches the
         regular expression `pattern` (re.search — matches anywhere). For complex
         selections like tag_key="cuisine", pattern="pizza|italian". */
-    event facet FilterGeoJSONByTagRegex(input_path: String, tag_key: String, pattern: String) => (result: OSMFilteredFeatures)
+    event facet FilterGeoJSONByTagRegex(input_path: String, tag_key: String, pattern: String) => (result: OSMFilteredFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 }

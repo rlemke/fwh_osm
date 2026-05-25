@@ -32,38 +32,38 @@ namespace osm.Population {
 
     /** Filters GeoJSON features by population threshold and place type. */
     event facet FilterByPopulation(input_path: String, min_population: Long,
-        place_type: String = "all", operator: String = "gte") => (result: PopulationFilteredFeatures)
+        place_type: String = "all", operator: String = "gte") => (result: PopulationFilteredFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Filters GeoJSON features by inclusive population range. */
     event facet FilterByPopulationRange(input_path: String, min_population: Long,
-        max_population: Long, place_type: String = "all") => (result: PopulationFilteredFeatures)
+        max_population: Long, place_type: String = "all") => (result: PopulationFilteredFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Extracts places with population tags from PBF, filtered by type and minimum. */
     event facet ExtractPlacesWithPopulation(cache: OSMCache, place_type: String = "all",
-        min_population: Long = 0) => (result: PopulationFilteredFeatures)
+        min_population: Long = 0) => (result: PopulationFilteredFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Computes population statistics for a GeoJSON file. */
     event facet PopulationStatistics(input_path: String,
-        place_type: String = "all") => (stats: PopulationStats)
+        place_type: String = "all") => (stats: PopulationStats) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Extracts cities (place=city) with population data. */
-    event facet Cities(cache: OSMCache, min_population: Long = 0) => (result: PopulationFilteredFeatures)
+    event facet Cities(cache: OSMCache, min_population: Long = 0) => (result: PopulationFilteredFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts towns (place=town) with population data. */
-    event facet Towns(cache: OSMCache, min_population: Long = 0) => (result: PopulationFilteredFeatures)
+    event facet Towns(cache: OSMCache, min_population: Long = 0) => (result: PopulationFilteredFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts villages (place=village) with population data. */
-    event facet Villages(cache: OSMCache, min_population: Long = 0) => (result: PopulationFilteredFeatures)
+    event facet Villages(cache: OSMCache, min_population: Long = 0) => (result: PopulationFilteredFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts countries (admin_level=2) with population data. */
-    event facet Countries(cache: OSMCache) => (result: PopulationFilteredFeatures)
+    event facet Countries(cache: OSMCache) => (result: PopulationFilteredFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts states and provinces (admin_level=4) with population data. */
-    event facet States(cache: OSMCache) => (result: PopulationFilteredFeatures)
+    event facet States(cache: OSMCache) => (result: PopulationFilteredFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts counties (admin_level=6) with population data. */
-    event facet Counties(cache: OSMCache) => (result: PopulationFilteredFeatures)
+    event facet Counties(cache: OSMCache) => (result: PopulationFilteredFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts all places that have a population tag. */
-    event facet AllPopulatedPlaces(cache: OSMCache, min_population: Long = 0) => (result: PopulationFilteredFeatures)
+    event facet AllPopulatedPlaces(cache: OSMCache, min_population: Long = 0) => (result: PopulationFilteredFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 }

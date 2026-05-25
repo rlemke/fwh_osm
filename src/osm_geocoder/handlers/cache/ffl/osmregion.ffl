@@ -30,7 +30,7 @@ namespace osm.Region {
      *  returns the best-match Region; inspect downstream behavior or
      *  use ResolveRegions for explicit ambiguity diagnostics. */
     event facet ResolveRegion(name: String,
-        prefer_continent: String = "") => (region: Region)
+        prefer_continent: String = "") => (region: Region) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Batch resolve. Continents, countries, subnational regions, and
      *  named geographic features ("Alps", "Scandinavia") may all
@@ -56,7 +56,7 @@ namespace osm.Region {
      *  `diagnostics.expanded` for traceability. */
     event facet ResolveRegions(names: [String],
         prefer_continent: String = "",
-        strict: Boolean = false) => (regions: [Region], diagnostics: ResolutionDiagnostics)
+        strict: Boolean = false) => (regions: [Region], diagnostics: ResolutionDiagnostics) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Enumerate the known region catalog, optionally filtered.
      *  Examples:
@@ -69,5 +69,5 @@ namespace osm.Region {
      *  every state/province/country by name. */
     event facet ListRegions(parent_canonical: String = "",
         level: String = "",
-        continent: String = "") => (regions: [Region])
+        continent: String = "") => (regions: [Region]) with Effect(kind = "pure") with Cost(tier = "cheap")
 }

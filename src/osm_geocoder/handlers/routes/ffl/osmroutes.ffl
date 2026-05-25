@@ -31,31 +31,31 @@ namespace osm.Routes {
 
     /** Extracts routes by transport type with optional network and infrastructure filtering. */
     event facet ExtractRoutes(cache: OSMCache, route_type: String,
-        network: String = "*", include_infrastructure: Boolean = true) => (result: RouteFeatures)
+        network: String = "*", include_infrastructure: Boolean = true) => (result: RouteFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Filters pre-extracted GeoJSON routes by transport type and network. */
     event facet FilterRoutesByType(input_path: String, route_type: String,
-        network: String = "*") => (result: RouteFeatures)
+        network: String = "*") => (result: RouteFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Computes aggregate statistics for extracted routes. */
-    event facet RouteStatistics(input_path: String) => (stats: RouteStats)
+    event facet RouteStatistics(input_path: String) => (stats: RouteStats) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Extracts bicycle routes and cycling infrastructure. */
     event facet BicycleRoutes(cache: OSMCache, network: String = "*",
-        include_infrastructure: Boolean = true) => (result: RouteFeatures)
+        include_infrastructure: Boolean = true) => (result: RouteFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts hiking and walking trails. */
     event facet HikingTrails(cache: OSMCache, network: String = "*",
-        include_infrastructure: Boolean = true) => (result: RouteFeatures)
+        include_infrastructure: Boolean = true) => (result: RouteFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts railway lines and stations. */
     event facet TrainRoutes(cache: OSMCache,
-        include_infrastructure: Boolean = true) => (result: RouteFeatures)
+        include_infrastructure: Boolean = true) => (result: RouteFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts bus routes and stops. */
     event facet BusRoutes(cache: OSMCache,
-        include_infrastructure: Boolean = true) => (result: RouteFeatures)
+        include_infrastructure: Boolean = true) => (result: RouteFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts all public transport routes across modes. */
-    event facet PublicTransport(cache: OSMCache) => (result: RouteFeatures)
+    event facet PublicTransport(cache: OSMCache) => (result: RouteFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 }

@@ -3,7 +3,7 @@ namespace osm.POIs {
     use osm.types
 
     /** Extracts all points of interest from cached OSM data. */
-    event facet POI(cache: OSMCache) => (pois: OSMCache )
+    event facet POI(cache: OSMCache) => (pois: OSMCache ) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Filters volcanoes by elevation and active status. */
     facet Volcanos(cache: OSMCache, elevation:Long, active:Boolean) => (pois: OSMCache )
@@ -21,19 +21,19 @@ namespace osm.POIs {
     facet Military(kind:String) => (pois: OSMCache )
 
     /** Extracts city-level settlements. */
-    event facet Cities(cache: OSMCache) => (cities: OSMCache )
+    event facet Cities(cache: OSMCache) => (cities: OSMCache ) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts town-level settlements. */
-    event facet Towns(cache: OSMCache) => (towns: OSMCache )
+    event facet Towns(cache: OSMCache) => (towns: OSMCache ) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts suburb-level settlements. */
-    event facet Suburbs(cache: OSMCache) => (towns: OSMCache )
+    event facet Suburbs(cache: OSMCache) => (towns: OSMCache ) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts village-level settlements. */
-    event facet Villages(cache: OSMCache) => (villages: OSMCache )
+    event facet Villages(cache: OSMCache) => (villages: OSMCache ) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts hamlet-level settlements. */
-    event facet Hamlets(cache: OSMCache) => (villages: OSMCache )
+    event facet Hamlets(cache: OSMCache) => (villages: OSMCache ) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts country-level boundaries. */
-    event facet Countries(cache: OSMCache) => (villages: OSMCache )
+    event facet Countries(cache: OSMCache) => (villages: OSMCache ) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Converts cached OSM data to GeoJSON format. */
-    event facet GeoOSMCache(cache: OSMCache) => (geojson: OSMCache )
+    event facet GeoOSMCache(cache: OSMCache) => (geojson: OSMCache ) with Effect(kind = "external") with Cost(tier = "expensive")
 
 }
 

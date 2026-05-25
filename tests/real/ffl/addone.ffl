@@ -6,7 +6,7 @@
 /** Provides a minimal event facet that increments an integer by one. */
 namespace handlers {
     /** Accepts an integer and returns it incremented by one. */
-    event facet AddOne(input: Long) => (output: Long)
+    event facet AddOne(input: Long) => (output: Long) with Effect(kind = "pure") with Cost(tier = "free")
 }
 
 /** Integration test verifying the complete AFL compile-to-execution pipeline. */

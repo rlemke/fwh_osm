@@ -18,7 +18,7 @@ namespace osm.Combined {
         total_features: Long,
         scan_duration: Double,
         category_count: Long
-    ) with Timeout(minutes = 120)
+    ) with Timeout(minutes = 120) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts a single category's output path from CombinedScan results.
      *
@@ -31,5 +31,5 @@ namespace osm.Combined {
     ) => (
         output_path: String,
         feature_count: Long
-    )
+    ) with Effect(kind = "external") with Cost(tier = "expensive")
 }

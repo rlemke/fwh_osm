@@ -8,28 +8,28 @@ namespace osm.Source.PBF {
     use osm.types
 
     /** Extracts routes by transport type from a PBF file. */
-    event facet ExtractRoutes(cache: OSMCache, route_type: String = "all", network: String = "*", include_infrastructure: Boolean = true) => (result: osm.Routes.RouteFeatures)
+    event facet ExtractRoutes(cache: OSMCache, route_type: String = "all", network: String = "*", include_infrastructure: Boolean = true) => (result: osm.Routes.RouteFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts amenities by category from a PBF file. */
-    event facet ExtractAmenities(cache: OSMCache, category: String = "all") => (result: osm.Amenities.AmenityFeatures)
+    event facet ExtractAmenities(cache: OSMCache, category: String = "all") => (result: osm.Amenities.AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts roads by classification from a PBF file. */
-    event facet ExtractRoads(cache: OSMCache, road_class: String = "all") => (result: osm.Roads.RoadFeatures)
+    event facet ExtractRoads(cache: OSMCache, road_class: String = "all") => (result: osm.Roads.RoadFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts parks and protected areas from a PBF file. */
-    event facet ExtractParks(cache: OSMCache, park_type: String = "all", protect_classes: String = "*") => (result: osm.Parks.ParkFeatures)
+    event facet ExtractParks(cache: OSMCache, park_type: String = "all", protect_classes: String = "*") => (result: osm.Parks.ParkFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts building footprints from a PBF file. */
-    event facet ExtractBuildings(cache: OSMCache, building_type: String = "all") => (result: osm.Buildings.BuildingFeatures)
+    event facet ExtractBuildings(cache: OSMCache, building_type: String = "all") => (result: osm.Buildings.BuildingFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts administrative and natural boundaries from a PBF file. */
-    event facet ExtractBoundaries(cache: OSMCache, boundary_type: String = "admin", admin_level: Long = 2) => (result: osm.Boundaries.BoundaryFeatures)
+    event facet ExtractBoundaries(cache: OSMCache, boundary_type: String = "admin", admin_level: Long = 2) => (result: osm.Boundaries.BoundaryFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts populated places from a PBF file. */
-    event facet ExtractPopulation(cache: OSMCache, place_type: String = "all", min_population: Long = 0) => (result: osm.Population.PopulationFilteredFeatures)
+    event facet ExtractPopulation(cache: OSMCache, place_type: String = "all", min_population: Long = 0) => (result: osm.Population.PopulationFilteredFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts points of interest from a PBF file. */
-    event facet ExtractPOIs(cache: OSMCache) => (pois: OSMCache)
+    event facet ExtractPOIs(cache: OSMCache) => (pois: OSMCache) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Cheap, cached single-category extract — the uniform Extract(category) primitive.
      *

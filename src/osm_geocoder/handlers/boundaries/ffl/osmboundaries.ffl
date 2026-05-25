@@ -15,24 +15,24 @@ namespace osm.Boundaries {
     }
 
     /** Extracts country boundaries (admin_level=2). */
-    event facet CountryBoundaries(cache: OSMCache) => (result: BoundaryFeatures)
+    event facet CountryBoundaries(cache: OSMCache) => (result: BoundaryFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts state/province boundaries (admin_level=4). */
-    event facet StateBoundaries(cache: OSMCache) => (result: BoundaryFeatures)
+    event facet StateBoundaries(cache: OSMCache) => (result: BoundaryFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts county boundaries (admin_level=6). */
-    event facet CountyBoundaries(cache: OSMCache) => (result: BoundaryFeatures)
+    event facet CountyBoundaries(cache: OSMCache) => (result: BoundaryFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts city boundaries (admin_level=8). */
-    event facet CityBoundaries(cache: OSMCache) => (result: BoundaryFeatures)
+    event facet CityBoundaries(cache: OSMCache) => (result: BoundaryFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts administrative boundaries at a configurable level. */
-    event facet AdminBoundary(cache: OSMCache, admin_level: Long = 2) => (result: BoundaryFeatures)
+    event facet AdminBoundary(cache: OSMCache, admin_level: Long = 2) => (result: BoundaryFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts lake boundaries. */
-    event facet LakeBoundaries(cache: OSMCache) => (result: BoundaryFeatures)
+    event facet LakeBoundaries(cache: OSMCache) => (result: BoundaryFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts forest boundaries. */
-    event facet ForestBoundaries(cache: OSMCache) => (result: BoundaryFeatures)
+    event facet ForestBoundaries(cache: OSMCache) => (result: BoundaryFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts park boundaries. */
-    event facet ParkBoundaries(cache: OSMCache) => (result: BoundaryFeatures)
+    event facet ParkBoundaries(cache: OSMCache) => (result: BoundaryFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts natural boundaries by configurable type (water, wood, etc.). */
-    event facet NaturalBoundary(cache: OSMCache, natural_type: String = "water") => (result: BoundaryFeatures)
+    event facet NaturalBoundary(cache: OSMCache, natural_type: String = "water") => (result: BoundaryFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 }

@@ -14,26 +14,26 @@ namespace osm.Source.PostGIS {
     }
 
     /** Extracts routes by transport type from PostGIS. */
-    event facet ExtractRoutes(source: PostGISSource, route_type: String = "all", network: String = "*", include_infrastructure: Boolean = true) => (result: osm.Routes.RouteFeatures)
+    event facet ExtractRoutes(source: PostGISSource, route_type: String = "all", network: String = "*", include_infrastructure: Boolean = true) => (result: osm.Routes.RouteFeatures) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Extracts amenities by category from PostGIS. */
-    event facet ExtractAmenities(source: PostGISSource, category: String = "all") => (result: osm.Amenities.AmenityFeatures)
+    event facet ExtractAmenities(source: PostGISSource, category: String = "all") => (result: osm.Amenities.AmenityFeatures) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Extracts roads by classification from PostGIS. */
-    event facet ExtractRoads(source: PostGISSource, road_class: String = "all") => (result: osm.Roads.RoadFeatures)
+    event facet ExtractRoads(source: PostGISSource, road_class: String = "all") => (result: osm.Roads.RoadFeatures) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Extracts parks and protected areas from PostGIS. */
-    event facet ExtractParks(source: PostGISSource, park_type: String = "all", protect_classes: String = "*") => (result: osm.Parks.ParkFeatures)
+    event facet ExtractParks(source: PostGISSource, park_type: String = "all", protect_classes: String = "*") => (result: osm.Parks.ParkFeatures) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Extracts building footprints from PostGIS. */
-    event facet ExtractBuildings(source: PostGISSource, building_type: String = "all") => (result: osm.Buildings.BuildingFeatures)
+    event facet ExtractBuildings(source: PostGISSource, building_type: String = "all") => (result: osm.Buildings.BuildingFeatures) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Extracts administrative and natural boundaries from PostGIS. */
-    event facet ExtractBoundaries(source: PostGISSource, boundary_type: String = "admin", admin_level: Long = 2) => (result: osm.Boundaries.BoundaryFeatures)
+    event facet ExtractBoundaries(source: PostGISSource, boundary_type: String = "admin", admin_level: Long = 2) => (result: osm.Boundaries.BoundaryFeatures) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Extracts populated places from PostGIS. */
-    event facet ExtractPopulation(source: PostGISSource, place_type: String = "all", min_population: Long = 0) => (result: osm.Population.PopulationFilteredFeatures)
+    event facet ExtractPopulation(source: PostGISSource, place_type: String = "all", min_population: Long = 0) => (result: osm.Population.PopulationFilteredFeatures) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Extracts points of interest from PostGIS. */
-    event facet ExtractPOIs(source: PostGISSource) => (pois: OSMCache)
+    event facet ExtractPOIs(source: PostGISSource) => (pois: OSMCache) with Effect(kind = "external") with Cost(tier = "moderate")
 }

@@ -35,31 +35,31 @@ namespace osm.Buildings {
 
     /** Extracts all buildings from a region, optionally filtered by type. */
     event facet ExtractBuildings(cache: OSMCache,
-        building_type: String = "all") => (result: BuildingFeatures)
+        building_type: String = "all") => (result: BuildingFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts residential buildings. */
-    event facet ResidentialBuildings(cache: OSMCache) => (result: BuildingFeatures)
+    event facet ResidentialBuildings(cache: OSMCache) => (result: BuildingFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts commercial buildings. */
-    event facet CommercialBuildings(cache: OSMCache) => (result: BuildingFeatures)
+    event facet CommercialBuildings(cache: OSMCache) => (result: BuildingFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts industrial buildings. */
-    event facet IndustrialBuildings(cache: OSMCache) => (result: BuildingFeatures)
+    event facet IndustrialBuildings(cache: OSMCache) => (result: BuildingFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts retail buildings (shops, malls). */
-    event facet RetailBuildings(cache: OSMCache) => (result: BuildingFeatures)
+    event facet RetailBuildings(cache: OSMCache) => (result: BuildingFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts buildings with height/levels data for 3D visualization. */
-    event facet Buildings3D(cache: OSMCache) => (result: BuildingFeatures)
+    event facet Buildings3D(cache: OSMCache) => (result: BuildingFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts buildings above a minimum area threshold. */
     event facet LargeBuildings(cache: OSMCache,
-        min_area_m2: Double = 1000) => (result: BuildingFeatures)
+        min_area_m2: Double = 1000) => (result: BuildingFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Computes aggregate building statistics. */
-    event facet BuildingStatistics(input_path: String) => (stats: BuildingStats)
+    event facet BuildingStatistics(input_path: String) => (stats: BuildingStats) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Filters pre-extracted GeoJSON by building type. */
     event facet FilterBuildingsByType(input_path: String,
-        building_type: String) => (result: BuildingFeatures)
+        building_type: String) => (result: BuildingFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 }

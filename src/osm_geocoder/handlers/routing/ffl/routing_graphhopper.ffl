@@ -19,7 +19,7 @@ namespace osm.Routing.GraphHopper {
         to_lon: Double,
         to_name: String = "",
         profile: String = "car"
-    ) => (result: PointToPointResult)
+    ) => (result: PointToPointResult) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Reachability polygon from a center point via GraphHopper /isochrone. */
     event facet Isochrone(
@@ -28,5 +28,5 @@ namespace osm.Routing.GraphHopper {
         center_name: String = "",
         time_minutes: Long = 15,
         profile: String = "car"
-    ) => (result: IsochroneResult)
+    ) => (result: IsochroneResult) with Effect(kind = "external") with Cost(tier = "moderate")
 }

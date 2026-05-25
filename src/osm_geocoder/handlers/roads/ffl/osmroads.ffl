@@ -38,45 +38,45 @@ namespace osm.Roads {
 
     /** Extracts all roads from a region, optionally filtered by classification. */
     event facet ExtractRoads(cache: OSMCache,
-        road_class: String = "all") => (result: RoadFeatures)
+        road_class: String = "all") => (result: RoadFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts motorway/highway segments. */
-    event facet Motorways(cache: OSMCache) => (result: RoadFeatures)
+    event facet Motorways(cache: OSMCache) => (result: RoadFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts primary roads. */
-    event facet PrimaryRoads(cache: OSMCache) => (result: RoadFeatures)
+    event facet PrimaryRoads(cache: OSMCache) => (result: RoadFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts secondary roads. */
-    event facet SecondaryRoads(cache: OSMCache) => (result: RoadFeatures)
+    event facet SecondaryRoads(cache: OSMCache) => (result: RoadFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts tertiary roads. */
-    event facet TertiaryRoads(cache: OSMCache) => (result: RoadFeatures)
+    event facet TertiaryRoads(cache: OSMCache) => (result: RoadFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts residential streets. */
-    event facet ResidentialRoads(cache: OSMCache) => (result: RoadFeatures)
+    event facet ResidentialRoads(cache: OSMCache) => (result: RoadFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts major roads only (motorway + primary + secondary). */
-    event facet MajorRoads(cache: OSMCache) => (result: RoadFeatures)
+    event facet MajorRoads(cache: OSMCache) => (result: RoadFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts bridge segments. */
-    event facet Bridges(cache: OSMCache) => (result: RoadFeatures)
+    event facet Bridges(cache: OSMCache) => (result: RoadFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts tunnel segments. */
-    event facet Tunnels(cache: OSMCache) => (result: RoadFeatures)
+    event facet Tunnels(cache: OSMCache) => (result: RoadFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts roundabout junctions. */
-    event facet Roundabouts(cache: OSMCache) => (result: RoadFeatures)
+    event facet Roundabouts(cache: OSMCache) => (result: RoadFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts roads with paved surfaces. */
-    event facet PavedRoads(cache: OSMCache) => (result: RoadFeatures)
+    event facet PavedRoads(cache: OSMCache) => (result: RoadFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts roads with unpaved surfaces. */
-    event facet UnpavedRoads(cache: OSMCache) => (result: RoadFeatures)
+    event facet UnpavedRoads(cache: OSMCache) => (result: RoadFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts roads that have speed limit tags. */
-    event facet RoadsWithSpeedLimit(cache: OSMCache) => (result: RoadFeatures)
+    event facet RoadsWithSpeedLimit(cache: OSMCache) => (result: RoadFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Computes aggregate road network statistics. */
-    event facet RoadStatistics(input_path: String) => (stats: RoadStats)
+    event facet RoadStatistics(input_path: String) => (stats: RoadStats) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Filters pre-extracted roads by classification. */
     event facet FilterRoadsByClass(input_path: String,
-        road_class: String) => (result: RoadFeatures)
+        road_class: String) => (result: RoadFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Filters pre-extracted roads by speed limit range. */
     event facet FilterBySpeedLimit(input_path: String,
-        min_speed: Long, max_speed: Long) => (result: RoadFeatures)
+        min_speed: Long, max_speed: Long) => (result: RoadFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 }

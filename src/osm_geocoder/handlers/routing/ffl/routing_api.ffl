@@ -16,13 +16,13 @@ namespace osm.Routing.API {
         to_lon: Double,
         to_name: String = "",
         profile: String = "car"
-    ) => (result: PointToPointResult)
+    ) => (result: PointToPointResult) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Compute a multi-stop route through an ordered list of waypoints via API. */
     event facet MultiStopRoute(
         waypoints: String,
         profile: String = "car"
-    ) => (result: MultiStopResult)
+    ) => (result: MultiStopResult) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Compute an isochrone (reachability polygon) from a center point via API. */
     event facet Isochrone(
@@ -31,5 +31,5 @@ namespace osm.Routing.API {
         center_name: String = "",
         time_minutes: Long = 15,
         profile: String = "car"
-    ) => (result: IsochroneResult)
+    ) => (result: IsochroneResult) with Effect(kind = "external") with Cost(tier = "moderate")
 }

@@ -35,22 +35,22 @@ namespace osm.ops.Validation {
     /** Runs all validation checks on a cached OSM dataset. */
     event facet ValidateCache(cache: OSMCache,
         output_dir: String = "/Volumes/afl_data/output/osm/validation",
-        use_hdfs: Boolean = false) => (stats: ValidationStats, result: ValidationResult)
+        use_hdfs: Boolean = false) => (stats: ValidationStats, result: ValidationResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Validates geometry correctness only. */
-    event facet ValidateGeometry(cache: OSMCache) => (stats: ValidationStats, result: ValidationResult)
+    event facet ValidateGeometry(cache: OSMCache) => (stats: ValidationStats, result: ValidationResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Validates tag completeness against required tags. */
     event facet ValidateTags(cache: OSMCache,
-        required_tags: String = "name") => (stats: ValidationStats, result: ValidationResult)
+        required_tags: String = "name") => (stats: ValidationStats, result: ValidationResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Validates coordinate bounds against a bounding box. */
     event facet ValidateBounds(cache: OSMCache,
         min_lat: Double = -90.0,
         max_lat: Double = 90.0,
         min_lon: Double = -180.0,
-        max_lon: Double = 180.0) => (stats: ValidationStats, result: ValidationResult)
+        max_lon: Double = 180.0) => (stats: ValidationStats, result: ValidationResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Reads a validation result file and computes summary statistics. */
-    event facet ValidationSummary(input_path: String) => (stats: ValidationStats)
+    event facet ValidationSummary(input_path: String) => (stats: ValidationStats) with Effect(kind = "pure") with Cost(tier = "cheap")
 }

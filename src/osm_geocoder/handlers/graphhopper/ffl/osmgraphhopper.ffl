@@ -6,20 +6,20 @@ namespace osm.ops.GraphHopper {
     use osm.types
 
     /** Builds a routing graph for a profile, returning cached graph if available. */
-    event facet BuildGraph(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache)
+    event facet BuildGraph(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Builds routing graphs for multiple profiles simultaneously. */
-    event facet BuildMultiProfile(cache: OSMCache, profiles: [String], recreate: Boolean = false) => (graphs: [GraphHopperCache])
+    event facet BuildMultiProfile(cache: OSMCache, profiles: [String], recreate: Boolean = false) => (graphs: [GraphHopperCache]) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Builds a routing graph in bulk batch mode. */
-    event facet BuildGraphBatch(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache)
+    event facet BuildGraphBatch(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Imports an existing routing graph, building it if not found. */
-    event facet ImportGraph(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache)
+    event facet ImportGraph(cache: OSMCache, profile: String = "car", recreate: Boolean = false) => (graph: GraphHopperCache) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Validates a routing graph and returns node/edge statistics. */
-    event facet ValidateGraph(graph: GraphHopperCache) => (valid: Boolean, nodeCount: Long, edgeCount: Long)
+    event facet ValidateGraph(graph: GraphHopperCache) => (valid: Boolean, nodeCount: Long, edgeCount: Long) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Deletes a routing graph directory. */
-    event facet CleanGraph(graph: GraphHopperCache) => (deleted: Boolean)
+    event facet CleanGraph(graph: GraphHopperCache) => (deleted: Boolean) with Effect(kind = "external") with Cost(tier = "expensive")
 }

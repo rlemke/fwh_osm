@@ -60,31 +60,31 @@ namespace census.tiger.Districts {
         @returns cache  Download metadata including local path to ZIP file */
     event facet CongressionalDistricts(state: String,
         year: Long = 2024,
-        congress_number: Long = 119) => (cache: TIGERCache)
+        congress_number: Long = 119) => (cache: TIGERCache) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Downloads state senate (upper chamber) district boundaries.
         @param state  State name, abbreviation, or FIPS code
         @param year   TIGER data year: 2020-2024 (default 2024) */
     event facet StateSenateDistricts(state: String,
-        year: Long = 2024) => (cache: TIGERCache)
+        year: Long = 2024) => (cache: TIGERCache) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Downloads state house/assembly (lower chamber) district boundaries.
         @param state  State name, abbreviation, or FIPS code
         @param year   TIGER data year: 2020-2024 (default 2024) */
     event facet StateHouseDistricts(state: String,
-        year: Long = 2024) => (cache: TIGERCache)
+        year: Long = 2024) => (cache: TIGERCache) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Downloads voting precinct boundaries (decennial census only).
         @param state  State name, abbreviation, or FIPS code
         @param year   Decennial census year: 2020 (default), 2010 */
     event facet VotingPrecincts(state: String,
-        year: Long = 2020) => (cache: TIGERCache)
+        year: Long = 2020) => (cache: TIGERCache) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Downloads senate, house, and precinct boundaries for a state in one call.
         @param state  State name, abbreviation, or FIPS code
         @param year   TIGER data year: 2020-2024 (default 2024) */
     event facet AllStateDistricts(state: String,
-        year: Long = 2024) => (senate: TIGERCache, house: TIGERCache, precincts: TIGERCache)
+        year: Long = 2024) => (senate: TIGERCache, house: TIGERCache, precincts: TIGERCache) with Effect(kind = "external") with Cost(tier = "expensive")
 }
 
 /** Processing facets for converting and filtering TIGER/Line shapefiles. */
@@ -93,15 +93,15 @@ namespace census.tiger.Processing {
 
     /** Converts a downloaded TIGER shapefile to GeoJSON format.
         Requires ogr2ogr (GDAL) or geopandas. */
-    event facet ShapefileToGeoJSON(cache: TIGERCache) => (result: VotingDistrictResult)
+    event facet ShapefileToGeoJSON(cache: TIGERCache) => (result: VotingDistrictResult) with Effect(kind = "io") with Cost(tier = "moderate")
 
     /** Spatially joins voting districts with OSM administrative boundaries. */
     event facet JoinWithOSMBoundaries(districts: VotingDistrictResult,
-        osm_boundaries_path: String) => (result: VotingDistrictResult)
+        osm_boundaries_path: String) => (result: VotingDistrictResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Filters districts by a named attribute (e.g., district number or name). */
     event facet FilterDistricts(input_path: String,
-        attribute: String, value: String) => (result: VotingDistrictResult)
+        attribute: String, value: String) => (result: VotingDistrictResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 }
 
 // Convenience workflows for common use cases

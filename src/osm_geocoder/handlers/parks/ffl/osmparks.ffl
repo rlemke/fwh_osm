@@ -44,30 +44,30 @@ namespace osm.Parks {
     }
 
     /** Extracts national parks (boundary=national_park or protect_class=2). */
-    event facet NationalParks(cache: OSMCache) => (result: ParkFeatures)
+    event facet NationalParks(cache: OSMCache) => (result: ParkFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts state and regional parks (protect_class=5). */
-    event facet StateParks(cache: OSMCache) => (result: ParkFeatures)
+    event facet StateParks(cache: OSMCache) => (result: ParkFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts nature reserves (leisure=nature_reserve). */
-    event facet NatureReserves(cache: OSMCache) => (result: ParkFeatures)
+    event facet NatureReserves(cache: OSMCache) => (result: ParkFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts all protected areas, optionally filtered by protect_class. */
     event facet ProtectedAreas(cache: OSMCache,
-        protect_classes: String = "*") => (result: ParkFeatures)
+        protect_classes: String = "*") => (result: ParkFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts parks by configurable type and protection class. */
     event facet ExtractParks(cache: OSMCache, park_type: String = "all",
-        protect_classes: String = "*") => (result: ParkFeatures)
+        protect_classes: String = "*") => (result: ParkFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Filters pre-extracted GeoJSON by park type. */
     event facet FilterParksByType(input_path: String, park_type: String,
-        protect_classes: String = "*") => (result: ParkFeatures)
+        protect_classes: String = "*") => (result: ParkFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Computes aggregate park statistics. */
-    event facet ParkStatistics(input_path: String) => (stats: ParkStats)
+    event facet ParkStatistics(input_path: String) => (stats: ParkStats) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Extracts parks above a minimum area threshold. */
     event facet LargeParks(cache: OSMCache, min_area_km2: Double = 100,
-        park_type: String = "all") => (result: ParkFeatures)
+        park_type: String = "all") => (result: ParkFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 }

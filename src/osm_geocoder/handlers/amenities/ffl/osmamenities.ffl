@@ -38,76 +38,76 @@ namespace osm.Amenities {
 
     /** Extracts all amenities from a region, optionally filtered by category. */
     event facet ExtractAmenities(cache: OSMCache,
-        category: String = "all") => (result: AmenityFeatures)
+        category: String = "all") => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts restaurants. */
-    event facet Restaurants(cache: OSMCache) => (result: AmenityFeatures)
+    event facet Restaurants(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts cafes. */
-    event facet Cafes(cache: OSMCache) => (result: AmenityFeatures)
+    event facet Cafes(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts bars. */
-    event facet Bars(cache: OSMCache) => (result: AmenityFeatures)
+    event facet Bars(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts fast food outlets. */
-    event facet FastFood(cache: OSMCache) => (result: AmenityFeatures)
+    event facet FastFood(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts all food and drink amenities. */
-    event facet FoodAndDrink(cache: OSMCache) => (result: AmenityFeatures)
+    event facet FoodAndDrink(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts supermarkets. */
-    event facet Supermarkets(cache: OSMCache) => (result: AmenityFeatures)
+    event facet Supermarkets(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts shopping malls. */
-    event facet ShoppingMalls(cache: OSMCache) => (result: AmenityFeatures)
+    event facet ShoppingMalls(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts convenience stores. */
-    event facet ConvenienceStores(cache: OSMCache) => (result: AmenityFeatures)
+    event facet ConvenienceStores(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts all shopping amenities. */
-    event facet AllShopping(cache: OSMCache) => (result: AmenityFeatures)
+    event facet AllShopping(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts banks. */
-    event facet Banks(cache: OSMCache) => (result: AmenityFeatures)
+    event facet Banks(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts ATMs. */
-    event facet ATMs(cache: OSMCache) => (result: AmenityFeatures)
+    event facet ATMs(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts post offices. */
-    event facet PostOffices(cache: OSMCache) => (result: AmenityFeatures)
+    event facet PostOffices(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts fuel stations. */
-    event facet FuelStations(cache: OSMCache) => (result: AmenityFeatures)
+    event facet FuelStations(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts EV charging stations. */
-    event facet EVCharging(cache: OSMCache) => (result: AmenityFeatures)
+    event facet EVCharging(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts parking facilities. */
-    event facet Parking(cache: OSMCache) => (result: AmenityFeatures)
+    event facet Parking(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts hospitals. */
-    event facet Hospitals(cache: OSMCache) => (result: AmenityFeatures)
+    event facet Hospitals(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts pharmacies. */
-    event facet Pharmacies(cache: OSMCache) => (result: AmenityFeatures)
+    event facet Pharmacies(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts doctors' offices. */
-    event facet Doctors(cache: OSMCache) => (result: AmenityFeatures)
+    event facet Doctors(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts all healthcare amenities. */
-    event facet AllHealthcare(cache: OSMCache) => (result: AmenityFeatures)
+    event facet AllHealthcare(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts schools. */
-    event facet Schools(cache: OSMCache) => (result: AmenityFeatures)
+    event facet Schools(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts universities. */
-    event facet Universities(cache: OSMCache) => (result: AmenityFeatures)
+    event facet Universities(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts libraries. */
-    event facet Libraries(cache: OSMCache) => (result: AmenityFeatures)
+    event facet Libraries(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts all education amenities. */
-    event facet AllEducation(cache: OSMCache) => (result: AmenityFeatures)
+    event facet AllEducation(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts cinemas. */
-    event facet Cinemas(cache: OSMCache) => (result: AmenityFeatures)
+    event facet Cinemas(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts theatres. */
-    event facet Theatres(cache: OSMCache) => (result: AmenityFeatures)
+    event facet Theatres(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts nightclubs. */
-    event facet Nightclubs(cache: OSMCache) => (result: AmenityFeatures)
+    event facet Nightclubs(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
     /** Extracts all entertainment amenities. */
-    event facet AllEntertainment(cache: OSMCache) => (result: AmenityFeatures)
+    event facet AllEntertainment(cache: OSMCache) => (result: AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Computes aggregate amenity statistics. */
-    event facet AmenityStatistics(input_path: String) => (stats: AmenityStats)
+    event facet AmenityStatistics(input_path: String) => (stats: AmenityStats) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Filters pre-extracted amenities by category. */
     event facet FilterAmenitiesByCategory(input_path: String,
-        category: String) => (result: AmenityFeatures)
+        category: String) => (result: AmenityFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Searches amenities by name pattern. */
     event facet SearchAmenities(input_path: String,
-        name_pattern: String) => (result: AmenityFeatures)
+        name_pattern: String) => (result: AmenityFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 }

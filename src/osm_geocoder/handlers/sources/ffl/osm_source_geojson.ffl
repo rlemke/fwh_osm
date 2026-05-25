@@ -8,26 +8,26 @@ namespace osm.Source.GeoJSON {
     use osm.types
 
     /** Loads routes from an existing GeoJSON file, optionally filtering by type. */
-    event facet LoadRoutes(input_path: String, route_type: String = "all", network: String = "*") => (result: osm.Routes.RouteFeatures)
+    event facet LoadRoutes(input_path: String, route_type: String = "all", network: String = "*") => (result: osm.Routes.RouteFeatures) with Effect(kind = "io") with Cost(tier = "cheap")
 
     /** Loads amenities from an existing GeoJSON file, optionally filtering by category. */
-    event facet LoadAmenities(input_path: String, category: String = "all") => (result: osm.Amenities.AmenityFeatures)
+    event facet LoadAmenities(input_path: String, category: String = "all") => (result: osm.Amenities.AmenityFeatures) with Effect(kind = "io") with Cost(tier = "cheap")
 
     /** Loads roads from an existing GeoJSON file, optionally filtering by class. */
-    event facet LoadRoads(input_path: String, road_class: String = "all") => (result: osm.Roads.RoadFeatures)
+    event facet LoadRoads(input_path: String, road_class: String = "all") => (result: osm.Roads.RoadFeatures) with Effect(kind = "io") with Cost(tier = "cheap")
 
     /** Loads parks from an existing GeoJSON file, optionally filtering by type. */
-    event facet LoadParks(input_path: String, park_type: String = "all", protect_classes: String = "*") => (result: osm.Parks.ParkFeatures)
+    event facet LoadParks(input_path: String, park_type: String = "all", protect_classes: String = "*") => (result: osm.Parks.ParkFeatures) with Effect(kind = "io") with Cost(tier = "cheap")
 
     /** Loads buildings from an existing GeoJSON file, optionally filtering by type. */
-    event facet LoadBuildings(input_path: String, building_type: String = "all") => (result: osm.Buildings.BuildingFeatures)
+    event facet LoadBuildings(input_path: String, building_type: String = "all") => (result: osm.Buildings.BuildingFeatures) with Effect(kind = "io") with Cost(tier = "cheap")
 
     /** Loads boundaries from an existing GeoJSON file, optionally filtering by type. */
-    event facet LoadBoundaries(input_path: String, boundary_type: String = "admin") => (result: osm.Boundaries.BoundaryFeatures)
+    event facet LoadBoundaries(input_path: String, boundary_type: String = "admin") => (result: osm.Boundaries.BoundaryFeatures) with Effect(kind = "io") with Cost(tier = "cheap")
 
     /** Loads populated places from an existing GeoJSON file, optionally filtering. */
-    event facet LoadPopulation(input_path: String, place_type: String = "all", min_population: Long = 0) => (result: osm.Population.PopulationFilteredFeatures)
+    event facet LoadPopulation(input_path: String, place_type: String = "all", min_population: Long = 0) => (result: osm.Population.PopulationFilteredFeatures) with Effect(kind = "io") with Cost(tier = "cheap")
 
     /** Loads points of interest from an existing GeoJSON file. */
-    event facet LoadPOIs(input_path: String) => (pois: OSMCache)
+    event facet LoadPOIs(input_path: String) => (pois: OSMCache) with Effect(kind = "io") with Cost(tier = "cheap")
 }

@@ -26,5 +26,5 @@ namespace osm.cache {
      *  Input is a fully-resolved Region (typically produced by
      *  `osm.Region.ResolveRegions`) — the handler reads
      *  `region.geofabrik_path` to fetch the extract. */
-    event facet Download(region: Region) => (cache: OSMCache)
+    event facet Download(region: Region) => (cache: OSMCache) with Effect(kind = "external") with Cost(tier = "expensive")
 }

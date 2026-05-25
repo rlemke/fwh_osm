@@ -18,5 +18,5 @@ namespace osm.ops {
      *   the best-matching download.
      * @return cache The cached PBF as an OSMCache (`{url, path, date, size, wasInCache}`).
      */
-    event facet CacheRegion(region: String) => (cache: OSMCache)
+    event facet CacheRegion(region: String) => (cache: OSMCache) with Effect(kind = "external") with Cost(tier = "expensive")
 }

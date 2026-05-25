@@ -124,40 +124,40 @@ namespace osm.Transit.GTFS {
     }
 
     /** Downloads and extracts a GTFS static feed from a URL. */
-    event facet DownloadFeed(url: String) => (feed: GTFSFeed)
+    event facet DownloadFeed(url: String) => (feed: GTFSFeed) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** Extracts stop locations to GeoJSON points. */
-    event facet ExtractStops(feed: GTFSFeed) => (result: StopResult)
+    event facet ExtractStops(feed: GTFSFeed) => (result: StopResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Extracts route geometries to GeoJSON linestrings. */
-    event facet ExtractRoutes(feed: GTFSFeed) => (result: GTFSRouteFeatures)
+    event facet ExtractRoutes(feed: GTFSFeed) => (result: GTFSRouteFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Computes trips-per-stop-per-day from stop_times and calendar. */
-    event facet ServiceFrequency(feed: GTFSFeed) => (result: FrequencyResult)
+    event facet ServiceFrequency(feed: GTFSFeed) => (result: FrequencyResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Computes aggregate transit statistics by route type. */
-    event facet TransitStatistics(feed: GTFSFeed) => (stats: TransitStats)
+    event facet TransitStatistics(feed: GTFSFeed) => (stats: TransitStats) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Finds the nearest transit stop for each OSM feature. */
     event facet NearestStops(osm_geojson_path: String,
         stops_geojson_path: String,
-        max_distance_m: Long = 2000) => (result: NearestStopResult)
+        max_distance_m: Long = 2000) => (result: NearestStopResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Classifies OSM features into walk-distance bands around transit stops. */
     event facet StopAccessibility(osm_geojson_path: String,
         stops_geojson_path: String,
-        walk_threshold_m: Long = 400) => (result: AccessibilityResult)
+        walk_threshold_m: Long = 400) => (result: AccessibilityResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Detects grid-based transit coverage gaps. */
     event facet CoverageGaps(stops_geojson_path: String,
         osm_geojson_path: String,
-        cell_size_m: Long = 500) => (result: CoverageResult)
+        cell_size_m: Long = 500) => (result: CoverageResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Computes route density per grid cell. */
     event facet RouteDensity(routes_geojson_path: String,
-        cell_size_m: Long = 500) => (result: DensityResult)
+        cell_size_m: Long = 500) => (result: DensityResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Runs all analyses and produces a consolidated transit report. */
     event facet GenerateReport(feed: GTFSFeed,
-        osm_geojson_path: String = "") => (report: TransitReport)
+        osm_geojson_path: String = "") => (report: TransitReport) with Effect(kind = "pure") with Cost(tier = "cheap")
 }
