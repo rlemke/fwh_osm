@@ -130,7 +130,7 @@ with **`osm.Vocab.ResolveTag`** (NL → `key=value`) — *lookup-then-compose*.
 | Transform | `osm.Transform` | `MergeLayers`, `Summarize` (count/sum/avg/min/max), `Dissolve` |
 | Geocoding | `osm.geocode` | `Geocode`, `ReverseGeocode` (Nominatim) |
 | Vocabulary | `osm.Vocab` | `ResolveTag`, `ListTagValues` (NL term → OSM `key=value`) |
-| Routing | `osm.Routing.{OSRM,API,Valhalla,GraphHopper}` | `Route`, `MultiStopRoute`, `Isochrone`, `Matrix`, `Nearest`, `MapMatch`, `Trip` (verbs per engine; uniform `osm.Routing.Types` schemas — swap engine by namespace) |
+| Routing | `osm.Routing.{OSRM,API,Valhalla,GraphHopper,PgRouting}` | `Route`, `MultiStopRoute`, `Isochrone`, `Matrix`, `Nearest`, `MapMatch`, `Trip` (verbs per engine; uniform `osm.Routing.Types` schemas — swap engine by namespace) |
 | Render / Tiles | `osm.viz`, `osm.Tiles` | `RenderMap`, `RenderLayers`, `BuildVectorTiles` (tippecanoe → MBTiles/PMTiles) |
 
 Everything operates on GeoJSON **paths** (or an `OSMCache` for Source/Clip), so

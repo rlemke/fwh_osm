@@ -1,0 +1,36 @@
+// Routing Adapter: pgRouting (PostGIS + pgrouting extension)
+//
+// Routes via SQL functions over a routable osm2pgrouting topology, rather than
+// an HTTP server. Same result schemas as the OSRM / Valhalla / GraphHopper / API
+// backends, so a workflow swaps to a DB-backed engine by namespace alone.
+// Set AFL_POSTGIS_URL and AFL_PGROUTING_PREFIX (default tables ways /
+// ways_vertices_pgr). Points are snapped to the nearest network vertex.
+
+/** pgRouting adapter — routes via PostGIS + the pgrouting extension. */
+namespace osm.Routing.PgRouting {
+    use osm.Routing.Types
+
+    /** Point-to-point route between two waypoints via pgr_dijkstra. */
+    event facet Route(
+        from_lat: Double,
+        from_lon: Double,
+        from_name: String = "",
+        to_lat: Double,
+        to_lon: Double,
+        to_name: String = "",
+        profile: String = "car"
+    ) => (result: PointToPointResult)
+
+    /** NxN travel-time/distance matrix between `points` (JSON list of {lon,lat,name}
+        or "lon,lat;…") via pgr_dijkstraCostMatrix. */
+    event facet Matrix(points: String, profile: String = "car") => (result: MatrixResult)
+
+    /** Reachability polygon from a center point via pgr_drivingDistance + convex hull. */
+    event facet Isochrone(
+        center_lat: Double,
+        center_lon: Double,
+        center_name: String = "",
+        time_minutes: Long = 15,
+        profile: String = "car"
+    ) => (result: IsochroneResult)
+}

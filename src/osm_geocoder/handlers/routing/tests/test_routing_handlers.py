@@ -176,13 +176,15 @@ class TestRoutingAdapterRegistration:
     @staticmethod
     def _expected_count():
         # Derive from the dispatch tables so adding verbs/engines never makes
-        # these registration tests stale (API + OSRM + Valhalla + GraphHopper).
+        # these registration tests stale (API + OSRM + Valhalla + GraphHopper + pgRouting).
         from osm_geocoder.handlers.routing.api_router import API_DISPATCH
         from osm_geocoder.handlers.routing.graphhopper_router import GRAPHHOPPER_DISPATCH
         from osm_geocoder.handlers.routing.osrm_router import OSRM_DISPATCH
+        from osm_geocoder.handlers.routing.pgrouting_router import PGROUTING_DISPATCH
         from osm_geocoder.handlers.routing.valhalla_router import VALHALLA_DISPATCH
 
-        return len(API_DISPATCH) + len(OSRM_DISPATCH) + len(VALHALLA_DISPATCH) + len(GRAPHHOPPER_DISPATCH)
+        return sum(len(d) for d in (API_DISPATCH, OSRM_DISPATCH, VALHALLA_DISPATCH,
+                                    GRAPHHOPPER_DISPATCH, PGROUTING_DISPATCH))
 
     def test_register_poller(self):
         from osm_geocoder.handlers.routing.routing_adapter_handlers import (
