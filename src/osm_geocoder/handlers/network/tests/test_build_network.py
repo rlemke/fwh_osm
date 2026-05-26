@@ -165,3 +165,26 @@ def test_distinct_tolerances_do_not_collide(tmp_path, monkeypatch):
     b = ops.build_network(src, snap_tolerance_m=100.0)
     assert a.network_path != b.network_path
     assert Path(a.network_path).is_dir() and Path(b.network_path).is_dir()
+
+
+def test_no_isolated_nodes_and_consistent_component_count(tmp_path, monkeypatch):
+    """The isolated-node fix: nodes.geojson, graph.json and the sidecar agree."""
+    import networkx as nx
+
+    monkeypatch.setenv("AFL_DATA_ROOT", str(tmp_path / "data"))
+    src = _write_input(tmp_path)
+    res = ops.build_network(src, snap_tolerance_m=25.0)
+    net = Path(res.network_path)
+
+    graph = json.loads((net / "graph.json").read_text())
+    node_ids = {f["properties"]["node_id"] for f in
+                json.loads((net / "nodes.geojson").read_text())["features"]}
+    # every persisted node participates in the adjacency — no isolated nodes
+    assert node_ids == {int(k) for k in graph}
+
+    g = nx.Graph()
+    for k, adj in graph.items():
+        for nbr, _length, _idx in adj:
+            g.add_edge(int(k), int(nbr))
+    side = json.loads((net.parent / (net.name + ".meta.json")).read_text())
+    assert side["extra"]["connected_components"] == nx.number_connected_components(g)
