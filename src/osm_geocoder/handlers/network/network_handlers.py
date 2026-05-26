@@ -14,7 +14,7 @@ import os
 from datetime import UTC, datetime
 
 from ..shared.output_cache import cached_result, save_result_meta
-from .network_ops import approx_route, build_network, route_matrix
+from .network_ops import approx_route, build_network, route_layer, route_matrix
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +63,18 @@ def _empty_matrix() -> dict:
             "result_path": "",
             "pair_count": 0,
             "reachable_count": 0,
+            "extraction_date": datetime.now(UTC).isoformat(),
+        }
+    }
+
+
+def _empty_routelayer() -> dict:
+    return {
+        "result": {
+            "output_path": "",
+            "route_count": 0,
+            "reachable_count": 0,
+            "point_count": 0,
             "extraction_date": datetime.now(UTC).isoformat(),
         }
     }
@@ -172,10 +184,45 @@ def _make_matrix_handler(facet_name: str):
     return handler
 
 
+def _make_routelayer_handler(facet_name: str):
+    qualified = f"{NAMESPACE}.{facet_name}"
+
+    def handler(payload: dict) -> dict:
+        network_path = payload.get("network_path", "")
+        points = payload.get("points", "") or ""
+        step_log = payload.get("_step_log")
+
+        input_cache = {"path": network_path, "size": _file_size(network_path)}
+        cp = {"points": points}
+        hit = cached_result(qualified, input_cache, cp, step_log)
+        if hit is not None:
+            return hit
+
+        if not network_path or not points:
+            return _empty_routelayer()
+        if step_log:
+            step_log(f"{facet_name}: drawing all-pairs routes over {network_path}")
+
+        result = route_layer(
+            network_path, points,
+            heartbeat=payload.get("_task_heartbeat"), run_id=payload.get("_workflow_id", ""),
+        )
+        if step_log:
+            step_log(f"{facet_name}: {result.route_count} routes "
+                     f"({result.reachable_count} reachable) over {result.point_count} points",
+                     level="success")
+        rv = {"result": result.to_dict()}
+        save_result_meta(qualified, input_cache, cp, rv)
+        return rv
+
+    return handler
+
+
 NETWORK_FACETS = [
     ("BuildNetwork", _make_build_handler),
     ("ApproxRoute", _make_route_handler),
     ("RouteMatrix", _make_matrix_handler),
+    ("RouteLayer", _make_routelayer_handler),
 ]
 
 

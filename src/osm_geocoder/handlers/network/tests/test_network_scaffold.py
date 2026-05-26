@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 FFL = Path(__file__).resolve().parents[1] / "ffl" / "osmnetwork.ffl"
-EXPECTED_FACETS = {"BuildNetwork", "ApproxRoute", "RouteMatrix"}
+EXPECTED_FACETS = {"BuildNetwork", "ApproxRoute", "RouteMatrix", "RouteLayer"}
 
 
 # --- the FFL contract ----------------------------------------------------------
@@ -107,3 +107,4 @@ def test_handlers_short_circuit_on_empty_input():
     assert h.handle({"_facet_name": "osm.Network.BuildNetwork", "edges_path": ""})["result"]["node_count"] == 0
     assert h.handle({"_facet_name": "osm.Network.ApproxRoute", "network_path": ""})["result"]["reached_b"] is False
     assert h.handle({"_facet_name": "osm.Network.RouteMatrix", "network_path": "", "points": ""})["result"]["pair_count"] == 0
+    assert h.handle({"_facet_name": "osm.Network.RouteLayer", "network_path": "", "points": ""})["result"]["route_count"] == 0
