@@ -188,3 +188,109 @@ def test_no_isolated_nodes_and_consistent_component_count(tmp_path, monkeypatch)
             g.add_edge(int(k), int(nbr))
     side = json.loads((net.parent / (net.name + ".meta.json")).read_text())
     assert side["extra"]["connected_components"] == nx.number_connected_components(g)
+
+
+# --- the node-id graph (exact OSM topology, tolerance-free) --------------------
+
+
+def _wline(coords, node_ids, **props):
+    """A road feature carrying its OSM node-id sequence (aligned with coords)."""
+    props["node_ids"] = node_ids
+    return {"type": "Feature", "properties": props,
+            "geometry": {"type": "LineString", "coordinates": coords}}
+
+
+def test_node_id_shared_node_connects():
+    # Two ways that reference the SAME OSM node id (200) at their meeting point
+    # are connected — no tolerance involved.
+    feats = [
+        _wline([[0, 0], [1, 0]], node_ids=[100, 200], ref="A1"),
+        _wline([[1, 0], [2, 0]], node_ids=[200, 300], ref="A1"),
+    ]
+    g = ops.node_id_graph(feats)
+    assert g.connected_components == 1
+    assert g.node_count == 3            # 100, 200, 300
+    assert g.edge_count == 2
+    assert set(g.nodes) == {100, 200, 300}
+
+
+def test_node_id_no_shared_node_stays_disjoint_even_when_coords_cross():
+    # Geometries cross at (0,0) but reference DIFFERENT node ids there (a grade-
+    # separated overpass). Node-id topology keeps them separate — exactly where
+    # coordinate-snapping would wrongly fuse them.
+    feats = [
+        _wline([[-1, 0], [0, 0], [1, 0]], node_ids=[1, 2, 3], ref="A1"),
+        _wline([[0, -1], [0, 0], [0, 1]], node_ids=[4, 5, 6], ref="A2"),
+    ]
+    g = ops.node_id_graph(feats)
+    assert g.connected_components == 2
+
+
+def test_node_id_contracts_degree2_interior_nodes():
+    # A single way with two interior degree-2 nodes contracts to ONE junction->
+    # junction edge (endpoints only) whose polyline keeps every coordinate.
+    feats = [_wline([[0, 0], [1, 0], [2, 0], [3, 0]], node_ids=[10, 11, 12, 13], ref="A1")]
+    g = ops.node_id_graph(feats)
+    assert g.node_count == 2            # only the endpoints 10 and 13
+    assert g.edge_count == 1
+    assert len(g.edges[0]["coords"]) == 4   # full polyline preserved for rendering
+
+
+def test_node_id_shared_interior_node_splits_way():
+    # Way A passes through node 11; way B also references node 11 -> 11 becomes a
+    # junction, so A splits into two edges and B connects in.
+    feats = [
+        _wline([[0, 0], [1, 0], [2, 0]], node_ids=[10, 11, 12], ref="A1"),
+        _wline([[1, 0], [1, 1]], node_ids=[11, 20], ref="A2"),
+    ]
+    g = ops.node_id_graph(feats)
+    assert g.connected_components == 1
+    assert set(g.nodes) == {10, 11, 12, 20}
+    assert g.edge_count == 3            # 10-11, 11-12, 11-20
+
+
+def test_node_id_ref_filter():
+    feats = [
+        _wline([[0, 0], [1, 0]], node_ids=[1, 2], ref="A1"),
+        _wline([[2, 0], [3, 0]], node_ids=[3, 4], ref="B5"),
+    ]
+    g = ops.node_id_graph(feats, ref_filter="A")
+    assert g.edge_count == 1
+    assert all(e["ref"].startswith("A") for e in g.edges)
+
+
+def test_build_network_autodetects_node_id_mode(tmp_path, monkeypatch):
+    monkeypatch.setenv("AFL_DATA_ROOT", str(tmp_path / "data"))
+    feats = [
+        _wline([[0, 0], [1, 0]], node_ids=[100, 200], ref="A1"),
+        _wline([[1, 0], [2, 0]], node_ids=[200, 300], ref="A1"),
+    ]
+    src = tmp_path / "roads_nodeid.geojson"
+    src.write_text(json.dumps({"type": "FeatureCollection", "features": feats}))
+
+    res = ops.build_network(str(src))
+    assert Path(res.network_path).name.endswith("@nodeid")
+    side = json.loads((Path(res.network_path).parent
+                       / (Path(res.network_path).name + ".meta.json")).read_text())
+    assert side["extra"]["topology"] == "node_id"
+    # the persisted graph uses the OSM node ids
+    graph = json.loads((Path(res.network_path) / "graph.json").read_text())
+    assert {int(k) for k in graph} == {100, 200, 300}
+
+
+def test_node_id_and_coord_snap_builds_do_not_collide(tmp_path, monkeypatch):
+    # Same source content can yield both a @nodeid and a @tol<N> artifact without
+    # clobbering each other (different cache dirs).
+    monkeypatch.setenv("AFL_DATA_ROOT", str(tmp_path / "data"))
+    with_ids = tmp_path / "with_ids.geojson"
+    with_ids.write_text(json.dumps({"type": "FeatureCollection", "features": [
+        _wline([[0, 0], [1, 0]], node_ids=[1, 2], ref="A1")]}))
+    no_ids = tmp_path / "no_ids.geojson"
+    no_ids.write_text(json.dumps({"type": "FeatureCollection", "features": [
+        _line([[0, 0], [1, 0]], ref="A1")]}))
+
+    a = ops.build_network(str(with_ids))
+    b = ops.build_network(str(no_ids), snap_tolerance_m=25.0)
+    assert Path(a.network_path).name.endswith("@nodeid")
+    assert Path(b.network_path).name.endswith("@tol25")
+    assert a.network_path != b.network_path

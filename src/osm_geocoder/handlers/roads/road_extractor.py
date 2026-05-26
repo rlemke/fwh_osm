@@ -285,6 +285,13 @@ def extract_roads(
             props = dict(tags)
             props["osm_id"] = w.id
             props["road_class"] = rc
+            # Preserve the OSM node-id sequence (aligned 1:1 with the geometry
+            # coordinates — the WKB linestring is built from these same nodes).
+            # osm.Network.BuildNetwork uses it to build a graph on SHARED node ids
+            # (exact topology, no coordinate-snapping): ways referencing the same
+            # node id connect, including across per-region extract seams, since
+            # OSM node ids are global. See node_id_graph() in network_ops.py.
+            props["node_ids"] = [n.ref for n in w.nodes]
             self.writer.write_feature(
                 {"type": "Feature", "properties": props, "geometry": geom}
             )
