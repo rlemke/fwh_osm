@@ -109,19 +109,18 @@ def test_handlers_short_circuit_on_empty_input():
     assert h.handle({"_facet_name": "osm.Network.RouteMatrix", "network_path": "", "points": ""})["result"]["pair_count"] == 0
 
 
-# --- Phase-1 bodies fail loudly (no silent empty defaults) ----------------------
+# --- not-yet-implemented query bodies fail loudly (no silent empty defaults) ----
 
 
-@pytest.mark.parametrize("op,kwargs", [
-    ("build_network", {"edges_path": "/tmp/edges.geojson"}),
-    ("approx_route", {"network_path": "/tmp/net", "from_lat": 37.8, "from_lon": -122.4,
-                      "to_lat": 34.0, "to_lon": -118.2}),
-    ("route_matrix", {"network_path": "/tmp/net", "points": "[]"}),
+@pytest.mark.parametrize("op,phase,kwargs", [
+    ("approx_route", "Phase 2", {"network_path": "/tmp/net", "from_lat": 37.8,
+                                 "from_lon": -122.4, "to_lat": 34.0, "to_lon": -118.2}),
+    ("route_matrix", "Phase 3", {"network_path": "/tmp/net", "points": "[]"}),
 ])
-def test_phase1_core_not_yet_implemented(op, kwargs):
+def test_query_bodies_not_yet_implemented(op, phase, kwargs):
     pytest.importorskip("shapely")
     pytest.importorskip("networkx")
     from osm_geocoder.handlers.network import network_ops as ops
 
-    with pytest.raises(NotImplementedError, match="Phase 1"):
+    with pytest.raises(NotImplementedError, match=phase):
         getattr(ops, op)(**kwargs)
