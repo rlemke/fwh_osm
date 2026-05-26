@@ -109,15 +109,13 @@ namespace osm.Network.workflows {
         per region), ready for RenderUSCityRoutesMap. `osm.cache.Download` fetches
         any region not already cached. */
     workflow CollectUSRouteLayers(region_names: [String], min_population: Long = 1000000,
-        place_type: String = "city") => (interstate_layers: [String], city_layers: [String]) andThen {
-            resolved = osm.Region.ResolveRegions(names = $.region_names)
-        } andThen foreach r in resolved.regions {
-            cache = osm.cache.Download(region = $.r)
-            roads = osm.Source.PBF.ExtractCategory(cache = cache.cache, category = "roads")
-            motorways = osm.Filters.FilterGeoJSONByOSMType(
-                input_path = roads.output_path, osm_type = "*",
-                tag_key = "highway", tag_value = "motorway"
-            )
+        place_type: String = "city") => (interstate_layers: [String], city_layers: [String]) andThen foreach name in $.region_names {
+            reg = osm.Region.ResolveRegion(name = $.name)
+            cache = osm.cache.Download(region = reg.region)
+            // Motorway-only extract (road_class targets highway=motorway) — far
+            // cheaper than extracting all roads then filtering; BuildNetwork's
+            // ref_filter="I " narrows to interstates downstream.
+            motorways = osm.Source.PBF.ExtractRoads(cache = cache.cache, road_class = "motorway")
             places = osm.Source.PBF.ExtractCategory(cache = cache.cache, category = "population")
             cities = osm.Population.FilterByPopulation(
                 input_path = places.output_path, min_population = $.min_population,
