@@ -108,36 +108,38 @@ namespace osm.Network.workflows {
         Returns the per-region layer paths as two aggregated lists (one element
         per region), ready for RenderUSCityRoutesMap. `osm.cache.Download` fetches
         any region not already cached. */
-    workflow CollectUSRouteLayers(region_names: [String], min_population: Long = 1000000,
-        place_type: String = "city") => (interstate_layers: [String], city_layers: [String]) andThen foreach name in $.region_names {
+    workflow CollectRouteLayers(region_names: [String], min_population: Long = 1000000,
+        place_type: String = "city") => (road_layers: [String], city_layers: [String]) andThen foreach name in $.region_names {
             reg = osm.Region.ResolveRegion(name = $.name)
             cache = osm.cache.Download(region = reg.region)
             // Motorway-only extract (road_class targets highway=motorway) — far
-            // cheaper than extracting all roads then filtering; BuildNetwork's
-            // ref_filter="I " narrows to interstates downstream.
+            // cheaper than extracting all roads then filtering. RenderCityRoutesMap's
+            // ref_filter narrows the network downstream ("I " for US interstates,
+            // "" to keep every motorway, e.g. for Europe).
             motorways = osm.Source.PBF.ExtractRoads(cache = cache.cache, road_class = "motorway")
             places = osm.Source.PBF.ExtractCategory(cache = cache.cache, category = "population")
             cities = osm.Population.FilterByPopulation(
                 input_path = places.output_path, min_population = $.min_population,
                 place_type = $.place_type, operator = "gte"
             )
-            yield CollectUSRouteLayers(
-                interstate_layers = [motorways.result.output_path],
+            yield CollectRouteLayers(
+                road_layers = [motorways.result.output_path],
                 city_layers = [cities.result.output_path]
             )
         }
 
-    /** Fan-in: merge the per-region interstate layers into one network, merge the
+    /** Fan-in: merge the per-region motorway layers into one network, merge the
         per-region city layers, route all city pairs over the network, and render
-        the routes + cities to an HTML map. Feed it the two lists from
-        CollectUSRouteLayers. */
-    workflow RenderUSCityRoutesMap(interstate_layers: [String], city_layers: [String],
-        snap_tolerance_m: Double = 25.0,
-        title: String = "US interstate routes between cities over 1M") => (map_path: String, route_count: Long, city_count: Long, network_edges: Long) andThen {
-            all_interstates = osm.Transform.MergeLayers(inputs = $.interstate_layers)
+        routes + cities to an HTML map. Feed it the two lists from
+        CollectRouteLayers. `ref_filter` narrows the network by road `ref` prefix
+        ("" = every motorway/freeway, e.g. for Europe; "I " = US interstates only). */
+    workflow RenderCityRoutesMap(road_layers: [String], city_layers: [String],
+        snap_tolerance_m: Double = 25.0, ref_filter: String = "",
+        title: String = "Freeway routes between large cities") => (map_path: String, route_count: Long, city_count: Long, network_edges: Long) andThen {
+            all_roads = osm.Transform.MergeLayers(inputs = $.road_layers)
             net = osm.Network.BuildNetwork(
-                edges_path = all_interstates.result.output_path,
-                snap_tolerance_m = $.snap_tolerance_m, ref_filter = "I "
+                edges_path = all_roads.result.output_path,
+                snap_tolerance_m = $.snap_tolerance_m, ref_filter = $.ref_filter
             )
             all_cities = osm.Transform.MergeLayers(inputs = $.city_layers)
             routes = osm.Network.RouteLayer(
@@ -149,7 +151,7 @@ namespace osm.Network.workflows {
                 colors = ["#1f78b4", "#e31a1c"],
                 title = $.title
             )
-            yield RenderUSCityRoutesMap(
+            yield RenderCityRoutesMap(
                 map_path = map.result.output_path,
                 route_count = routes.result.route_count,
                 city_count = all_cities.result.feature_count,
