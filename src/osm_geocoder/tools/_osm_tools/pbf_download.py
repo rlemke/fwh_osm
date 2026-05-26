@@ -23,15 +23,17 @@ are per-entry.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import timezone
+from datetime import UTC
 from email.utils import parsedate_to_datetime
-from typing import Any, Callable
+from typing import Any
 
 try:
     import requests
@@ -45,6 +47,8 @@ NAMESPACE = "osm"
 CACHE_TYPE = "pbf"
 GEOFABRIK_BASE = "https://download.geofabrik.de"
 USER_AGENT = "facetwork-osm-geocoder/1.0 (OSM PBF downloader)"
+
+logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[str, int, int, bool], None]
 """Progress callback: (label, bytes_so_far, total_bytes, is_final)."""
@@ -143,8 +147,8 @@ def head_last_modified(url: str) -> str | None:
     except (TypeError, ValueError):
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _already_cached(
@@ -334,10 +338,27 @@ def download_region(
             raise
 
         if md5_hex != expected_md5:
-            os.unlink(staged)
-            raise DownloadError(
-                f"MD5 mismatch for {region}: upstream={expected_md5} computed={md5_hex}"
-            )
+            # Geofabrik's .md5 and .pbf are briefly inconsistent during its daily
+            # rebuild; for multi-GB files we fetch the .md5 before the long
+            # download finishes. Re-fetch the current .md5 (the one we read may be
+            # stale) and re-compare before treating it as corruption.
+            fresh = fetch_md5(url)
+            if md5_hex == fresh:
+                expected_md5 = fresh
+            elif os.environ.get("AFL_OSM_TOLERATE_MD5", "").lower() in ("1", "true", "yes"):
+                # Still mismatched, but accept the COMPLETE download with a warning
+                # (a stale upstream md5 during the rebuild window, not a corrupt
+                # file). Opt-in via AFL_OSM_TOLERATE_MD5.
+                logger.warning(
+                    "MD5 mismatch for %s (upstream=%s computed=%s); accepting %d-byte "
+                    "download (AFL_OSM_TOLERATE_MD5).", region, fresh, md5_hex, size
+                )
+                expected_md5 = md5_hex
+            else:
+                os.unlink(staged)
+                raise DownloadError(
+                    f"MD5 mismatch for {region}: upstream={fresh} computed={md5_hex}"
+                )
 
         storage.finalize_from_local(staged, cache_file)
 
