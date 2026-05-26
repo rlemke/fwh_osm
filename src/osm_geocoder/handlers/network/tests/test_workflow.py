@@ -63,4 +63,4 @@ def test_workflow_is_declared():
             walk(ns)
 
     walk(program)
-    assert "CityRoutesByPopulation" in names
+    assert {"CityRoutesByPopulation", "RouteFanout"} <= set(names)

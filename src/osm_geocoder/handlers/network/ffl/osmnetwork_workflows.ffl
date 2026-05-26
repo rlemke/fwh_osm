@@ -78,4 +78,20 @@ namespace osm.Network.workflows {
                 city_count = cities.result.feature_count
             )
         }
+
+    /** Fan-out approximate routing over a PREBUILT network — the distributable
+        unit. One ApproxRoute task per (from,to) pair; the N pure tasks are
+        claimed lock-free across the runner fleet, each runner loading the shared
+        network once (read-once-per-runner). This is the workflow used for the
+        multi-server proof: `andThen foreach` over `pairs` fans out, runners on
+        different hosts/containers share the one network artifact. `pairs` is a
+        JSON list of {from_lat, from_lon, to_lat, to_lon}. */
+    workflow RouteFanout(network_path: String, pairs: Json) => (routes: [String], distances: [Double]) andThen foreach p in $.pairs {
+        r = osm.Network.ApproxRoute(
+            network_path = $.network_path,
+            from_lat = $.p.from_lat, from_lon = $.p.from_lon,
+            to_lat = $.p.to_lat, to_lon = $.p.to_lon
+        )
+        yield RouteFanout(routes = [r.result.route_path], distances = [r.result.distance_km])
+    }
 }
