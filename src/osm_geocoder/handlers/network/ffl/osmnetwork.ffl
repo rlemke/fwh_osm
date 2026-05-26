@@ -31,7 +31,7 @@ namespace osm.Network {
         traversed segments. When B is off-network, `reached_b` is false and
         (`reached_lat`, `reached_lon`) is the closest reachable point to B, with
         `gap_to_b_km` the straight-line residual. */
-    schema RouteResult {
+    schema ApproxRouteResult {
         route_path: String,
         distance_km: Double,
         reached_lat: Double,
@@ -44,7 +44,7 @@ namespace osm.Network {
 
     /** All-pairs approximate routing. `result_path` is a JSON file of pairs
         `{from, to, distance_km, reached_b}`. */
-    schema MatrixResult {
+    schema RouteMatrixResult {
         result_path: String,
         pair_count: Long,
         reachable_count: Long,
@@ -61,10 +61,10 @@ namespace osm.Network {
     /** Approximate route over a freeway network: snap A and B to the nearest
         network nodes, shortest path by segment length, and return the route plus
         the closest reachable point to B (and the residual gap when B is off-net). */
-    event facet ApproxRoute(network_path: String, from_lat: Double, from_lon: Double, to_lat: Double, to_lon: Double) => (result: RouteResult) with Effect(kind = "pure") with Cost(tier = "cheap")
+    event facet ApproxRoute(network_path: String, from_lat: Double, from_lon: Double, to_lat: Double, to_lon: Double) => (result: ApproxRouteResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** All-pairs approximate routing over the small network — pure in-process,
         no engine. `points` is a JSON list of {lon, lat, name} (or a
         "lon,lat;lon,lat" string). One single-source Dijkstra per origin. */
-    event facet RouteMatrix(network_path: String, points: String) => (result: MatrixResult) with Effect(kind = "pure") with Cost(tier = "cheap")
+    event facet RouteMatrix(network_path: String, points: String) => (result: RouteMatrixResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 }

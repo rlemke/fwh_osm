@@ -83,11 +83,11 @@ def test_result_dataclasses_round_trip():
     assert net.to_dict()["network_path"] == "/c/osm/network/x"
     assert net.to_dict()["edge_count"] == 12
 
-    route = ops.RouteResult(route_path="/c/r.geojson", distance_km=615.0, reached_b=True)
+    route = ops.ApproxRouteResult(route_path="/c/r.geojson", distance_km=615.0, reached_b=True)
     assert route.to_dict()["reached_b"] is True
     assert route.to_dict()["distance_km"] == 615.0
 
-    mtx = ops.MatrixResult(result_path="/c/m.json", pair_count=9, reachable_count=8)
+    mtx = ops.RouteMatrixResult(result_path="/c/m.json", pair_count=9, reachable_count=8)
     assert mtx.to_dict()["reachable_count"] == 8
 
 
@@ -103,22 +103,7 @@ def test_dispatch_exposes_all_facets():
 def test_handlers_short_circuit_on_empty_input():
     from osm_geocoder.handlers.network import network_handlers as h
 
-    # No edges/network path → empty result, never touches the (unimplemented) core.
+    # No edges/network/points → empty result, never touches the compute core.
     assert h.handle({"_facet_name": "osm.Network.BuildNetwork", "edges_path": ""})["result"]["node_count"] == 0
     assert h.handle({"_facet_name": "osm.Network.ApproxRoute", "network_path": ""})["result"]["reached_b"] is False
     assert h.handle({"_facet_name": "osm.Network.RouteMatrix", "network_path": "", "points": ""})["result"]["pair_count"] == 0
-
-
-# --- not-yet-implemented query bodies fail loudly (no silent empty defaults) ----
-
-
-@pytest.mark.parametrize("op,phase,kwargs", [
-    ("route_matrix", "Phase 3", {"network_path": "/tmp/net", "points": "[]"}),
-])
-def test_query_bodies_not_yet_implemented(op, phase, kwargs):
-    pytest.importorskip("shapely")
-    pytest.importorskip("networkx")
-    from osm_geocoder.handlers.network import network_ops as ops
-
-    with pytest.raises(NotImplementedError, match=phase):
-        getattr(ops, op)(**kwargs)
