@@ -1,0 +1,81 @@
+// Worked composition over osm.Network — the "routes between all large cities"
+// capstone from docs/architecture/approximate-freeway-routing.md.
+//
+// This is the exact decomposition from the original design question ("routes
+// between all US cities over 1M population"), composed from orthogonal
+// primitives rather than hand-coded:
+//
+//     CacheRegion(region)
+//       -> ExtractCategory(population) -> FilterByPopulation(min) [the cities = waypoints]
+//       -> ExtractCategory(roads) -> FilterByOSMType(motorway)
+//          -> BuildNetwork(ref_filter="I ")                       [the interstate graph]
+//       -> RouteMatrix(network, cities)                           [all-pairs routes]
+//
+// RouteMatrix accepts the cities GeoJSON path directly (the GeoJSON->waypoints
+// adapter is built into _parse_points), so the merged-cities layer feeds the
+// matrix with no glue. One region per leaf; fan out across states with
+// `andThen foreach` at the workflow for the national run.
+
+/** All-pairs interstate routes between the large cities of a region. */
+namespace osm.Network.workflows {
+    use osm.types
+
+    /** Computes the all-pairs approximate interstate-route matrix between every
+        place in `region` with population >= `min_population`. Defaults to
+        California cities over 1,000,000 (Los Angeles, San Diego, San Jose).
+        `place_type` narrows the population layer (city/town/all). */
+    workflow CityRoutesByPopulation(region: String = "California", min_population: Long = 1000000,
+        place_type: String = "city", snap_tolerance_m: Double = 25.0) => (matrix_path: String, pair_count: Long, reachable_count: Long, city_count: Long) andThen {
+            cache = osm.ops.CacheRegion(region = $.region)
+            body = CityRoutesFromCache(
+                cache = cache.cache,
+                min_population = $.min_population,
+                place_type = $.place_type,
+                snap_tolerance_m = $.snap_tolerance_m
+            )
+            yield CityRoutesByPopulation(
+                matrix_path = body.matrix_path,
+                pair_count = body.pair_count,
+                reachable_count = body.reachable_count,
+                city_count = body.city_count
+            )
+        }
+
+    /** Cache-dependent body for CityRoutesByPopulation (one region per leaf; fan
+        out across regions with `andThen foreach` at the workflow when needed). */
+    facet CityRoutesFromCache(cache: OSMCache, min_population: Long = 1000000,
+        place_type: String = "city", snap_tolerance_m: Double = 25.0) => (matrix_path: String, pair_count: Long, reachable_count: Long, city_count: Long) andThen {
+            // Waypoints: places at or above the population threshold.
+            places = osm.Source.PBF.ExtractCategory(cache = $.cache, category = "population")
+            cities = osm.Population.FilterByPopulation(
+                input_path = places.output_path,
+                min_population = $.min_population,
+                place_type = $.place_type,
+                operator = "gte"
+            )
+            // Network: the interstate freeway graph (motorways tagged ref "I ").
+            roads = osm.Source.PBF.ExtractCategory(cache = $.cache, category = "roads")
+            motorways = osm.Filters.FilterGeoJSONByOSMType(
+                input_path = roads.output_path,
+                osm_type = "*",
+                tag_key = "highway",
+                tag_value = "motorway"
+            )
+            net = osm.Network.BuildNetwork(
+                edges_path = motorways.result.output_path,
+                snap_tolerance_m = $.snap_tolerance_m,
+                ref_filter = "I "
+            )
+            // All-pairs approximate routes — the cities GeoJSON feeds straight in.
+            matrix = osm.Network.RouteMatrix(
+                network_path = net.result.network_path,
+                points = cities.result.output_path
+            )
+            yield CityRoutesFromCache(
+                matrix_path = matrix.result.result_path,
+                pair_count = matrix.result.pair_count,
+                reachable_count = matrix.result.reachable_count,
+                city_count = cities.result.feature_count
+            )
+        }
+}

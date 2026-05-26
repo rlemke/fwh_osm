@@ -12,8 +12,10 @@ Three operations:
   (``nodes.geojson`` + ``edges.geojson`` + ``graph.json``) under the ``osm/network``
   cache_type. ``graph.json`` is the authoritative, language-neutral adjacency
   list — every runner rebuilds a ``networkx`` graph from it in milliseconds.
-* :func:`approx_route`   — Phase 2.
-* :func:`route_matrix`   — Phase 3.
+* :func:`approx_route`   — snap A/B to nearest nodes, Dijkstra by length, return
+  the route plus the closest reachable point to B (``reached_b`` / ``gap_to_b_km``).
+* :func:`route_matrix`   — all-pairs over the small graph (one single-source
+  Dijkstra per origin); accepts a JSON list, a GeoJSON path, or ``"lon,lat;..."``.
 
 ``build_network`` writes a durable, content-addressed cache entry (keyed by the
 input sha256 + snap tolerance + ref filter) via the shared sidecar protocol, so
@@ -80,11 +82,6 @@ NAMESPACE_CACHE = "osm"
 CACHE_TYPE = "network"
 _EARTH_R_M = 6371008.8  # mean Earth radius (m), haversine fallback when no pyproj
 
-_PHASE = (
-    "osm.Network.{op} is scaffolded but not yet implemented — it lands in "
-    "{phase}. See docs/architecture/approximate-freeway-routing.md."
-)
-
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -131,8 +128,8 @@ class NetworkResult:
 
 
 @dataclass
-class RouteResult:
-    """A single approximate route (mirrors the FFL RouteResult)."""
+class ApproxRouteResult:
+    """A single approximate route (mirrors the FFL ApproxRouteResult)."""
 
     route_path: str = ""
     distance_km: float = 0.0
@@ -157,8 +154,8 @@ class RouteResult:
 
 
 @dataclass
-class MatrixResult:
-    """All-pairs approximate routing result (mirrors the FFL MatrixResult)."""
+class RouteMatrixResult:
+    """All-pairs approximate routing result (mirrors the FFL RouteMatrixResult)."""
 
     result_path: str = ""
     pair_count: int = 0
@@ -662,7 +659,7 @@ def approx_route(
     output_path: str | None = None,
     heartbeat=None,
     run_id: str = "",
-) -> RouteResult:
+) -> ApproxRouteResult:
     """Approximate A→B route over a built freeway network.
 
     Snaps A and B to the nearest network nodes, runs single-source Dijkstra from
@@ -709,7 +706,7 @@ def approx_route(
          "gap_to_b_km": round(gap_km, 3), "node_hops": len(path)},
     )
 
-    return RouteResult(
+    return ApproxRouteResult(
         route_path=output_path,
         distance_km=round(distance_km, 3),
         reached_lat=rlat,
@@ -721,13 +718,142 @@ def approx_route(
     )
 
 
+def _representative_point(geom: dict) -> tuple[float | None, float | None]:
+    """A single (lon, lat) for any geometry — coords for a Point, else the rep point."""
+    if not geom:
+        return (None, None)
+    if geom.get("type") == "Point":
+        c = geom.get("coordinates") or []
+        return (float(c[0]), float(c[1])) if len(c) >= 2 else (None, None)
+    if not geom.get("coordinates"):
+        return (None, None)
+    try:
+        p = shape(geom).representative_point()
+        return (p.x, p.y)
+    except Exception:  # pragma: no cover - defensive
+        return (None, None)
+
+
+def _points_from_obj(obj) -> list[tuple[float, float, str]]:
+    if isinstance(obj, dict) and obj.get("type") == "FeatureCollection":
+        out: list[tuple[float, float, str]] = []
+        for f in obj.get("features", []):
+            props = f.get("properties") or {}
+            name = str(props.get("name") or props.get("city") or props.get("place") or "")
+            lon, lat = _representative_point(f.get("geometry") or {})
+            if lon is not None:
+                out.append((lon, lat, name))
+        return out
+    out = []
+    for d in obj:
+        if isinstance(d, (list, tuple)):
+            lon, lat = d[0], d[1]
+            name = str(d[2]) if len(d) > 2 else ""
+        else:
+            lon, lat, name = d.get("lon"), d.get("lat"), str(d.get("name", ""))
+        out.append((float(lon), float(lat), name))
+    return out
+
+
+def _parse_points(points) -> list[tuple[float, float, str]]:
+    """Accept a JSON points list, a GeoJSON FeatureCollection (inline or a file
+    path), or a ``"lon,lat;lon,lat"`` string — closing the GeoJSON→waypoints gap
+    so a merged-cities layer feeds straight into the matrix."""
+    if not isinstance(points, str):
+        return _points_from_obj(points)
+    text = points
+    if os.path.exists(points):
+        from facetwork.runtime.storage import localize
+        with open(localize(points)) as f:
+            text = f.read()
+    text = text.strip()
+    if text.startswith("{") or text.startswith("["):
+        return _points_from_obj(json.loads(text))
+    out = []
+    for chunk in text.split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        parts = chunk.split(",")
+        out.append((float(parts[0]), float(parts[1]), ""))
+    return out
+
+
 def route_matrix(
     network_path: str,
     points: str,
     output_path: str | None = None,
     heartbeat=None,
     run_id: str = "",
-) -> MatrixResult:
-    """All-pairs approximate routing over the small network (Phase 3)."""
+) -> RouteMatrixResult:
+    """All-pairs approximate routing over the small network — pure, no engine.
+
+    Snaps each point to its nearest network node and runs one single-source
+    Dijkstra per origin (a full shortest-path tree), so the N×N matrix costs N
+    Dijkstras. Each pair carries the on-network ``distance_km`` and ``reached_b``;
+    unreachable pairs report the distance to the closest reachable node to the
+    target with ``reached_b=false``. Accepts a JSON list, a GeoJSON path, or a
+    ``"lon,lat;..."`` string for ``points``.
+    """
     _require_deps()
-    raise NotImplementedError(_PHASE.format(op="RouteMatrix", phase="Phase 3"))
+    pts = _parse_points(points)
+    if len(pts) < 2:
+        raise ValueError(f"RouteMatrix needs >= 2 points, got {len(pts)}")
+
+    net = _load_network(network_path, heartbeat)
+    if net.g.number_of_nodes() == 0:
+        raise ValueError(f"RouteMatrix: empty network at {network_path}")
+
+    snapped = [
+        (_snap(net, lon, lat), lon, lat, name or f"p{i}")
+        for i, (lon, lat, name) in enumerate(pts)
+    ]
+
+    pairs: list[dict] = []
+    reachable = 0
+    for si, (snode, _slon, _slat, sname) in enumerate(snapped):
+        lengths, _paths = nx.single_source_dijkstra(net.g, snode, weight="length_m")
+        if heartbeat:
+            heartbeat()
+        for ti, (tnode, tlon, tlat, tname) in enumerate(snapped):
+            if ti == si:
+                continue
+            if tnode in lengths:
+                dist_km = lengths[tnode] / 1000.0
+                gap_km = _haversine_m(tlon, tlat, *net.coords[tnode]) / 1000.0
+                reached = True
+                reachable += 1
+            elif lengths:
+                best = min(lengths, key=lambda n: _haversine_m(tlon, tlat, net.coords[n][0], net.coords[n][1]))
+                dist_km = lengths[best] / 1000.0
+                gap_km = _haversine_m(tlon, tlat, *net.coords[best]) / 1000.0
+                reached = False
+            else:  # pragma: no cover - source has no reachable nodes
+                dist_km, gap_km, reached = 0.0, 0.0, False
+            pairs.append({
+                "from": sname, "to": tname,
+                "distance_km": round(dist_km, 3), "reached_b": reached,
+                "gap_km": round(gap_km, 3),
+            })
+
+    if output_path is None:
+        output_path = derive_output_path(
+            "osm-network", "matrix", str(len(pts)), ext="json", run_id=run_id or None,
+        )
+    output_path = str(output_path)
+    ensure_dir(output_path)
+    Path(output_path).write_text(json.dumps({
+        "operation": "route_matrix",
+        "point_count": len(pts),
+        "pair_count": len(pairs),
+        "reachable_count": reachable,
+        "pairs": pairs,
+        "extraction_date": _now(),
+    }, indent=2))
+
+    return RouteMatrixResult(
+        result_path=output_path,
+        pair_count=len(pairs),
+        reachable_count=reachable,
+        extraction_date=_now(),
+    )
