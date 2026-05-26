@@ -130,7 +130,8 @@ with **`osm.Vocab.ResolveTag`** (NL → `key=value`) — *lookup-then-compose*.
 | Transform | `osm.Transform` | `MergeLayers`, `Summarize` (count/sum/avg/min/max), `Dissolve` |
 | Geocoding | `osm.geocode` | `Geocode`, `ReverseGeocode` (Nominatim) |
 | Vocabulary | `osm.Vocab` | `ResolveTag`, `ListTagValues` (NL term → OSM `key=value`) |
-| Routing | `osm.Routing.{OSRM,API,Valhalla,GraphHopper,PgRouting}` | `Route`, `MultiStopRoute`, `Isochrone`, `Matrix`, `Nearest`, `MapMatch`, `Trip` (verbs per engine; uniform `osm.Routing.Types` schemas — swap engine by namespace) |
+| Routing (engines) | `osm.Routing.{OSRM,API,Valhalla,GraphHopper,PgRouting}` | `Route`, `MultiStopRoute`, `Isochrone`, `Matrix`, `Nearest`, `MapMatch`, `Trip` (verbs per engine; uniform `osm.Routing.Types` schemas — swap engine by namespace) |
+| Network (approx routing) | `osm.Network` | `BuildNetwork`, `ApproxRoute`, `RouteMatrix` — **engine-free**: pure shapely/networkx graph search over a tiny noded-freeway cache artifact (no daemon, read-once-per-runner). `+ workflows.CityRoutesByPopulation` / `RouteFanout` |
 | Render / Tiles | `osm.viz`, `osm.Tiles` | `RenderMap`, `RenderLayers`, `BuildVectorTiles` (tippecanoe → MBTiles/PMTiles) |
 
 Everything operates on GeoJSON **paths** (or an `OSMCache` for Source/Clip), so
@@ -155,6 +156,15 @@ is in-process (pure/cheap); anything hitting a server/DB/subprocess is external.
 `tippecanoe` (+ `pmtiles` for PMTiles output); geocoding hits Nominatim
 (`AFL_NOMINATIM_URL`). Each degrades gracefully or fails explicitly when its
 engine is absent.
+
+**`osm.Network` is the engine-free routing tier.** When you only need approximate
+corridor distances (not turn-by-turn), `BuildNetwork`/`ApproxRoute`/`RouteMatrix`
+route over a tiny noded-freeway graph entirely in-process — no OSRM daemon, no
+GB-scale build. The graph is a small (~MB) content-addressed `osm/network/` cache
+artifact, so every runner reads it once and the work fans out lock-free across the
+fleet (proven live in Docker — see facetwork's
+`docs/architecture/approximate-freeway-routing.md` §8). `ApproxRoute` reports the
+closest reachable point + a `gap_to_b_km` when the destination is off-freeway.
 
 ### Output artifact naming
 
