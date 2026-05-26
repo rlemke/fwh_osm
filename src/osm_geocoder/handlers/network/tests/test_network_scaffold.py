@@ -113,8 +113,6 @@ def test_handlers_short_circuit_on_empty_input():
 
 
 @pytest.mark.parametrize("op,phase,kwargs", [
-    ("approx_route", "Phase 2", {"network_path": "/tmp/net", "from_lat": 37.8,
-                                 "from_lon": -122.4, "to_lat": 34.0, "to_lon": -118.2}),
     ("route_matrix", "Phase 3", {"network_path": "/tmp/net", "points": "[]"}),
 ])
 def test_query_bodies_not_yet_implemented(op, phase, kwargs):

@@ -37,6 +37,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ..shared._output import derive_output_path, ensure_dir
 from ..shared.geojson_writer import iter_geojson_features
 
 log = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ except ImportError:  # pragma: no cover - optional until Phase 1
 
 try:
     import shapely
-    from shapely.geometry import shape
+    from shapely.geometry import Point, shape
     from shapely.ops import unary_union
     from shapely.strtree import STRtree
 
@@ -335,9 +336,6 @@ def node_linestrings(features, snap_tolerance_m: float = 25.0, ref_filter: str =
         else:
             g.add_edge(u, v, length_m=length_m, coords=coords, ref=ref, name=name)
 
-    for nid in idx.nodes:
-        g.add_node(nid)
-
     edges: list[dict] = []
     for edge_idx, (u, v, data) in enumerate(g.edges(data=True)):
         data["edge_idx"] = edge_idx
@@ -352,12 +350,18 @@ def node_linestrings(features, snap_tolerance_m: float = 25.0, ref_filter: str =
         adjacency.setdefault(u, []).append([v, data["length_m"], data["edge_idx"]])
         adjacency.setdefault(v, []).append([u, data["length_m"], data["edge_idx"]])
 
+    # Keep only nodes that participate in a routable edge. A degenerate u==v
+    # segment can mint a node via node_for() that never gets an edge; ``g`` has
+    # no such isolated node (it only gains nodes through add_edge), so the
+    # component count, graph.json, and nodes.geojson all stay mutually consistent.
+    nodes = {nid: idx.nodes[nid] for nid in adjacency}
+
     comps = list(nx.connected_components(g))
     largest = max((len(c) for c in comps), default=0)
-    frac = largest / len(idx.nodes) if idx.nodes else 0.0
+    frac = largest / len(nodes) if nodes else 0.0
 
     return NodedGraph(
-        nodes=dict(idx.nodes),
+        nodes=nodes,
         edges=edges,
         adjacency=adjacency,
         connected_components=len(comps),
@@ -543,6 +547,112 @@ def build_network(
     )
 
 
+# ---------------------------------------------------------------------------
+# Network load (read-once-per-runner) + routing helpers.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _LoadedNetwork:
+    """An in-memory, ready-to-route network loaded from a cache artifact."""
+
+    g: Any                                    # networkx.Graph (edge attrs: length_m, edge_idx)
+    coords: dict[int, tuple[float, float]]    # node_id -> (lon, lat)
+    edge_coords: dict[int, list]              # edge_idx -> [[lon, lat], ...]
+    node_ids: list[int]
+    tree: Any                                 # STRtree over node Points (for snapping)
+
+
+# Module-level memo: each runner loads a given network once and answers all
+# subsequent routes from RAM (the read-once-per-runner design). Keyed by
+# (network_path, sidecar sha256) so a rebuilt artifact at the same path reloads.
+_GRAPH_CACHE: dict[tuple[str, str], _LoadedNetwork] = {}
+
+
+def _load_network(network_path: str, heartbeat=None) -> _LoadedNetwork:
+    """Load (and memoize) a built network artifact into an in-memory routable graph."""
+    _require_deps()
+    from _osm_tools import storage as _storage
+
+    s = _storage.get_storage()
+    join = _storage.Storage.join
+    meta_path = network_path + ".meta.json"
+    sha = ""
+    if s.exists(meta_path):
+        try:
+            sha = (json.loads(s.read_text(meta_path)) or {}).get("sha256", "")
+        except Exception:  # pragma: no cover - defensive
+            sha = ""
+
+    key = (network_path, sha)
+    cached = _GRAPH_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    graph_json = json.loads(s.read_text(join(network_path, "graph.json")))
+    nodes_fc = json.loads(s.read_text(join(network_path, "nodes.geojson")))
+    edges_fc = json.loads(s.read_text(join(network_path, "edges.geojson")))
+
+    g = nx.Graph()
+    for nid, adj in graph_json.items():
+        u = int(nid)
+        for nbr, length_m, edge_idx in adj:
+            g.add_edge(u, int(nbr), length_m=float(length_m), edge_idx=int(edge_idx))
+
+    coords = {
+        f["properties"]["node_id"]: (f["geometry"]["coordinates"][0], f["geometry"]["coordinates"][1])
+        for f in nodes_fc.get("features", [])
+    }
+    edge_coords = {
+        f["properties"]["edge_idx"]: f["geometry"]["coordinates"]
+        for f in edges_fc.get("features", [])
+    }
+    node_ids = list(coords)
+    tree = STRtree([Point(coords[n][0], coords[n][1]) for n in node_ids])
+
+    loaded = _LoadedNetwork(g=g, coords=coords, edge_coords=edge_coords,
+                            node_ids=node_ids, tree=tree)
+    _GRAPH_CACHE[key] = loaded
+    if heartbeat:
+        heartbeat()
+    return loaded
+
+
+def _snap(net: _LoadedNetwork, lon: float, lat: float) -> int:
+    """Snap a coordinate to the nearest network node id."""
+    return net.node_ids[int(net.tree.nearest(Point(lon, lat)))]
+
+
+def _stitch_route(net: _LoadedNetwork, path: list[int]) -> list:
+    """Concatenate the edge geometries along a node path into one coordinate list."""
+    if len(path) < 2:
+        return [list(net.coords[path[0]])] if path else []
+    out: list = []
+    for u, v in zip(path, path[1:], strict=False):
+        data = net.g.get_edge_data(u, v) or {}
+        seg = [list(c) for c in net.edge_coords.get(data.get("edge_idx"), [])]
+        if not seg:
+            seg = [list(net.coords[u]), list(net.coords[v])]
+        ulon, ulat = net.coords[u]
+        if (_haversine_m(ulon, ulat, seg[0][0], seg[0][1])
+                > _haversine_m(ulon, ulat, seg[-1][0], seg[-1][1])):
+            seg.reverse()  # orient u -> v
+        out.extend(seg if not out else seg[1:])
+    return out
+
+
+def _write_route_geojson(path: str, coords: list, props: dict) -> None:
+    if len(coords) >= 2:
+        geom = {"type": "LineString", "coordinates": coords}
+    elif coords:
+        geom = {"type": "Point", "coordinates": coords[0]}
+    else:  # pragma: no cover - empty network guarded earlier
+        geom = {"type": "LineString", "coordinates": []}
+    fc = {"type": "FeatureCollection",
+          "features": [{"type": "Feature", "properties": props, "geometry": geom}]}
+    Path(path).write_text(json.dumps(fc))
+
+
 def approx_route(
     network_path: str,
     from_lat: float,
@@ -553,9 +663,62 @@ def approx_route(
     heartbeat=None,
     run_id: str = "",
 ) -> RouteResult:
-    """Approximate A→B route over a built freeway network (Phase 2)."""
+    """Approximate A→B route over a built freeway network.
+
+    Snaps A and B to the nearest network nodes, runs single-source Dijkstra from
+    A by segment length, and returns the route. If B's node is unreachable from
+    A's component, returns the route to the reachable node *closest* to B with
+    ``reached_b=False``; ``gap_to_b_km`` is always the straight-line residual from
+    the reached on-network point to B (the off-freeway last mile when reached,
+    the unreachable gap when not).
+    """
     _require_deps()
-    raise NotImplementedError(_PHASE.format(op="ApproxRoute", phase="Phase 2"))
+    net = _load_network(network_path, heartbeat)
+    if net.g.number_of_nodes() == 0:
+        raise ValueError(f"ApproxRoute: empty network at {network_path}")
+
+    a = _snap(net, from_lon, from_lat)
+    b = _snap(net, to_lon, to_lat)
+
+    lengths, paths = nx.single_source_dijkstra(net.g, a, weight="length_m")
+    if heartbeat:
+        heartbeat()
+
+    if b in paths:
+        target, reached_b = b, True
+    else:
+        target = min(paths, key=lambda n: _haversine_m(to_lon, to_lat, net.coords[n][0], net.coords[n][1]))
+        reached_b = False
+
+    path = paths[target]
+    rlon, rlat = net.coords[target]
+    distance_km = lengths[target] / 1000.0
+    gap_km = _haversine_m(to_lon, to_lat, rlon, rlat) / 1000.0
+
+    if output_path is None:
+        output_path = derive_output_path(
+            "osm-network", "route",
+            f"{from_lat:.4f}_{from_lon:.4f}", f"{to_lat:.4f}_{to_lon:.4f}",
+            ext="geojson", run_id=run_id or None,
+        )
+    output_path = str(output_path)
+    ensure_dir(output_path)
+    _write_route_geojson(
+        output_path, _stitch_route(net, path),
+        {"distance_km": round(distance_km, 3), "reached_b": reached_b,
+         "gap_to_b_km": round(gap_km, 3), "node_hops": len(path)},
+    )
+
+    return RouteResult(
+        route_path=output_path,
+        distance_km=round(distance_km, 3),
+        reached_lat=rlat,
+        reached_lon=rlon,
+        gap_to_b_km=round(gap_km, 3),
+        reached_b=reached_b,
+        node_hops=len(path),
+        extraction_date=_now(),
+    )
 
 
 def route_matrix(
