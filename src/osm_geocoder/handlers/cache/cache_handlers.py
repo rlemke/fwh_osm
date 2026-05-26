@@ -178,7 +178,7 @@ REGION_REGISTRY: dict[str, dict[str, str]] = {
         "Poland": "europe/poland",
         "Portugal": "europe/portugal",
         "Romania": "europe/romania",
-        "Russia": "europe/russia",
+        "Russia": "russia",
         "Serbia": "europe/serbia",
         "Slovakia": "europe/slovakia",
         "Slovenia": "europe/slovenia",
