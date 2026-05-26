@@ -13,6 +13,7 @@ that an LLM can discover (`fw_capabilities`) and compose from a natural-language
 - **Transform** (`osm.Transform`) — MergeLayers, Summarize, Dissolve
 - **Geocoding** (`osm.geocode`) — forward + reverse via Nominatim
 - **Routing** (`osm.Routing.{OSRM,API,Valhalla,GraphHopper,PgRouting}`) — Route, MultiStop, Isochrone, Matrix, Nearest, MapMatch, Trip across five swappable engines (uniform schemas)
+- **Network — engine-free approx routing** (`osm.Network`) — BuildNetwork / ApproxRoute / RouteMatrix: pure shapely/networkx graph search over a tiny noded-freeway cache artifact (no daemon, read-once-per-runner, embarrassingly parallel). `+ CityRoutesByPopulation` / `RouteFanout` workflows
 - **Vocabulary** (`osm.Vocab`) — natural-language term → OSM `key=value` (e.g. "pharmacy" → `amenity=pharmacy`)
 - **Visualization** — Folium/Leaflet HTML maps + vector tiles (`osm.Tiles`, tippecanoe → MBTiles/PMTiles)
 - **Bulk PostGIS imports** — multi-hour, local-first staged imports with autovacuum management
