@@ -19,6 +19,7 @@ dependencies = [
     "osm2geojson>=0.3",
     "shapely>=2.0",
     "pyproj>=3.0",
+    "networkx>=3.0",
     "folium>=0.14",
 ]
 

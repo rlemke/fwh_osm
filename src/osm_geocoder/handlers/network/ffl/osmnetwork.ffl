@@ -1,0 +1,70 @@
+// Approximate freeway routing — the Network layer of the composable library.
+//
+// Pure, in-process graph search over a small noded-freeway artifact: the
+// engine-free alternative to osm.Routing.{OSRM,Valhalla,GraphHopper,pgRouting}.
+// Because the interstate network is single-digit-MB, the graph is a content-
+// addressed cache directory artifact that every routing runner loads ONCE into
+// memory — no daemon, no AFL_*_URL, no replica lifecycle. All facets are pure,
+// so they fan out freely across the fleet.
+//
+// Design + on-disk/cross-server storage contract:
+//   docs/architecture/approximate-freeway-routing.md (facetwork repo)
+
+/** Approximate freeway routing over a tiny in-process graph. */
+namespace osm.Network {
+
+    /** A built, routable freeway graph. `network_path` is a cache directory
+        artifact (nodes.geojson + edges.geojson + graph.json). The component
+        counts are build-quality signals: a fragmented graph (many components /
+        low largest_component_frac) means noding under-connected the network. */
+    schema NetworkResult {
+        network_path: String,
+        node_count: Long,
+        edge_count: Long,
+        connected_components: Long,
+        largest_component_frac: Double,
+        snap_tolerance_m: Double,
+        extraction_date: String
+    }
+
+    /** A single approximate route. `route_path` is a GeoJSON LineString of the
+        traversed segments. When B is off-network, `reached_b` is false and
+        (`reached_lat`, `reached_lon`) is the closest reachable point to B, with
+        `gap_to_b_km` the straight-line residual. */
+    schema RouteResult {
+        route_path: String,
+        distance_km: Double,
+        reached_lat: Double,
+        reached_lon: Double,
+        gap_to_b_km: Double,
+        reached_b: Boolean,
+        node_hops: Long,
+        extraction_date: String
+    }
+
+    /** All-pairs approximate routing. `result_path` is a JSON file of pairs
+        `{from, to, distance_km, reached_b}`. */
+    schema MatrixResult {
+        result_path: String,
+        pair_count: Long,
+        reachable_count: Long,
+        extraction_date: String
+    }
+
+    /** Node freeway LineStrings at intersections and build a routable graph
+        (shapely unary_union to node + networkx adjacency, edge weight = segment
+        length in meters). `ref_filter` keeps only ways whose `ref` starts with
+        the prefix (e.g. "I " for interstates); empty keeps all. Output is a
+        cached directory artifact, keyed by source + snap tolerance. */
+    event facet BuildNetwork(edges_path: String, snap_tolerance_m: Double = 25.0, ref_filter: String = "") => (result: NetworkResult) with Effect(kind = "pure") with Cost(tier = "moderate")
+
+    /** Approximate route over a freeway network: snap A and B to the nearest
+        network nodes, shortest path by segment length, and return the route plus
+        the closest reachable point to B (and the residual gap when B is off-net). */
+    event facet ApproxRoute(network_path: String, from_lat: Double, from_lon: Double, to_lat: Double, to_lon: Double) => (result: RouteResult) with Effect(kind = "pure") with Cost(tier = "cheap")
+
+    /** All-pairs approximate routing over the small network — pure in-process,
+        no engine. `points` is a JSON list of {lon, lat, name} (or a
+        "lon,lat;lon,lat" string). One single-source Dijkstra per origin. */
+    event facet RouteMatrix(network_path: String, points: String) => (result: MatrixResult) with Effect(kind = "pure") with Cost(tier = "cheap")
+}

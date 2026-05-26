@@ -18,6 +18,7 @@ from .filters.osmose_handlers import register_osmose_handlers
 from .filters.validation_handlers import register_validation_handlers
 from .geocoding.geocoding_handlers import register_geocoding_handlers
 from .graphhopper.graphhopper_handlers import register_graphhopper_handlers
+from .network.network_handlers import register_network_handlers
 from .parks.park_handlers import register_park_handlers
 from .poi.poi_handlers import register_poi_handlers
 from .population.population_handlers import register_population_handlers
@@ -54,6 +55,7 @@ __all__ = [
     "register_geocoding_handlers",
     "register_graphhopper_handlers",
     "register_gtfs_handlers",
+    "register_network_handlers",
     "register_osmose_handlers",
     "register_park_handlers",
     "register_poi_handlers",
@@ -90,6 +92,7 @@ def register_all_handlers(poller) -> None:
     register_geocoding_handlers(poller)
     register_graphhopper_handlers(poller)
     register_gtfs_handlers(poller)
+    register_network_handlers(poller)
     register_osmose_handlers(poller)
     register_park_handlers(poller)
     register_poi_handlers(poller)
@@ -168,6 +171,7 @@ def register_all_registry_handlers(runner) -> None:
 
     from .combined.combined_handlers import register_handlers as reg_combined
     from .db.import_handlers import register_handlers as reg_db_import
+    from .network.network_handlers import register_handlers as reg_network
     from .routing.routing_adapter_handlers import register_handlers as reg_routing_adapter
     from .sources.source_handlers import register_handlers as reg_source
     from .spatial.spatial_handlers import register_handlers as reg_spatial
@@ -177,6 +181,7 @@ def register_all_registry_handlers(runner) -> None:
 
     reg_combined(runner)
     reg_db_import(runner)
+    reg_network(runner)
     reg_source(runner)
     reg_routing_adapter(runner)
     reg_spatial(runner)
