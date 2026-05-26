@@ -64,4 +64,4 @@ def test_workflow_is_declared():
 
     walk(program)
     assert {"CityRoutesByPopulation", "RouteFanout",
-            "CollectUSRouteLayers", "RenderUSCityRoutesMap"} <= set(names)
+            "CollectRouteLayers", "RenderCityRoutesMap"} <= set(names)
