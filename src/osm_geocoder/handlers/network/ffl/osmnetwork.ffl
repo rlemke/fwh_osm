@@ -51,6 +51,16 @@ namespace osm.Network {
         extraction_date: String
     }
 
+    /** A drawable all-pairs routes layer: `output_path` is a GeoJSON of one
+        LineString per city pair (the map companion to RouteMatrix). */
+    schema RouteLayerResult {
+        output_path: String,
+        route_count: Long,
+        reachable_count: Long,
+        point_count: Long,
+        extraction_date: String
+    }
+
     /** Node freeway LineStrings at intersections and build a routable graph
         (shapely unary_union to node + networkx adjacency, edge weight = segment
         length in meters). `ref_filter` keeps only ways whose `ref` starts with
@@ -67,4 +77,9 @@ namespace osm.Network {
         no engine. `points` is a JSON list of {lon, lat, name} (or a
         "lon,lat;lon,lat" string). One single-source Dijkstra per origin. */
     event facet RouteMatrix(network_path: String, points: String) => (result: RouteMatrixResult) with Effect(kind = "pure") with Cost(tier = "cheap")
+
+    /** All-pairs route GEOMETRIES as one drawable GeoJSON layer (one LineString
+        per pair) — the map companion to RouteMatrix. Feed it the cities layer and
+        render the result with `osm.viz.RenderLayers`. */
+    event facet RouteLayer(network_path: String, points: String) => (result: RouteLayerResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 }

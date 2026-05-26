@@ -857,3 +857,96 @@ def route_matrix(
         reachable_count=reachable,
         extraction_date=_now(),
     )
+
+
+@dataclass
+class RouteLayerResult:
+    """A drawable all-pairs routes layer (mirrors the FFL RouteLayerResult)."""
+
+    output_path: str = ""
+    route_count: int = 0
+    reachable_count: int = 0
+    point_count: int = 0
+    extraction_date: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "output_path": self.output_path,
+            "route_count": self.route_count,
+            "reachable_count": self.reachable_count,
+            "point_count": self.point_count,
+            "extraction_date": self.extraction_date,
+        }
+
+
+def route_layer(
+    network_path: str,
+    points: str,
+    output_path: str | None = None,
+    heartbeat=None,
+    run_id: str = "",
+) -> RouteLayerResult:
+    """All-pairs route *geometries* as one drawable GeoJSON layer — the map
+    companion to RouteMatrix (which gives distances, not lines).
+
+    For each unordered pair (i<j) it reconstructs the shortest path over the
+    network and writes one LineString feature (props: from/to/distance_km/
+    reached_b). Unreachable pairs route to the closest reachable node to the
+    target (reached_b=false). One single-source Dijkstra per origin. Accepts the
+    same ``points`` forms as RouteMatrix (JSON list, GeoJSON path, "lon,lat;...").
+    """
+    _require_deps()
+    pts = _parse_points(points)
+    if len(pts) < 2:
+        raise ValueError(f"RouteLayer needs >= 2 points, got {len(pts)}")
+
+    net = _load_network(network_path, heartbeat)
+    if net.g.number_of_nodes() == 0:
+        raise ValueError(f"RouteLayer: empty network at {network_path}")
+
+    snapped = [
+        (_snap(net, lon, lat), lon, lat, name or f"p{i}")
+        for i, (lon, lat, name) in enumerate(pts)
+    ]
+
+    features: list[dict] = []
+    reachable = 0
+    for i, (snode, _slon, _slat, sname) in enumerate(snapped):
+        lengths, paths = nx.single_source_dijkstra(net.g, snode, weight="length_m")
+        if heartbeat:
+            heartbeat()
+        for j in range(i + 1, len(snapped)):
+            tnode, tlon, tlat, tname = snapped[j]
+            if tnode in paths:
+                path, dist_km, reached = paths[tnode], lengths[tnode] / 1000.0, True
+                reachable += 1
+            elif paths:
+                best = min(paths, key=lambda n: _haversine_m(tlon, tlat, net.coords[n][0], net.coords[n][1]))
+                path, dist_km, reached = paths[best], lengths[best] / 1000.0, False
+            else:  # pragma: no cover - isolated source
+                continue
+            coords = _stitch_route(net, path)
+            if len(coords) < 2:
+                continue
+            features.append({
+                "type": "Feature",
+                "properties": {"from": sname, "to": tname,
+                               "distance_km": round(dist_km, 3), "reached_b": reached},
+                "geometry": {"type": "LineString", "coordinates": coords},
+            })
+
+    if output_path is None:
+        output_path = derive_output_path(
+            "osm-network", "routes", str(len(pts)), ext="geojson", run_id=run_id or None,
+        )
+    output_path = str(output_path)
+    ensure_dir(output_path)
+    Path(output_path).write_text(json.dumps({"type": "FeatureCollection", "features": features}))
+
+    return RouteLayerResult(
+        output_path=output_path,
+        route_count=len(features),
+        reachable_count=reachable,
+        point_count=len(pts),
+        extraction_date=_now(),
+    )

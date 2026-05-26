@@ -19,6 +19,8 @@
 /** All-pairs interstate routes between the large cities of a region. */
 namespace osm.Network.workflows {
     use osm.types
+    use osm.Region
+    use osm.cache
 
     /** Computes the all-pairs approximate interstate-route matrix between every
         place in `region` with population >= `min_population`. Defaults to
@@ -94,4 +96,66 @@ namespace osm.Network.workflows {
         )
         yield RouteFanout(routes = [r.result.route_path], distances = [r.result.distance_km])
     }
+
+    // --- National (multi-region) pipeline: fan-out collect, then linear render ---
+    // FFL has no post-foreach aggregation block, so this is the genomics
+    // fan-out / fan-in split: CollectUSRouteLayers fans out per region (Download
+    // auto-caches/downloads each state's PBF), then RenderUSCityRoutesMap is a
+    // linear merge -> build -> route -> render over the collected layers.
+
+    /** Fan-out: for every region in `region_names`, download (auto-cache) its PBF
+        and extract the interstate-motorway layer + the cities >= `min_population`.
+        Returns the per-region layer paths as two aggregated lists (one element
+        per region), ready for RenderUSCityRoutesMap. `osm.cache.Download` fetches
+        any region not already cached. */
+    workflow CollectUSRouteLayers(region_names: [String], min_population: Long = 1000000,
+        place_type: String = "city") => (interstate_layers: [String], city_layers: [String]) andThen {
+            resolved = osm.Region.ResolveRegions(names = $.region_names)
+        } andThen foreach r in resolved.regions {
+            cache = osm.cache.Download(region = $.r)
+            roads = osm.Source.PBF.ExtractCategory(cache = cache.cache, category = "roads")
+            motorways = osm.Filters.FilterGeoJSONByOSMType(
+                input_path = roads.output_path, osm_type = "*",
+                tag_key = "highway", tag_value = "motorway"
+            )
+            places = osm.Source.PBF.ExtractCategory(cache = cache.cache, category = "population")
+            cities = osm.Population.FilterByPopulation(
+                input_path = places.output_path, min_population = $.min_population,
+                place_type = $.place_type, operator = "gte"
+            )
+            yield CollectUSRouteLayers(
+                interstate_layers = [motorways.result.output_path],
+                city_layers = [cities.result.output_path]
+            )
+        }
+
+    /** Fan-in: merge the per-region interstate layers into one network, merge the
+        per-region city layers, route all city pairs over the network, and render
+        the routes + cities to an HTML map. Feed it the two lists from
+        CollectUSRouteLayers. */
+    workflow RenderUSCityRoutesMap(interstate_layers: [String], city_layers: [String],
+        snap_tolerance_m: Double = 25.0,
+        title: String = "US interstate routes between cities over 1M") => (map_path: String, route_count: Long, city_count: Long, network_edges: Long) andThen {
+            all_interstates = osm.Transform.MergeLayers(inputs = $.interstate_layers)
+            net = osm.Network.BuildNetwork(
+                edges_path = all_interstates.result.output_path,
+                snap_tolerance_m = $.snap_tolerance_m, ref_filter = "I "
+            )
+            all_cities = osm.Transform.MergeLayers(inputs = $.city_layers)
+            routes = osm.Network.RouteLayer(
+                network_path = net.result.network_path,
+                points = all_cities.result.output_path
+            )
+            map = osm.viz.RenderLayers(
+                layers = [routes.result.output_path, all_cities.result.output_path],
+                colors = ["#1f78b4", "#e31a1c"],
+                title = $.title
+            )
+            yield RenderUSCityRoutesMap(
+                map_path = map.result.output_path,
+                route_count = routes.result.route_count,
+                city_count = all_cities.result.feature_count,
+                network_edges = net.result.edge_count
+            )
+        }
 }
