@@ -16,7 +16,13 @@ from pathlib import Path
 
 from facetwork.runtime.storage import get_storage_backend
 
-from ..shared._output import ensure_dir, open_output, resolve_output_dir, uri_stem
+from ..shared._output import (
+    ensure_dir,
+    finalize_output_file,
+    open_output,
+    resolve_output_dir,
+    uri_stem,
+)
 
 _storage = get_storage_backend()
 
@@ -237,7 +243,6 @@ def extract_roads(
     ``road_class``. Streams to a temp file then moves into place (multi-GB safe).
     """
     import os
-    import shutil
     import tempfile
 
     import osmium
@@ -308,8 +313,7 @@ def extract_roads(
         with GeoJSONStreamWriter(tmp_path) as writer:
             handler = _RoadHandler(writer)
             handler.apply_file(local_pbf, locations=True, idx="flex_mem")
-        ensure_dir(output_path_str)
-        shutil.move(tmp_path, output_path_str)
+        finalize_output_file(tmp_path, output_path_str)
     except Exception:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)

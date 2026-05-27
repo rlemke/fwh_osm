@@ -39,7 +39,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ..shared._output import derive_output_path, ensure_dir
+from ..shared._output import derive_output_path, ensure_dir, open_output
 from ..shared.geojson_writer import iter_geojson_features
 
 log = logging.getLogger(__name__)
@@ -774,7 +774,8 @@ def _write_route_geojson(path: str, coords: list, props: dict) -> None:
         geom = {"type": "LineString", "coordinates": []}
     fc = {"type": "FeatureCollection",
           "features": [{"type": "Feature", "properties": props, "geometry": geom}]}
-    Path(path).write_text(json.dumps(fc))
+    with open_output(path) as f:
+        f.write(json.dumps(fc))
 
 
 def approx_route(
@@ -969,14 +970,15 @@ def route_matrix(
         )
     output_path = str(output_path)
     ensure_dir(output_path)
-    Path(output_path).write_text(json.dumps({
-        "operation": "route_matrix",
-        "point_count": len(pts),
-        "pair_count": len(pairs),
-        "reachable_count": reachable,
-        "pairs": pairs,
-        "extraction_date": _now(),
-    }, indent=2))
+    with open_output(output_path) as f:
+        f.write(json.dumps({
+            "operation": "route_matrix",
+            "point_count": len(pts),
+            "pair_count": len(pairs),
+            "reachable_count": reachable,
+            "pairs": pairs,
+            "extraction_date": _now(),
+        }, indent=2))
 
     return RouteMatrixResult(
         result_path=output_path,
@@ -1068,7 +1070,8 @@ def route_layer(
         )
     output_path = str(output_path)
     ensure_dir(output_path)
-    Path(output_path).write_text(json.dumps({"type": "FeatureCollection", "features": features}))
+    with open_output(output_path) as f:
+        f.write(json.dumps({"type": "FeatureCollection", "features": features}))
 
     return RouteLayerResult(
         output_path=output_path,
