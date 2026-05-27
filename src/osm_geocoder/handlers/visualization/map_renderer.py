@@ -16,7 +16,25 @@ from pathlib import Path
 from facetwork.config import get_temp_dir
 from facetwork.runtime.storage import localize
 
-from ..shared._output import resolve_local_output_dir, uri_stem
+from ..shared._output import finalize_output_file, resolve_local_output_dir, uri_stem
+
+
+def _save_map_html(folium_map, output_path: str) -> None:
+    """Save a folium map to ``output_path`` (storage-aware).
+
+    folium can only write to the local filesystem, so for remote outputs
+    (``s3://``, ``hdfs://``) we save to a local temp then finalize onto the
+    backend — the map output is shareable on the object store like any other
+    artifact."""
+    if not output_path.startswith(("s3://", "hdfs://")):
+        folium_map.save(output_path)
+        return
+    import tempfile
+
+    fd, tmp = tempfile.mkstemp(suffix=".html")
+    os.close(fd)
+    folium_map.save(tmp)
+    finalize_output_file(tmp, output_path)
 
 log = logging.getLogger(__name__)
 
@@ -539,7 +557,7 @@ def render_layers(
     """
     m.get_root().html.add_child(folium.Element(title_html))
 
-    m.save(str(output_path))
+    _save_map_html(m, str(output_path))
 
     return MapResult(
         output_path=str(output_path),

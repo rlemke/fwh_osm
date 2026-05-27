@@ -890,7 +890,7 @@ def _parse_points(points) -> list[tuple[float, float, str]]:
     if not isinstance(points, str):
         return _points_from_obj(points)
     text = points
-    if os.path.exists(points):
+    if points.startswith(("s3://", "hdfs://")) or os.path.exists(points):
         from facetwork.runtime.storage import localize
         with open(localize(points)) as f:
             text = f.read()

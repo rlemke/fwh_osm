@@ -27,7 +27,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from ..shared._output import derive_output_path, ensure_dir, uri_stem
+from ..shared._output import (
+    derive_output_path,
+    ensure_dir,
+    finalize_output_file,
+    uri_stem,
+)
 from ..shared.geojson_writer import GeoJSONStreamWriter, iter_geojson_features
 
 log = logging.getLogger(__name__)
@@ -114,8 +119,7 @@ def merge_layers(
                 merged_layers += 1
                 for feature in iter_geojson_features(local, heartbeat):
                     writer.write_feature(feature)
-        ensure_dir(output_path)
-        shutil.move(tmp_path, output_path)
+        finalize_output_file(tmp_path, output_path)
         feature_count = writer.feature_count
     except Exception:
         if os.path.exists(tmp_path):
@@ -303,8 +307,7 @@ def dissolve(
                     "properties": {group_by: key, "dissolved_count": len(geoms)},
                     "geometry": mapping(merged),
                 })
-        ensure_dir(output_path)
-        shutil.move(tmp_path, output_path)
+        finalize_output_file(tmp_path, output_path)
         feature_count = writer.feature_count
     except Exception:
         if os.path.exists(tmp_path):
