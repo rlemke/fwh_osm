@@ -109,14 +109,15 @@ namespace osm.Network.workflows {
         per region), ready for RenderUSCityRoutesMap. `osm.cache.Download` fetches
         any region not already cached. */
     workflow CollectRouteLayers(region_names: [String], min_population: Long = 1000000,
-        place_type: String = "city") => (road_layers: [String], city_layers: [String]) andThen foreach name in $.region_names {
+        place_type: String = "city", road_class: String = "motorway") => (road_layers: [String], city_layers: [String]) andThen foreach name in $.region_names {
             reg = osm.Region.ResolveRegion(name = $.name)
             cache = osm.cache.Download(region = reg.region)
-            // Motorway-only extract (road_class targets highway=motorway) — far
-            // cheaper than extracting all roads then filtering. RenderCityRoutesMap's
-            // ref_filter narrows the network downstream ("I " for US interstates,
-            // "" to keep every motorway, e.g. for Europe).
-            motorways = osm.Source.PBF.ExtractRoads(cache = cache.cache, road_class = "motorway")
+            // Road extract by class. "motorway" = strict freeways (cheapest);
+            // "major" = motorway+trunk, which bridges class-downgrade gaps where a
+            // freeway corridor drops to trunk (borders / urban bypasses), e.g. the
+            // Turkey<->Bulgaria Kapıkule link. RenderCityRoutesMap's ref_filter
+            // narrows the network downstream ("I " for US interstates, "" for all).
+            motorways = osm.Source.PBF.ExtractRoads(cache = cache.cache, road_class = $.road_class)
             places = osm.Source.PBF.ExtractCategory(cache = cache.cache, category = "population")
             cities = osm.Population.FilterByPopulation(
                 input_path = places.output_path, min_population = $.min_population,

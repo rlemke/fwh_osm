@@ -39,8 +39,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ..shared._output import derive_output_path, ensure_dir, open_output
-from ..shared.geojson_writer import iter_geojson_features
+from ..shared._output import derive_output_path, ensure_dir, finalize_output_file, open_output
+from ..shared.geojson_writer import GeoJSONStreamWriter, iter_geojson_features
 
 log = logging.getLogger(__name__)
 
@@ -765,6 +765,25 @@ def _stitch_route(net: _LoadedNetwork, path: list[int]) -> list:
     return out
 
 
+def _reconstruct_path(pred: dict, source: int, target: int) -> list[int]:
+    """Rebuild the node path ``source``→``target`` from a predecessor map.
+
+    ``nx.dijkstra_predecessor_and_distance`` returns a predecessor map (one entry
+    per node, O(V) memory) instead of ``single_source_dijkstra``'s full ``paths``
+    dict (a complete node list to *every* node — O(V·path_len), tens of GB on a
+    continental motorway+trunk graph). We reconstruct only the few routes we
+    actually draw. Returns ``[]`` if ``target`` isn't reachable from ``source``.
+    """
+    path = [target]
+    while path[-1] != source:
+        preds = pred.get(path[-1])
+        if not preds:
+            return []
+        path.append(preds[0])
+    path.reverse()
+    return path
+
+
 def _write_route_geojson(path: str, coords: list, props: dict) -> None:
     if len(coords) >= 2:
         geom = {"type": "LineString", "coordinates": coords}
@@ -805,17 +824,18 @@ def approx_route(
     a = _snap(net, from_lon, from_lat)
     b = _snap(net, to_lon, to_lat)
 
-    lengths, paths = nx.single_source_dijkstra(net.g, a, weight="length_m")
+    # Predecessor + distance (O(V) memory) rather than the full paths dict.
+    pred, lengths = nx.dijkstra_predecessor_and_distance(net.g, a, weight="length_m")
     if heartbeat:
         heartbeat()
 
-    if b in paths:
+    if b in lengths:
         target, reached_b = b, True
     else:
-        target = min(paths, key=lambda n: _haversine_m(to_lon, to_lat, net.coords[n][0], net.coords[n][1]))
+        target = min(lengths, key=lambda n: _haversine_m(to_lon, to_lat, net.coords[n][0], net.coords[n][1]))
         reached_b = False
 
-    path = paths[target]
+    path = _reconstruct_path(pred, a, target)
     rlon, rlat = net.coords[target]
     distance_km = lengths[target] / 1000.0
     gap_km = _haversine_m(to_lon, to_lat, rlon, rlat) / 1000.0
@@ -940,7 +960,8 @@ def route_matrix(
     pairs: list[dict] = []
     reachable = 0
     for si, (snode, _slon, _slat, sname) in enumerate(snapped):
-        lengths, _paths = nx.single_source_dijkstra(net.g, snode, weight="length_m")
+        # distances only — RouteMatrix never needs the (huge) paths dict.
+        lengths = nx.single_source_dijkstra_path_length(net.g, snode, weight="length_m")
         if heartbeat:
             heartbeat()
         for ti, (tnode, tlon, tlat, tname) in enumerate(snapped):
@@ -1038,44 +1059,63 @@ def route_layer(
         for i, (lon, lat, name) in enumerate(pts)
     ]
 
-    features: list[dict] = []
-    reachable = 0
-    for i, (snode, _slon, _slat, sname) in enumerate(snapped):
-        lengths, paths = nx.single_source_dijkstra(net.g, snode, weight="length_m")
-        if heartbeat:
-            heartbeat()
-        for j in range(i + 1, len(snapped)):
-            tnode, tlon, tlat, tname = snapped[j]
-            if tnode in paths:
-                path, dist_km, reached = paths[tnode], lengths[tnode] / 1000.0, True
-                reachable += 1
-            elif paths:
-                best = min(paths, key=lambda n: _haversine_m(tlon, tlat, net.coords[n][0], net.coords[n][1]))
-                path, dist_km, reached = paths[best], lengths[best] / 1000.0, False
-            else:  # pragma: no cover - isolated source
-                continue
-            coords = _stitch_route(net, path)
-            if len(coords) < 2:
-                continue
-            features.append({
-                "type": "Feature",
-                "properties": {"from": sname, "to": tname,
-                               "distance_km": round(dist_km, 3), "reached_b": reached},
-                "geometry": {"type": "LineString", "coordinates": coords},
-            })
-
     if output_path is None:
         output_path = derive_output_path(
             "osm-network", "routes", str(len(pts)), ext="geojson", run_id=run_id or None,
         )
     output_path = str(output_path)
     ensure_dir(output_path)
-    with open_output(output_path) as f:
-        f.write(json.dumps({"type": "FeatureCollection", "features": features}))
+
+    # Stream route features to a local temp (then finalize onto the backend), and
+    # use a predecessor map per source instead of the full paths dict. So we never
+    # hold all route polylines, the entire output GeoJSON, or every-node paths in
+    # memory at once — what makes a continental motorway+trunk network (millions of
+    # edges) routable without exhausting RAM.
+    import tempfile
+
+    from facetwork.config import get_temp_dir
+
+    fd, tmp = tempfile.mkstemp(suffix=".geojson", dir=get_temp_dir())
+    os.close(fd)
+    route_count = 0
+    reachable = 0
+    try:
+        with GeoJSONStreamWriter(tmp) as writer:
+            for i, (snode, _slon, _slat, sname) in enumerate(snapped):
+                pred, lengths = nx.dijkstra_predecessor_and_distance(net.g, snode, weight="length_m")
+                if heartbeat:
+                    heartbeat()
+                for j in range(i + 1, len(snapped)):
+                    tnode, tlon, tlat, tname = snapped[j]
+                    if tnode in lengths:
+                        target, dist_km, reached = tnode, lengths[tnode] / 1000.0, True
+                    elif lengths:
+                        target = min(lengths, key=lambda n: _haversine_m(tlon, tlat, net.coords[n][0], net.coords[n][1]))
+                        dist_km, reached = lengths[target] / 1000.0, False
+                    else:  # pragma: no cover - isolated source
+                        continue
+                    if reached:
+                        reachable += 1
+                    coords = _stitch_route(net, _reconstruct_path(pred, snode, target))
+                    if len(coords) < 2:
+                        continue
+                    writer.write_feature({
+                        "type": "Feature",
+                        "properties": {"from": sname, "to": tname,
+                                       "distance_km": round(dist_km, 3), "reached_b": reached},
+                        "geometry": {"type": "LineString", "coordinates": coords},
+                    })
+                    route_count += 1
+                del pred, lengths  # free the per-source maps before the next source
+        finalize_output_file(tmp, output_path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
 
     return RouteLayerResult(
         output_path=output_path,
-        route_count=len(features),
+        route_count=route_count,
         reachable_count=reachable,
         point_count=len(pts),
         extraction_date=_now(),

@@ -159,6 +159,33 @@ def classify_road(tags: dict[str, str]) -> str:
     return "other"
 
 
+# Composite road classes: a single ``road_class`` token that keeps SEVERAL
+# underlying classes. ``"major"``/``"freeway"`` keep motorway+trunk (+links) —
+# the limited-access "through-road" network. This is what connects cities that
+# motorways alone can't: a continuous freeway corridor often drops to trunk at
+# borders / urban bypasses (e.g. the D-100/E80 across the Turkey↔Bulgaria
+# Kapıkule border), so a motorway-only graph breaks there but motorway+trunk
+# bridges it. (links classify to their parent: motorway_link -> "motorway".)
+_COMPOSITE_ROAD_CLASSES: dict[str, set[str]] = {
+    "major": {"motorway", "trunk"},
+    "freeway": {"motorway", "trunk"},
+}
+
+
+def road_class_matches(requested: str, rc: str) -> bool:
+    """Whether a feature's class ``rc`` satisfies the requested ``road_class``.
+
+    ``"all"`` keeps everything; a composite token (``"major"``/``"freeway"``)
+    keeps any of its member classes; otherwise it's an exact match.
+    """
+    if requested == "all":
+        return True
+    members = _COMPOSITE_ROAD_CLASSES.get(requested)
+    if members is not None:
+        return rc in members
+    return rc == requested
+
+
 def parse_speed_limit(value: str | None) -> int | None:
     """Parse speed limit from OSM maxspeed tag."""
     if not value:
@@ -279,7 +306,7 @@ def extract_roads(
                 return
             self.original += 1
             rc = classify_road(tags)
-            if road_class != "all" and rc != road_class:
+            if not road_class_matches(road_class, rc):
                 return
             try:
                 geom = shapely_mapping(
