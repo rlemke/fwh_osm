@@ -39,7 +39,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ..shared._output import derive_output_path, ensure_dir
+from ..shared._output import derive_output_path, ensure_dir, open_output
 from ..shared.geojson_writer import iter_geojson_features
 
 log = logging.getLogger(__name__)
@@ -366,6 +366,113 @@ def node_linestrings(features, snap_tolerance_m: float = 25.0, ref_filter: str =
     )
 
 
+def node_id_graph(features, ref_filter: str = "") -> NodedGraph:
+    """Build a routable graph on SHARED OSM NODE IDs — exact topology, no tolerance.
+
+    The fidelity-preserving counterpart to :func:`node_linestrings`. That function
+    *reconstructs* connectivity by snapping GeoJSON coordinates within a tolerance,
+    which is lossy at interchanges and across per-region extract seams (it both
+    misses real connections and falsely joins grade-separated crossings). This one
+    uses the OSM node-id sequence carried on each feature
+    (``properties["node_ids"]``, aligned 1:1 with the LineString coordinates): two
+    ways that reference the *same* OSM node id are connected, and only then —
+    exactly how OSRM/pgRouting/Valhalla build their graphs. Because OSM node ids
+    are global, separate per-region PBF extracts auto-stitch at shared border
+    nodes with zero tolerance.
+
+    Degree-2 interior nodes are contracted away so each edge spans junction→
+    junction (a node referenced by >=2 ways, or a way endpoint), matching the
+    ``edge=polyline`` artifact contract of :func:`node_linestrings`; the graph
+    node ids ARE the OSM node ids. ``ref_filter`` keeps only ways whose ``ref``
+    starts with the prefix.
+    """
+    _require_deps()
+
+    # Pass 1: collect kept ways (node_ids + coords + ref/name); tally how many
+    # ways reference each node (>=2 => an intersection vertex) and which nodes are
+    # way endpoints (always vertices).
+    ways: list[tuple[list[int], list, str, str]] = []
+    way_count: dict[int, int] = {}
+    endpoints: set[int] = set()
+    for feat in features:
+        geom = feat.get("geometry") or {}
+        if geom.get("type") != "LineString":
+            continue
+        coords = geom.get("coordinates") or []
+        props = feat.get("properties") or {}
+        node_ids = props.get("node_ids")
+        if not node_ids or len(node_ids) != len(coords) or len(node_ids) < 2:
+            continue
+        ref = _prop(props, "ref")
+        if ref_filter and not ref.startswith(ref_filter):
+            continue
+        nids = [int(n) for n in node_ids]
+        ways.append((nids, coords, ref, _prop(props, "name")))
+        for nid in set(nids):
+            way_count[nid] = way_count.get(nid, 0) + 1
+        endpoints.add(nids[0])
+        endpoints.add(nids[-1])
+
+    if not ways:
+        return NodedGraph()
+
+    def _is_vertex(nid: int) -> bool:
+        return way_count.get(nid, 0) >= 2 or nid in endpoints
+
+    # Pass 2: walk each way, emitting one edge per junction->junction span with
+    # the full polyline between them (parallel spans collapse to the shortest).
+    g = nx.Graph()
+    vcoord: dict[int, tuple[float, float]] = {}
+    for nids, coords, ref, name in ways:
+        vcoord[nids[0]] = (float(coords[0][0]), float(coords[0][1]))
+        last_v = nids[0]
+        seg = [[float(coords[0][0]), float(coords[0][1])]]
+        for i in range(1, len(nids)):
+            cx, cy = float(coords[i][0]), float(coords[i][1])
+            seg.append([cx, cy])
+            nid = nids[i]
+            if not _is_vertex(nid):
+                continue
+            if nid != last_v and len(seg) >= 2:
+                length_m = _line_length_m(seg)
+                if length_m > 0:
+                    if g.has_edge(last_v, nid):
+                        if length_m < g[last_v][nid]["length_m"]:
+                            g[last_v][nid].update(length_m=length_m, coords=seg, ref=ref, name=name)
+                    else:
+                        g.add_edge(last_v, nid, length_m=length_m, coords=seg, ref=ref, name=name)
+            vcoord[nid] = (cx, cy)   # every vertex's coordinate, edge emitted or not
+            last_v = nid
+            seg = [[cx, cy]]
+
+    edges: list[dict] = []
+    for edge_idx, (u, v, data) in enumerate(g.edges(data=True)):
+        data["edge_idx"] = edge_idx
+        edges.append({
+            "u": u, "v": v, "length_m": data["length_m"],
+            "ref": data["ref"], "name": data["name"],
+            "edge_idx": edge_idx, "coords": data["coords"],
+        })
+
+    adjacency: dict[int, list] = {}
+    for u, v, data in g.edges(data=True):
+        adjacency.setdefault(u, []).append([v, data["length_m"], data["edge_idx"]])
+        adjacency.setdefault(v, []).append([u, data["length_m"], data["edge_idx"]])
+
+    nodes = {nid: vcoord[nid] for nid in adjacency if nid in vcoord}
+    comps = list(nx.connected_components(g))
+    largest = max((len(c) for c in comps), default=0)
+    frac = largest / len(nodes) if nodes else 0.0
+
+    return NodedGraph(
+        nodes=nodes,
+        edges=edges,
+        adjacency=adjacency,
+        connected_components=len(comps),
+        largest_component_frac=frac,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Cache I/O helpers.
 # ---------------------------------------------------------------------------
@@ -375,14 +482,19 @@ def _slug(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "", value).lower()
 
 
-def _relative_path(edges_path: str, snap_tolerance_m: float, ref_filter: str) -> str:
-    """Cache relative_path: source stem + the build params that change the graph."""
+def _relative_path(edges_path: str, snap_tolerance_m: float, ref_filter: str,
+                   node_id: bool = False) -> str:
+    """Cache relative_path: source stem + the build params that change the graph.
+
+    Node-id topology is tolerance-free, so it gets its own ``@nodeid`` suffix —
+    a node-id build and a coordinate-snap build of the same source never collide.
+    """
     stem = Path(str(edges_path)).name
     for suffix in (".geojson.gz", ".geojson", ".json"):
         if stem.endswith(suffix):
             stem = stem[: -len(suffix)]
             break
-    rel = f"{stem}@tol{int(round(snap_tolerance_m))}"
+    rel = f"{stem}@nodeid" if node_id else f"{stem}@tol{int(round(snap_tolerance_m))}"
     if ref_filter:
         rel += f"-{_slug(ref_filter)}"
     return rel
@@ -470,7 +582,20 @@ def build_network(
         raise FileNotFoundError(f"BuildNetwork: edges_path not found: {edges_path}")
 
     input_sha = _sha256_file(local_in)
-    rel = _relative_path(edges_path, snap_tolerance_m, ref_filter)
+
+    # Peek the first feature: if the extractor preserved OSM node-id sequences
+    # (properties.node_ids), build the graph on SHARED node ids (exact topology,
+    # tolerance-free); otherwise fall back to coordinate-snap noding. The two
+    # modes live in separate cache entries (@nodeid vs @tol<N>).
+    import itertools
+
+    feats = iter_geojson_features(local_in, heartbeat)
+    first = next(feats, None)
+    use_node_ids = bool(first and (first.get("properties") or {}).get("node_ids"))
+    if first is not None:
+        feats = itertools.chain([first], feats)
+
+    rel = _relative_path(edges_path, snap_tolerance_m, ref_filter, node_id=use_node_ids)
     s = storage.get_storage()
     cache_dir = sidecar.cache_path(NAMESPACE_CACHE, CACHE_TYPE, rel, s)
 
@@ -491,10 +616,10 @@ def build_network(
             extraction_date=existing.get("generated_at", ""),
         )
 
-    graph = node_linestrings(
-        iter_geojson_features(local_in, heartbeat),
-        snap_tolerance_m=snap_tolerance_m, ref_filter=ref_filter,
-    )
+    if use_node_ids:
+        graph = node_id_graph(feats, ref_filter=ref_filter)
+    else:
+        graph = node_linestrings(feats, snap_tolerance_m=snap_tolerance_m, ref_filter=ref_filter)
 
     staging = _staging_dir()
     try:
@@ -523,7 +648,8 @@ def build_network(
                     "edge_count": graph.edge_count,
                     "connected_components": graph.connected_components,
                     "largest_component_frac": round(graph.largest_component_frac, 6),
-                    "snap_tolerance_m": snap_tolerance_m,
+                    "topology": "node_id" if use_node_ids else "coord_snap",
+                    "snap_tolerance_m": 0.0 if use_node_ids else snap_tolerance_m,
                     "ref_filter": ref_filter,
                 },
                 storage=s,
@@ -531,8 +657,9 @@ def build_network(
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
-    log.info("BuildNetwork: %s -> %d nodes / %d edges (%d components) at %s",
-             rel, graph.node_count, graph.edge_count, graph.connected_components, cache_dir)
+    log.info("BuildNetwork[%s]: %s -> %d nodes / %d edges (%d components) at %s",
+             "node_id" if use_node_ids else "coord_snap", rel, graph.node_count,
+             graph.edge_count, graph.connected_components, cache_dir)
     return NetworkResult(
         network_path=cache_dir,
         node_count=graph.node_count,
@@ -647,7 +774,8 @@ def _write_route_geojson(path: str, coords: list, props: dict) -> None:
         geom = {"type": "LineString", "coordinates": []}
     fc = {"type": "FeatureCollection",
           "features": [{"type": "Feature", "properties": props, "geometry": geom}]}
-    Path(path).write_text(json.dumps(fc))
+    with open_output(path) as f:
+        f.write(json.dumps(fc))
 
 
 def approx_route(
@@ -762,7 +890,7 @@ def _parse_points(points) -> list[tuple[float, float, str]]:
     if not isinstance(points, str):
         return _points_from_obj(points)
     text = points
-    if os.path.exists(points):
+    if points.startswith(("s3://", "hdfs://")) or os.path.exists(points):
         from facetwork.runtime.storage import localize
         with open(localize(points)) as f:
             text = f.read()
@@ -842,14 +970,15 @@ def route_matrix(
         )
     output_path = str(output_path)
     ensure_dir(output_path)
-    Path(output_path).write_text(json.dumps({
-        "operation": "route_matrix",
-        "point_count": len(pts),
-        "pair_count": len(pairs),
-        "reachable_count": reachable,
-        "pairs": pairs,
-        "extraction_date": _now(),
-    }, indent=2))
+    with open_output(output_path) as f:
+        f.write(json.dumps({
+            "operation": "route_matrix",
+            "point_count": len(pts),
+            "pair_count": len(pairs),
+            "reachable_count": reachable,
+            "pairs": pairs,
+            "extraction_date": _now(),
+        }, indent=2))
 
     return RouteMatrixResult(
         result_path=output_path,
@@ -941,7 +1070,8 @@ def route_layer(
         )
     output_path = str(output_path)
     ensure_dir(output_path)
-    Path(output_path).write_text(json.dumps({"type": "FeatureCollection", "features": features}))
+    with open_output(output_path) as f:
+        f.write(json.dumps({"type": "FeatureCollection", "features": features}))
 
     return RouteLayerResult(
         output_path=output_path,

@@ -192,7 +192,11 @@ def _extract_roads(payload: dict) -> dict:
     step_log = payload.get("_step_log")
 
     qualified = f"{NAMESPACE}.ExtractRoads"
-    dyn = {"road_class": road_class}
+    # Per-handler cache-version bump: extract_roads now emits ``node_ids`` on each
+    # feature (for osm.Network's shared-node-id graph), which changes the output
+    # schema. Bumping this key re-extracts roads with node_ids on the next run
+    # while leaving every other handler's cached outputs untouched.
+    dyn = {"road_class": road_class, "schema": "node_ids_v2"}
     hit = cached_result(qualified, cache, dyn, step_log)
     if hit is not None:
         return hit

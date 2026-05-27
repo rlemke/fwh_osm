@@ -8,6 +8,7 @@ extractors write output there. Otherwise they derive from AFL_OUTPUT_BASE/osm.
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import IO
 
@@ -15,6 +16,7 @@ from facetwork.config import get_output_base
 from facetwork.runtime.storage import get_storage_backend
 
 _OUTPUT_BASE = os.environ.get("AFL_OSM_OUTPUT_BASE", "")
+_REMOTE_SCHEMES = ("hdfs://", "s3://")
 
 
 def resolve_output_dir(category: str, default_local: str = "") -> str:
@@ -133,14 +135,37 @@ def uri_stem(path: str) -> str:
 
 
 def ensure_dir(path: str) -> None:
-    """Create parent directory for output paths.
+    """Create the parent directory for an output path (storage-aware).
 
-    For local paths, creates parent directories via Path.mkdir().
-    For HDFS paths, calls makedirs() on the HDFS backend.
+    Local paths → ``Path.mkdir``. Remote paths (``hdfs://``, ``s3://``) → the
+    backend's ``makedirs`` (a no-op for object stores, which have no dirs).
     """
-    if path.startswith("hdfs://"):
-        parent = path.rsplit("/", 1)[0]
+    if path.startswith(_REMOTE_SCHEMES):
         backend = get_storage_backend(path)
-        backend.makedirs(parent)
+        backend.makedirs(path.rsplit("/", 1)[0])
     else:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
+
+
+def finalize_output_file(local_tmp: str, dst: str) -> None:
+    """Publish a locally-written temp file to its final ``dst`` (storage-aware).
+
+    Local ``dst`` → atomic ``shutil.move``. Remote ``dst`` (``hdfs://``,
+    ``s3://``) → stream the bytes through the storage backend, then remove the
+    local temp. This is the *output* counterpart to the cache's
+    stage-locally-then-finalize pattern, so handlers can write to a remote
+    shared store transparently.
+    """
+    if not dst.startswith(_REMOTE_SCHEMES):
+        ensure_dir(dst)
+        shutil.move(local_tmp, dst)
+        return
+    backend = get_storage_backend(dst)
+    backend.makedirs(dst.rsplit("/", 1)[0])
+    with open(local_tmp, "rb") as src, backend.open(dst, "wb") as out:
+        while True:
+            chunk = src.read(1024 * 1024)
+            if not chunk:
+                break
+            out.write(chunk)
+    os.remove(local_tmp)

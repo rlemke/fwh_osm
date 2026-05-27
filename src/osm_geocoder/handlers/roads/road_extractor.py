@@ -16,7 +16,13 @@ from pathlib import Path
 
 from facetwork.runtime.storage import get_storage_backend
 
-from ..shared._output import ensure_dir, open_output, resolve_output_dir, uri_stem
+from ..shared._output import (
+    ensure_dir,
+    finalize_output_file,
+    open_output,
+    resolve_output_dir,
+    uri_stem,
+)
 
 _storage = get_storage_backend()
 
@@ -237,7 +243,6 @@ def extract_roads(
     ``road_class``. Streams to a temp file then moves into place (multi-GB safe).
     """
     import os
-    import shutil
     import tempfile
 
     import osmium
@@ -285,6 +290,13 @@ def extract_roads(
             props = dict(tags)
             props["osm_id"] = w.id
             props["road_class"] = rc
+            # Preserve the OSM node-id sequence (aligned 1:1 with the geometry
+            # coordinates — the WKB linestring is built from these same nodes).
+            # osm.Network.BuildNetwork uses it to build a graph on SHARED node ids
+            # (exact topology, no coordinate-snapping): ways referencing the same
+            # node id connect, including across per-region extract seams, since
+            # OSM node ids are global. See node_id_graph() in network_ops.py.
+            props["node_ids"] = [n.ref for n in w.nodes]
             self.writer.write_feature(
                 {"type": "Feature", "properties": props, "geometry": geom}
             )
@@ -301,8 +313,7 @@ def extract_roads(
         with GeoJSONStreamWriter(tmp_path) as writer:
             handler = _RoadHandler(writer)
             handler.apply_file(local_pbf, locations=True, idx="flex_mem")
-        ensure_dir(output_path_str)
-        shutil.move(tmp_path, output_path_str)
+        finalize_output_file(tmp_path, output_path_str)
     except Exception:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)

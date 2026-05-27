@@ -56,6 +56,12 @@ from typing import IO, Iterator
 
 LOCAL_DEFAULT_ROOT = "/Volumes/afl_data"
 HDFS_DEFAULT_ROOT = "/user/afl"
+S3_DEFAULT_ROOT = "s3://afl-cache"
+
+
+def _is_remote_root(root: str) -> bool:
+    """True for object-store / distributed roots that can't host local scratch."""
+    return root.startswith(("s3://", "hdfs://"))
 
 
 class Storage(abc.ABC):
@@ -380,6 +386,95 @@ class HdfsStorage(Storage):
         os.unlink(local_path)
 
 
+class S3Storage(Storage):
+    """S3-compatible object store (AWS S3 or MinIO), delegating to the
+    facetwork ``S3StorageBackend``. Endpoint/credentials come from the
+    environment (see that class). No advisory locking (single-writer cache
+    semantics, like HDFS); directory finalization uploads each staged file.
+    """
+
+    name = "s3"
+
+    def __init__(self) -> None:
+        try:
+            from facetwork.runtime.storage import S3StorageBackend
+        except ImportError as exc:
+            raise RuntimeError(
+                "S3 backend unavailable: could not import "
+                "facetwork.runtime.storage (requires the Facetwork runtime "
+                f"package). Underlying error: {exc}"
+            ) from exc
+        self._backend = S3StorageBackend()
+
+    @property
+    def supports_locking(self) -> bool:
+        return False
+
+    def exists(self, path: str) -> bool:
+        return self._backend.exists(path)
+
+    def size(self, path: str) -> int:
+        return self._backend.getsize(path)
+
+    def mkdir_p(self, path: str) -> None:
+        return None  # object stores have no directories
+
+    def unlink(self, path: str) -> None:
+        try:
+            self._backend.remove(path)
+        except Exception:
+            if not self._backend.isfile(path):
+                return
+            raise
+
+    def rename(self, src: str, dst: str) -> None:
+        """S3 has no rename — server-side copy then delete."""
+        sb, sk = self._backend._split(src)
+        db, dk = self._backend._split(dst)
+        self._backend._client.copy_object(
+            Bucket=db, Key=dk, CopySource={"Bucket": sb, "Key": sk}
+        )
+        self._backend._client.delete_object(Bucket=sb, Key=sk)
+
+    def read_text(self, path: str) -> str:
+        with self._backend.open(path, "r") as f:
+            return f.read()
+
+    def write_text_atomic(self, path: str, text: str) -> None:
+        # A single PUT is atomic per-object on S3.
+        with self._backend.open(path, "w") as f:
+            f.write(text)
+
+    def open_write_binary(self, path: str) -> IO[bytes]:
+        return self._backend.open(path, "wb")
+
+    @contextmanager
+    def lock(self, path: str, *, exclusive: bool) -> Iterator[None]:
+        yield
+
+    def _upload_file(self, local_path: str, dst_path: str) -> None:
+        with open(local_path, "rb") as src, self._backend.open(dst_path, "wb") as dst:
+            while True:
+                chunk = src.read(1024 * 1024)
+                if not chunk:
+                    break
+                dst.write(chunk)
+
+    def finalize_from_local(self, local_path: str, dst_path: str) -> None:
+        self._upload_file(local_path, dst_path)
+        os.unlink(local_path)
+
+    def finalize_dir_from_local(self, local_dir: str, dst_dir: str) -> None:
+        if self._backend.isdir(dst_dir):
+            self._backend.rmtree(dst_dir)
+        for root, _dirs, files in os.walk(local_dir):
+            for fn in files:
+                lp = os.path.join(root, fn)
+                rel = os.path.relpath(lp, local_dir).replace(os.sep, "/")
+                self._upload_file(lp, self.join(dst_dir, rel))
+        shutil.rmtree(local_dir, ignore_errors=True)
+
+
 # ---------------------------------------------------------------------------
 # Backend selection.
 # ---------------------------------------------------------------------------
@@ -394,8 +489,10 @@ def get_storage(backend: str | None = None) -> Storage:
         return LocalStorage()
     if name == "hdfs":
         return HdfsStorage()
+    if name == "s3":
+        return S3Storage()
     raise ValueError(
-        f"Unknown storage backend: {name!r} (expected 'local' or 'hdfs')"
+        f"Unknown storage backend: {name!r} (expected 'local', 'hdfs', or 's3')"
     )
 
 
@@ -413,7 +510,11 @@ def data_root(backend: str | None = None) -> str:
     if env:
         return env
     name = (backend or default_backend()).lower()
-    return HDFS_DEFAULT_ROOT if name == "hdfs" else LOCAL_DEFAULT_ROOT
+    if name == "hdfs":
+        return HDFS_DEFAULT_ROOT
+    if name == "s3":
+        return S3_DEFAULT_ROOT
+    return LOCAL_DEFAULT_ROOT
 
 
 def _derived_root(env_var: str, subdir: str, backend: str | None = None) -> str:
@@ -424,19 +525,37 @@ def _derived_root(env_var: str, subdir: str, backend: str | None = None) -> str:
     return Storage.join(data_root(backend), subdir)
 
 
+def _scratch_derived_root(env_var: str, subdir: str, backend: str | None = None) -> str:
+    """Like :func:`_derived_root`, but for scratch subtrees (staging/tmp/locks)
+    that MUST live on the local filesystem — you stage locally and finalize onto
+    the durable backend. When the data root is remote (s3://, hdfs://) and no
+    explicit override is set, fall back to a local scratch base
+    (``AFL_LOCAL_SCRATCH`` or the system temp dir)."""
+    override = os.environ.get(env_var)
+    if override:
+        return override
+    root = data_root(backend)
+    if _is_remote_root(root):
+        base = os.environ.get("AFL_LOCAL_SCRATCH") or os.path.join(tempfile.gettempdir(), "afl")
+        return Storage.join(base, subdir)
+    return Storage.join(root, subdir)
+
+
 def cache_root(backend: str | None = None) -> str:
     """Durable cached artifacts live here."""
     return _derived_root("AFL_CACHE_ROOT", "cache", backend)
 
 
 def staging_root(backend: str | None = None) -> str:
-    """In-flight downloads and builds live here until atomically renamed."""
-    return _derived_root("AFL_STAGING_ROOT", "staging", backend)
+    """In-flight downloads and builds live here until atomically renamed.
+
+    Local even when the durable root is remote (stage-locally-then-finalize)."""
+    return _scratch_derived_root("AFL_STAGING_ROOT", "staging", backend)
 
 
 def tmp_root(backend: str | None = None) -> str:
-    """Scratch working area. Safe to wipe at any time."""
-    return _derived_root("AFL_TMP_ROOT", "tmp", backend)
+    """Scratch working area. Safe to wipe at any time. Always local."""
+    return _scratch_derived_root("AFL_TMP_ROOT", "tmp", backend)
 
 
 def indexes_root(backend: str | None = None) -> str:
@@ -445,8 +564,8 @@ def indexes_root(backend: str | None = None) -> str:
 
 
 def locks_root(backend: str | None = None) -> str:
-    """Per-entry fcntl lock targets for overwrite contention."""
-    return _derived_root("AFL_LOCKS_ROOT", "locks", backend)
+    """Per-entry fcntl lock targets for overwrite contention. Always local."""
+    return _scratch_derived_root("AFL_LOCKS_ROOT", "locks", backend)
 
 
 # ---------------------------------------------------------------------------
