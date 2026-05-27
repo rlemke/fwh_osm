@@ -29,7 +29,16 @@ roots:
     defaults:
       local: "/Volumes/afl_data"
       hdfs: "/user/afl"
-    description: "The single filesystem root. All derived roots below are computed from it."
+      s3: "s3://afl-cache"
+    description: >
+      The single filesystem root. All derived roots below are computed from it.
+      Backend selected by AFL_STORAGE (local | hdfs | s3). For s3 (AWS S3 or
+      MinIO), the durable roots (cache, _indexes) live on the object store while
+      the scratch roots (staging, tmp, locks) fall back to a LOCAL base
+      (AFL_LOCAL_SCRATCH or the system temp dir) since you stage locally then
+      finalize onto the backend. S3 config: AFL_S3_ENDPOINT (omit for AWS),
+      AFL_S3_ACCESS_KEY/SECRET (or the standard AWS chain), AFL_S3_REGION;
+      requires the `s3` pip extra (boto3). See docs/operations/deployment.md.
 
   derived:
     cache_root:
@@ -209,6 +218,7 @@ locks:
   backend:
     local: "fcntl.flock LOCK_EX."
     hdfs: "no-op. HDFS assumes single-writer for overwrites in v1."
+    s3: "no-op. S3/MinIO assumes single-writer for overwrites (like hdfs); each object PUT is atomic."
   lifetime: "Acquired for the duration of the rename plus sidecar write. Not for the download itself (downloads happen into staging with no lock)."
   cleanup: "Lock files are never deleted. A stale lock file with no active holder is a no-op for new writers."
 
