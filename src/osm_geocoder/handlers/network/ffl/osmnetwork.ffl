@@ -81,5 +81,5 @@ namespace osm.Network {
     /** All-pairs route GEOMETRIES as one drawable GeoJSON layer (one LineString
         per pair) — the map companion to RouteMatrix. Feed it the cities layer and
         render the result with `osm.viz.RenderLayers`. */
-    event facet RouteLayer(network_path: String, points: String) => (result: RouteLayerResult) with Effect(kind = "pure") with Cost(tier = "cheap")
+    event facet RouteLayer(network_path: String, points: String, simplify_tolerance_m: Double = 0.0) => (result: RouteLayerResult) with Effect(kind = "pure") with Cost(tier = "cheap")
 }

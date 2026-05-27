@@ -784,6 +784,22 @@ def _reconstruct_path(pred: dict, source: int, target: int) -> list[int]:
     return path
 
 
+def _simplify_coords(coords: list, tol_m: float) -> list:
+    """Douglas–Peucker simplify a lon/lat polyline by ~``tol_m`` metres.
+
+    Continental route geometries carry every trunk vertex, which makes the
+    rendered HTML enormous (a 1.6 GB Africa map). Simplifying to a tolerance
+    (e.g. ~500 m for a continent-scale view) cuts the vertex count 10–100× while
+    the line stays visually identical at that zoom. ``tol_m <= 0`` is a no-op."""
+    if tol_m <= 0 or len(coords) < 3:
+        return coords
+    from shapely.geometry import LineString
+
+    simp = LineString(coords).simplify(tol_m / 111_320.0, preserve_topology=False)
+    out = [list(c) for c in simp.coords]
+    return out if len(out) >= 2 else coords
+
+
 def _write_route_geojson(path: str, coords: list, props: dict) -> None:
     if len(coords) >= 2:
         geom = {"type": "LineString", "coordinates": coords}
@@ -1033,6 +1049,7 @@ def route_layer(
     network_path: str,
     points: str,
     output_path: str | None = None,
+    simplify_tolerance_m: float = 0.0,
     heartbeat=None,
     run_id: str = "",
 ) -> RouteLayerResult:
@@ -1097,6 +1114,8 @@ def route_layer(
                     if reached:
                         reachable += 1
                     coords = _stitch_route(net, _reconstruct_path(pred, snode, target))
+                    if simplify_tolerance_m > 0:
+                        coords = _simplify_coords(coords, simplify_tolerance_m)
                     if len(coords) < 2:
                         continue
                     writer.write_feature({

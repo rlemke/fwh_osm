@@ -136,6 +136,7 @@ namespace osm.Network.workflows {
         ("" = every motorway/freeway, e.g. for Europe; "I " = US interstates only). */
     workflow RenderCityRoutesMap(road_layers: [String], city_layers: [String],
         snap_tolerance_m: Double = 25.0, ref_filter: String = "",
+        simplify_tolerance_m: Double = 0.0,
         title: String = "Freeway routes between large cities") => (map_path: String, route_count: Long, city_count: Long, network_edges: Long) andThen {
             all_roads = osm.Transform.MergeLayers(inputs = $.road_layers)
             net = osm.Network.BuildNetwork(
@@ -143,9 +144,12 @@ namespace osm.Network.workflows {
                 snap_tolerance_m = $.snap_tolerance_m, ref_filter = $.ref_filter
             )
             all_cities = osm.Transform.MergeLayers(inputs = $.city_layers)
+            // simplify_tolerance_m thins route geometry (~metres) so a continental
+            // map stays a sane size; 0 = full detail. ~500m suits a continent view.
             routes = osm.Network.RouteLayer(
                 network_path = net.result.network_path,
-                points = all_cities.result.output_path
+                points = all_cities.result.output_path,
+                simplify_tolerance_m = $.simplify_tolerance_m
             )
             map = osm.viz.RenderLayers(
                 layers = [routes.result.output_path, all_cities.result.output_path],

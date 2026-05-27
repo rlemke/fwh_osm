@@ -190,10 +190,11 @@ def _make_routelayer_handler(facet_name: str):
     def handler(payload: dict) -> dict:
         network_path = payload.get("network_path", "")
         points = payload.get("points", "") or ""
+        simplify = float(payload.get("simplify_tolerance_m", 0.0) or 0.0)
         step_log = payload.get("_step_log")
 
         input_cache = {"path": network_path, "size": _file_size(network_path)}
-        cp = {"points": points}
+        cp = {"points": points, "simplify_m": simplify}
         hit = cached_result(qualified, input_cache, cp, step_log)
         if hit is not None:
             return hit
@@ -204,7 +205,7 @@ def _make_routelayer_handler(facet_name: str):
             step_log(f"{facet_name}: drawing all-pairs routes over {network_path}")
 
         result = route_layer(
-            network_path, points,
+            network_path, points, simplify_tolerance_m=simplify,
             heartbeat=payload.get("_task_heartbeat"), run_id=payload.get("_workflow_id", ""),
         )
         if step_log:
