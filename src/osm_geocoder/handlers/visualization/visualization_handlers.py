@@ -234,6 +234,65 @@ def _make_render_layers_handler(facet_name: str):
     return handler
 
 
+def _make_render_tiled_map_handler(facet_name: str):
+    """Create handler for RenderTiledMap event facet (MapLibre + PMTiles)."""
+    qualified = f"{NAMESPACE}.{facet_name}"
+
+    def handler(payload: dict) -> dict:
+        tiles = payload.get("tiles", [])
+        layer_names = payload.get("layer_names", []) or []
+        colors = payload.get("colors", []) or []
+        title = payload.get("title", "Tiled map")
+        center_lon = float(payload.get("center_lon", 0.0) or 0.0)
+        center_lat = float(payload.get("center_lat", 20.0) or 20.0)
+        zoom = float(payload.get("zoom", 2.0) or 2.0)
+        step_log = payload.get("_step_log")
+
+        if isinstance(tiles, str):
+            tiles = [t.strip() for t in tiles.split(",") if t.strip()]
+        if isinstance(layer_names, str):
+            layer_names = [t.strip() for t in layer_names.split(",") if t.strip()]
+        if isinstance(colors, str):
+            colors = [c.strip() for c in colors.split(",") if c.strip()]
+
+        cache = _cache_dict_from_paths(tiles)
+        cache_params = {
+            "layer_names": layer_names, "colors": colors, "title": title,
+            "center_lon": center_lon, "center_lat": center_lat, "zoom": zoom,
+        }
+        hit = cached_result(qualified, cache, cache_params, step_log)
+        if hit is not None:
+            return hit
+
+        if not tiles:
+            return {"result": _empty_result(title, "html-tiled")}
+        if step_log:
+            step_log(f"{facet_name}: rendering MapLibre viewer over {len(tiles)} PMTiles")
+
+        from .map_renderer import render_tiled_map
+
+        try:
+            result = render_tiled_map(
+                tiles,
+                layer_names=layer_names if layer_names else None,
+                colors=colors if colors else None,
+                title=title, center_lon=center_lon, center_lat=center_lat, zoom=zoom,
+            )
+            rv = {"result": _result_to_dict(result)}
+            save_result_meta(qualified, cache, cache_params, rv)
+            if step_log:
+                step_log(f"{facet_name}: viewer at {result.output_path} (serve the dir over HTTP "
+                         "so the browser can Range-fetch PMTiles)", level="success")
+            return rv
+        except Exception as exc:
+            log.error("Failed to render tiled map: %s", exc)
+            if step_log:
+                step_log(f"{facet_name}: FAILED to render tiled map: {exc}", level="error")
+            raise
+
+    return handler
+
+
 def _make_render_styled_map_handler(facet_name: str):
     """Create handler for RenderStyledMap event facet."""
     qualified = f"{NAMESPACE}.{facet_name}"
@@ -370,6 +429,7 @@ VISUALIZATION_FACETS = [
     ("RenderMap", _make_render_map_handler),
     ("RenderMapAt", _make_render_map_at_handler),
     ("RenderLayers", _make_render_layers_handler),
+    ("RenderTiledMap", _make_render_tiled_map_handler),
     ("RenderStyledMap", _make_render_styled_map_handler),
     ("PreviewMap", _make_preview_map_handler),
 ]

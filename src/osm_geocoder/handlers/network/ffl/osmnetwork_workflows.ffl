@@ -163,4 +163,50 @@ namespace osm.Network.workflows {
                 network_edges = net.result.edge_count
             )
         }
+
+    /** Fan-in: same as RenderCityRoutesMap, but the final map is a zoom-tiled
+        MapLibre+PMTiles viewer (via osm.Tiles.BuildVectorTiles + osm.viz.RenderTiledMap)
+        instead of a folium single-HTML page. tippecanoe handles per-zoom
+        geometry simplification, so leave RouteLayer's `simplify_tolerance_m=0`
+        (the default) and let the tiler manage detail. The output dir must be
+        served over HTTP — e.g. `python -m http.server` in the map directory —
+        so the browser can Range-fetch the PMTiles archives. */
+    workflow RenderCityRoutesTiledMap(road_layers: [String], city_layers: [String],
+        snap_tolerance_m: Double = 25.0, ref_filter: String = "",
+        routes_max_zoom: Long = 10, cities_max_zoom: Long = 14,
+        center_lon: Double = 0.0, center_lat: Double = 20.0, view_zoom: Double = 2.0,
+        title: String = "Tiled freeway routes between large cities") => (map_path: String, route_count: Long, city_count: Long, network_edges: Long) andThen {
+            all_roads = osm.Transform.MergeLayers(inputs = $.road_layers)
+            net = osm.Network.BuildNetwork(
+                edges_path = all_roads.result.output_path,
+                snap_tolerance_m = $.snap_tolerance_m, ref_filter = $.ref_filter
+            )
+            all_cities = osm.Transform.MergeLayers(inputs = $.city_layers)
+            // RouteLayer at full detail — tippecanoe handles per-zoom simplification.
+            routes = osm.Network.RouteLayer(
+                network_path = net.result.network_path,
+                points = all_cities.result.output_path
+            )
+            routes_tiles = osm.Tiles.BuildVectorTiles(
+                geojson_path = routes.result.output_path,
+                layer_name = "routes", min_zoom = 0, max_zoom = $.routes_max_zoom
+            )
+            cities_tiles = osm.Tiles.BuildVectorTiles(
+                geojson_path = all_cities.result.output_path,
+                layer_name = "cities", min_zoom = 0, max_zoom = $.cities_max_zoom
+            )
+            map = osm.viz.RenderTiledMap(
+                tiles = [routes_tiles.result.output_path, cities_tiles.result.output_path],
+                layer_names = ["routes", "cities"],
+                colors = ["#1f78b4", "#e31a1c"],
+                title = $.title,
+                center_lon = $.center_lon, center_lat = $.center_lat, zoom = $.view_zoom
+            )
+            yield RenderCityRoutesTiledMap(
+                map_path = map.result.output_path,
+                route_count = routes.result.route_count,
+                city_count = all_cities.result.feature_count,
+                network_edges = net.result.edge_count
+            )
+        }
 }

@@ -569,6 +569,157 @@ def render_layers(
     )
 
 
+_TILED_HTML_TEMPLATE = """<!DOCTYPE html>
+<html><head><meta charset='utf-8'><title>__TITLE__</title>
+<link href='https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css' rel='stylesheet'>
+<script src='https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js'></script>
+<script src='https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js'></script>
+<style>html,body{margin:0;height:100%} #map{position:absolute;inset:0}
+#title{position:absolute;top:10px;left:50px;z-index:1;background:#fff;padding:8px 12px;border-radius:6px;
+       box-shadow:0 2px 5px rgba(0,0,0,.3);font-family:Arial,sans-serif}
+#title h3{margin:0;font-size:16px} #title small{color:#666}</style>
+</head><body>
+<div id='title'><h3>__TITLE__</h3><small>vector tiles · zoom-tiled (only the current viewport is fetched) · <a href='https://protomaps.com/' target='_blank'>PMTiles</a> + <a href='https://maplibre.org/' target='_blank'>MapLibre</a></small></div>
+<div id='map'></div>
+<script>
+const p=new pmtiles.Protocol(); maplibregl.addProtocol('pmtiles', p.tile);
+const map=new maplibregl.Map({
+  container:'map',
+  style:{
+    version:8,
+    sources:Object.assign({
+      bg:{type:'raster',tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],tileSize:256,attribution:'© OpenStreetMap'}
+    }, __SOURCES__),
+    layers:[{id:'bg',type:'raster',source:'bg'}].concat(__LAYERS__)
+  },
+  center:[__CENTER_LON__,__CENTER_LAT__], zoom:__ZOOM__
+});
+map.addControl(new maplibregl.NavigationControl());
+map.addControl(new maplibregl.ScaleControl());
+</script>
+</body></html>
+"""
+
+
+def _infer_layer_kind(layer_name: str) -> str:
+    """Guess Mapbox-style 'type' for a vector-tile layer name."""
+    n = layer_name.lower()
+    if any(k in n for k in ("point", "node", "city", "cities", "place", "marker", "stop", "amenit")):
+        return "circle"
+    return "line"
+
+
+def _default_palette(i: int) -> str:
+    palette = ["#1f78b4", "#e31a1c", "#33a02c", "#ff7f00", "#6a3d9a", "#b15928"]
+    return palette[i % len(palette)]
+
+
+def render_tiled_map(
+    tile_paths: list[str | Path],
+    layer_names: list[str] | None = None,
+    colors: list[str] | None = None,
+    title: str = "Tiled map",
+    output_path: str | Path | None = None,
+    center_lon: float = 0.0,
+    center_lat: float = 20.0,
+    zoom: float = 2.0,
+) -> MapResult:
+    """Render a MapLibre + PMTiles viewer page for a set of vector-tile layers.
+
+    The companion to :func:`render_layers` (folium, single-HTML): produces a
+    zoom-tiled viewer where the browser fetches *only the tiles intersecting
+    the current viewport at the current zoom*, via HTTP Range requests against
+    the PMTiles archives. As you zoom in you get more detail (deeper tiles)
+    AND less data (smaller viewport = fewer tiles).
+
+    The output is a **directory**: an ``index.html`` plus a relative reference
+    (symlink, falling back to a copy) to each input PMTiles archive. **The
+    directory must be served over HTTP** (e.g. ``python -m http.server 8765``)
+    so the browser can issue Range requests against the PMTiles files —
+    ``file://`` is not reliable across browsers.
+
+    Args:
+        tile_paths: PMTiles archive paths (one per layer).
+        layer_names: layer name *inside* each PMTiles (the ``-l`` value
+            passed to tippecanoe in BuildVectorTiles). If empty/short, the
+            file stem is used as a fallback.
+        colors: per-layer color; defaults to a small palette.
+        title: page title.
+        center_lon, center_lat, zoom: initial view.
+    """
+    import shutil
+
+    tile_paths = [Path(p) for p in tile_paths]
+    if not tile_paths:
+        raise ValueError("render_tiled_map: no tile paths provided")
+    for p in tile_paths:
+        if not p.exists():
+            raise FileNotFoundError(f"PMTiles missing: {p}")
+
+    # Output dir: a per-render subfolder under the local maps dir, named for the
+    # first layer's stem (deterministic + human-readable).
+    if output_path is None:
+        base = resolve_local_output_dir("maps", "tiled")
+        out_dir = Path(base) / tile_paths[0].stem
+    else:
+        out_dir = Path(str(output_path))
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Place each PMTiles next to index.html (symlink, fall back to copy).
+    sources = []
+    for i, p in enumerate(tile_paths):
+        dst = out_dir / p.name
+        if dst.resolve() != p.resolve():
+            if dst.exists() or dst.is_symlink():
+                dst.unlink()
+            try:
+                dst.symlink_to(p.resolve())
+            except OSError:
+                shutil.copy2(p, dst)
+        layer_name = (layer_names[i] if layer_names and i < len(layer_names) and layer_names[i] else p.stem)
+        sources.append({
+            "id": f"layer{i}",
+            "file": p.name,
+            "layer": layer_name,
+            "color": (colors[i] if colors and i < len(colors) and colors[i] else _default_palette(i)),
+            "kind": _infer_layer_kind(layer_name),
+        })
+
+    sources_obj = ", ".join(
+        f"{s['id']}:{{type:'vector', url:'pmtiles://./{s['file']}'}}" for s in sources
+    )
+    def _layer_block(s: dict) -> str:
+        if s["kind"] == "circle":
+            return (f"{{id:'{s['id']}-dot',type:'circle',source:'{s['id']}','source-layer':'{s['layer']}',"
+                    f"paint:{{'circle-color':'{s['color']}','circle-radius':4,'circle-stroke-color':'#fff','circle-stroke-width':1}}}},"
+                    f"{{id:'{s['id']}-lbl',type:'symbol',source:'{s['id']}','source-layer':'{s['layer']}',minzoom:4,"
+                    f"layout:{{'text-field':['get','name'],'text-size':11,'text-offset':[0,1],'text-anchor':'top'}},"
+                    f"paint:{{'text-color':'#222','text-halo-color':'#fff','text-halo-width':1.2}}}}")
+        return (f"{{id:'{s['id']}',type:'line',source:'{s['id']}','source-layer':'{s['layer']}',"
+                f"paint:{{'line-color':'{s['color']}','line-width':1.2,'line-opacity':0.55}}}}")
+    layers_arr = "[" + ",".join(_layer_block(s) for s in sources) + "]"
+
+    html = (_TILED_HTML_TEMPLATE
+            .replace("__TITLE__", title)
+            .replace("__SOURCES__", "{" + sources_obj + "}")
+            .replace("__LAYERS__", layers_arr)
+            .replace("__CENTER_LON__", repr(float(center_lon)))
+            .replace("__CENTER_LAT__", repr(float(center_lat)))
+            .replace("__ZOOM__", repr(float(zoom))))
+
+    index = out_dir / "index.html"
+    index.write_text(html)
+
+    return MapResult(
+        output_path=str(index),
+        format="html-tiled",
+        feature_count=0,
+        bounds="",
+        title=title,
+        extraction_date=datetime.now(UTC).isoformat(),
+    )
+
+
 def preview_map(geojson_path: str | Path) -> MapResult:
     """Render a GeoJSON file and open it in the default browser.
 
