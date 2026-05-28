@@ -784,6 +784,39 @@ def _reconstruct_path(pred: dict, source: int, target: int) -> list[int]:
     return path
 
 
+class _NearestReachable:
+    """Spatial index for the closest-reachable-node fallback (unreachable pairs).
+
+    When a target city isn't reachable from a source, we route to the reachable
+    node *nearest the target*. A linear ``min`` over the source's reachable set is
+    O(reachable_nodes) **per unreachable pair** — crippling on a large, fragmented
+    continent (e.g. Asia: 2.4 M edges, 3,098 components, ~70 k unreachable pairs).
+
+    The reachable set from any node is its connected component (the graph is
+    undirected), so one STRtree per component serves every source in it, turning
+    the fallback into O(log n) per pair. Components and per-component trees are
+    built lazily on first use, so a fully-connected network pays nothing.
+    """
+
+    def __init__(self, net: _LoadedNetwork) -> None:
+        comps = list(nx.connected_components(net.g))
+        self._net = net
+        self._comp_of = {n: i for i, c in enumerate(comps) for n in c}
+        self._comp_nodes = [list(c) for c in comps]
+        self._trees: dict[int, tuple] = {}
+
+    def nearest(self, source_node: int, lon: float, lat: float) -> int:
+        cid = self._comp_of[source_node]
+        entry = self._trees.get(cid)
+        if entry is None:
+            ids = self._comp_nodes[cid]
+            tree = STRtree([Point(self._net.coords[n][0], self._net.coords[n][1]) for n in ids])
+            entry = (tree, ids)
+            self._trees[cid] = entry
+        tree, ids = entry
+        return ids[int(tree.nearest(Point(lon, lat)))]
+
+
 def _simplify_coords(coords: list, tol_m: float) -> list:
     """Douglas–Peucker simplify a lon/lat polyline by ~``tol_m`` metres.
 
@@ -975,6 +1008,7 @@ def route_matrix(
 
     pairs: list[dict] = []
     reachable = 0
+    nr = None  # lazy closest-reachable-node index, built on first unreachable pair
     for si, (snode, _slon, _slat, sname) in enumerate(snapped):
         # distances only — RouteMatrix never needs the (huge) paths dict.
         lengths = nx.single_source_dijkstra_path_length(net.g, snode, weight="length_m")
@@ -989,7 +1023,9 @@ def route_matrix(
                 reached = True
                 reachable += 1
             elif lengths:
-                best = min(lengths, key=lambda n: _haversine_m(tlon, tlat, net.coords[n][0], net.coords[n][1]))
+                if nr is None:
+                    nr = _NearestReachable(net)
+                best = nr.nearest(snode, tlon, tlat)
                 dist_km = lengths[best] / 1000.0
                 gap_km = _haversine_m(tlon, tlat, *net.coords[best]) / 1000.0
                 reached = False
@@ -1096,6 +1132,7 @@ def route_layer(
     os.close(fd)
     route_count = 0
     reachable = 0
+    nr = None  # lazy closest-reachable-node index, built on first unreachable pair
     try:
         with GeoJSONStreamWriter(tmp) as writer:
             for i, (snode, _slon, _slat, sname) in enumerate(snapped):
@@ -1107,7 +1144,9 @@ def route_layer(
                     if tnode in lengths:
                         target, dist_km, reached = tnode, lengths[tnode] / 1000.0, True
                     elif lengths:
-                        target = min(lengths, key=lambda n: _haversine_m(tlon, tlat, net.coords[n][0], net.coords[n][1]))
+                        if nr is None:
+                            nr = _NearestReachable(net)
+                        target = nr.nearest(snode, tlon, tlat)
                         dist_km, reached = lengths[target] / 1000.0, False
                     else:  # pragma: no cover - isolated source
                         continue
