@@ -634,9 +634,12 @@ def render_tiled_map(
 
     The output is a **directory**: an ``index.html`` plus a relative reference
     (symlink, falling back to a copy) to each input PMTiles archive. **The
-    directory must be served over HTTP** (e.g. ``python -m http.server 8765``)
-    so the browser can issue Range requests against the PMTiles files —
-    ``file://`` is not reliable across browsers.
+    directory must be served over HTTP with Range support** — PMTiles relies on
+    HTTP Range requests, and stdlib ``python -m http.server`` does NOT honor
+    them (it returns ``200 OK`` with the full file, silently breaking the
+    viewer). Use ``scripts/serve-tiled-map`` shipped with this package, or any
+    Range-capable static server (nginx, caddy, ``npx http-server``). ``file://``
+    is also unreliable across browsers.
 
     Args:
         tile_paths: PMTiles archive paths (one per layer).
