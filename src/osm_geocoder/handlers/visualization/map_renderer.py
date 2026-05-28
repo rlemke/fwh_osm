@@ -572,21 +572,33 @@ def render_layers(
 _TILED_HTML_TEMPLATE = """<!DOCTYPE html>
 <html><head><meta charset='utf-8'><title>__TITLE__</title>
 <link href='https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css' rel='stylesheet'>
-<script src='https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js'></script>
-<script src='https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js'></script>
-<style>html,body{margin:0;height:100%} #map{position:absolute;inset:0}
+<script src='https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js' crossorigin='anonymous'></script>
+<script src='https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js' crossorigin='anonymous'></script>
+<style>html,body{margin:0;height:100%} #map{position:absolute;top:0;bottom:0;left:0;right:0}
 #title{position:absolute;top:10px;left:50px;z-index:1;background:#fff;padding:8px 12px;border-radius:6px;
        box-shadow:0 2px 5px rgba(0,0,0,.3);font-family:Arial,sans-serif}
-#title h3{margin:0;font-size:16px} #title small{color:#666}</style>
+#title h3{margin:0;font-size:16px} #title small{color:#666}
+#err{position:absolute;bottom:10px;left:10px;right:10px;z-index:2;background:#fee;color:#900;padding:8px;
+     border:1px solid #c66;border-radius:4px;font-family:monospace;font-size:12px;display:none;white-space:pre-wrap}</style>
 </head><body>
 <div id='title'><h3>__TITLE__</h3><small>vector tiles · zoom-tiled (only the current viewport is fetched) · <a href='https://protomaps.com/' target='_blank'>PMTiles</a> + <a href='https://maplibre.org/' target='_blank'>MapLibre</a></small></div>
 <div id='map'></div>
+<div id='err'></div>
 <script>
-const p=new pmtiles.Protocol(); maplibregl.addProtocol('pmtiles', p.tile);
+const eb=document.getElementById('err');
+function showErr(m){eb.style.display='block';eb.textContent+=m+"\\n"}
+window.addEventListener('error',e=>showErr('JS error: '+(e.error&&e.error.stack||e.message)));
+window.addEventListener('unhandledrejection',e=>showErr('promise: '+(e.reason&&e.reason.stack||e.reason)));
+if(typeof maplibregl==='undefined') showErr('maplibregl global missing — CDN load failed');
+if(typeof pmtiles==='undefined') showErr('pmtiles global missing — CDN load failed');
+const here=location.origin+location.pathname.replace(/\\/[^/]*$/,'/');
+const protocol=new pmtiles.Protocol(); maplibregl.addProtocol('pmtiles', protocol.tile);
+__PRE_REGISTER__
 const map=new maplibregl.Map({
   container:'map',
   style:{
     version:8,
+    glyphs:'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
     sources:Object.assign({
       bg:{type:'raster',tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],tileSize:256,attribution:'© OpenStreetMap'}
     }, __SOURCES__),
@@ -594,6 +606,7 @@ const map=new maplibregl.Map({
   },
   center:[__CENTER_LON__,__CENTER_LAT__], zoom:__ZOOM__
 });
+map.on('error',e=>showErr('map error: '+(e.error&&e.error.message||JSON.stringify(e))));
 map.addControl(new maplibregl.NavigationControl());
 map.addControl(new maplibregl.ScaleControl());
 </script>
@@ -688,15 +701,23 @@ def render_tiled_map(
             "kind": _infer_layer_kind(layer_name),
         })
 
+    # Build the JS substitutions. Sources use absolute URLs assembled at runtime
+    # from JS `here` (the page's own origin+path) — relative `./` URLs are
+    # unreliable with pmtiles 3.x. Each PMTiles instance is pre-registered with
+    # the protocol so MapLibre and the protocol share one instance.
     sources_obj = ", ".join(
-        f"{s['id']}:{{type:'vector', url:'pmtiles://./{s['file']}'}}" for s in sources
+        f"{s['id']}:{{type:'vector', url:'pmtiles://' + here + '{s['file']}'}}" for s in sources
     )
+    pre_register = "\n".join(
+        f"protocol.add(new pmtiles.PMTiles(here + '{s['file']}'));" for s in sources
+    )
+
     def _layer_block(s: dict) -> str:
         if s["kind"] == "circle":
             return (f"{{id:'{s['id']}-dot',type:'circle',source:'{s['id']}','source-layer':'{s['layer']}',"
                     f"paint:{{'circle-color':'{s['color']}','circle-radius':4,'circle-stroke-color':'#fff','circle-stroke-width':1}}}},"
                     f"{{id:'{s['id']}-lbl',type:'symbol',source:'{s['id']}','source-layer':'{s['layer']}',minzoom:4,"
-                    f"layout:{{'text-field':['get','name'],'text-size':11,'text-offset':[0,1],'text-anchor':'top'}},"
+                    f"layout:{{'text-field':['get','name'],'text-font':['Noto Sans Regular'],'text-size':11,'text-offset':[0,1],'text-anchor':'top'}},"
                     f"paint:{{'text-color':'#222','text-halo-color':'#fff','text-halo-width':1.2}}}}")
         return (f"{{id:'{s['id']}',type:'line',source:'{s['id']}','source-layer':'{s['layer']}',"
                 f"paint:{{'line-color':'{s['color']}','line-width':1.2,'line-opacity':0.55}}}}")
@@ -704,6 +725,7 @@ def render_tiled_map(
 
     html = (_TILED_HTML_TEMPLATE
             .replace("__TITLE__", title)
+            .replace("__PRE_REGISTER__", pre_register)
             .replace("__SOURCES__", "{" + sources_obj + "}")
             .replace("__LAYERS__", layers_arr)
             .replace("__CENTER_LON__", repr(float(center_lon)))
