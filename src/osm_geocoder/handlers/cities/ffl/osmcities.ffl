@@ -1,0 +1,292 @@
+// Cities — population-tiered zoom assignments.
+//
+// One event facet (TierCitiesByPopulation) that takes a populated-places
+// GeoJSON and assigns each feature to the highest of four disjoint zoom
+// tiers it qualifies for, plus one workflow (CitiesByZoom) that chains
+// region caching + population extraction + tiering together.
+
+/** Assign cities to disjoint zoom tiers by population, recording bbox, zoom, location, and other tags. */
+namespace osm.Cities {
+    use osm.types
+
+    /** Output of TierCitiesByPopulation — the tiered GeoJSON plus per-tier counts. */
+    schema TieredCitiesResult {
+        output_path: String,
+        total_count: Long,
+        tier_a_zoom: Long,
+        tier_a_count: Long,
+        tier_b_zoom: Long,
+        tier_b_count: Long,
+        tier_c_zoom: Long,
+        tier_c_count: Long,
+        tier_d_zoom: Long,
+        tier_d_count: Long,
+        format: String,
+        extraction_date: String
+    }
+
+    /**
+     * Tiers a populated-places GeoJSON into four disjoint zoom bands by
+     * population. Each city lands in the highest tier it qualifies for —
+     * a 6M-pop city only appears in tier_a (zoom 3), never in the smaller
+     * tiers. Cities below the lowest threshold are dropped. Output
+     * features carry zoom, tier_min_population, name, country, place,
+     * population, lon, lat, and bbox.
+     */
+    event facet TierCitiesByPopulation(
+        input_path: String,
+        zoom_a: Long = 3,  min_pop_a: Long = 5000000,
+        zoom_b: Long = 6,  min_pop_b: Long = 1000000,
+        zoom_c: Long = 8,  min_pop_c: Long = 500000,
+        zoom_d: Long = 10, min_pop_d: Long = 10000
+    ) => (result: TieredCitiesResult) with Effect(kind = "pure") with Cost(tier = "cheap")
+
+    /** Output of SplitTiers — one GeoJSON path + count per zoom band. */
+    schema SplitTiersResult {
+        tier_a_path: String, tier_a_count: Long,
+        tier_b_path: String, tier_b_count: Long,
+        tier_c_path: String, tier_c_count: Long,
+        tier_d_path: String, tier_d_count: Long,
+        format: String,
+        extraction_date: String
+    }
+
+    /**
+     * Splits a tiered cities GeoJSON (produced by TierCitiesByPopulation)
+     * into four separate FeatureCollections keyed by the `zoom` property
+     * on each feature. Zooms with no features still produce empty
+     * GeoJSONs — downstream tilers (BuildVectorTiles) need a path.
+     */
+    event facet SplitTiers(
+        input_path: String,
+        zoom_a: Long = 3,
+        zoom_b: Long = 6,
+        zoom_c: Long = 8,
+        zoom_d: Long = 10
+    ) => (result: SplitTiersResult) with Effect(kind = "pure") with Cost(tier = "cheap")
+}
+
+/** Cities-by-zoom workflows. */
+namespace osm.Cities.workflows {
+    use osm.types
+    use osm.Cities
+    use osm.ops
+    use osm.Population
+
+    /**
+     * For one OSM region: cache the PBF, extract every populated place
+     * with a parseable population >= the smallest tier threshold, tier
+     * them into the four zoom bands, and emit a single GeoJSON where
+     * each city carries its tier zoom, bbox, location, and tags.
+     */
+    workflow CitiesByZoom(
+        region: String = "California",
+        zoom_a: Long = 3,  min_pop_a: Long = 5000000,
+        zoom_b: Long = 6,  min_pop_b: Long = 1000000,
+        zoom_c: Long = 8,  min_pop_c: Long = 500000,
+        zoom_d: Long = 10, min_pop_d: Long = 10000
+    ) => (
+        output_path: String,
+        total_count: Long,
+        tier_a_count: Long,
+        tier_b_count: Long,
+        tier_c_count: Long,
+        tier_d_count: Long
+    ) andThen {
+        cache = osm.ops.CacheRegion(region = $.region)
+        f = CitiesByZoomFromCache(
+            cache = cache.cache,
+            zoom_a = $.zoom_a, min_pop_a = $.min_pop_a,
+            zoom_b = $.zoom_b, min_pop_b = $.min_pop_b,
+            zoom_c = $.zoom_c, min_pop_c = $.min_pop_c,
+            zoom_d = $.zoom_d, min_pop_d = $.min_pop_d
+        )
+        yield CitiesByZoom(
+            output_path = f.output_path,
+            total_count = f.total_count,
+            tier_a_count = f.tier_a_count,
+            tier_b_count = f.tier_b_count,
+            tier_c_count = f.tier_c_count,
+            tier_d_count = f.tier_d_count
+        )
+    }
+
+    /** Cache-dependent logic for CitiesByZoom. */
+    facet CitiesByZoomFromCache(
+        cache: OSMCache,
+        zoom_a: Long = 3,  min_pop_a: Long = 5000000,
+        zoom_b: Long = 6,  min_pop_b: Long = 1000000,
+        zoom_c: Long = 8,  min_pop_c: Long = 500000,
+        zoom_d: Long = 10, min_pop_d: Long = 10000
+    ) => (
+        output_path: String,
+        total_count: Long,
+        tier_a_count: Long,
+        tier_b_count: Long,
+        tier_c_count: Long,
+        tier_d_count: Long
+    ) andThen {
+        places = osm.Population.AllPopulatedPlaces(
+            cache = $.cache,
+            min_population = $.min_pop_d
+        )
+        tiered = osm.Cities.TierCitiesByPopulation(
+            input_path = places.result.output_path,
+            zoom_a = $.zoom_a, min_pop_a = $.min_pop_a,
+            zoom_b = $.zoom_b, min_pop_b = $.min_pop_b,
+            zoom_c = $.zoom_c, min_pop_c = $.min_pop_c,
+            zoom_d = $.zoom_d, min_pop_d = $.min_pop_d
+        )
+        yield CitiesByZoomFromCache(
+            output_path = tiered.result.output_path,
+            total_count = tiered.result.total_count,
+            tier_a_count = tiered.result.tier_a_count,
+            tier_b_count = tiered.result.tier_b_count,
+            tier_c_count = tiered.result.tier_c_count,
+            tier_d_count = tiered.result.tier_d_count
+        )
+    }
+
+    /**
+     * Renders a MapLibre+PMTiles viewer where the visible city set
+     * matches the current zoom level: at zoom 0–3 you see only cities
+     * >5M; at zoom 4–6 cities >1M are added; at zoom 7–8 cities >500K
+     * are added; at zoom 9+ cities >10K are added. Each layer's
+     * tippecanoe `min_zoom` is the first zoom at which it appears.
+     *
+     * Output is a directory (index.html + four PMTiles archives) and
+     * MUST be served over HTTP — MapLibre relies on Range fetches that
+     * file:// does not support. Use `scripts/serve-tiled-map` or any
+     * static server.
+     */
+    workflow CitiesByZoomTiledMap(
+        region: String = "California",
+        zoom_a: Long = 3,  min_pop_a: Long = 5000000,
+        zoom_b: Long = 6,  min_pop_b: Long = 1000000,
+        zoom_c: Long = 8,  min_pop_c: Long = 500000,
+        zoom_d: Long = 10, min_pop_d: Long = 10000,
+        tiles_max_zoom: Long = 14,
+        center_lon: Double = -119.5,
+        center_lat: Double = 37.0,
+        view_zoom: Double = 5.5,
+        title: String = "California cities by zoom"
+    ) => (
+        map_path: String,
+        total_count: Long,
+        tier_a_count: Long,
+        tier_b_count: Long,
+        tier_c_count: Long,
+        tier_d_count: Long
+    ) andThen {
+        cache = osm.ops.CacheRegion(region = $.region)
+        f = CitiesByZoomTiledMapFromCache(
+            cache = cache.cache,
+            zoom_a = $.zoom_a, min_pop_a = $.min_pop_a,
+            zoom_b = $.zoom_b, min_pop_b = $.min_pop_b,
+            zoom_c = $.zoom_c, min_pop_c = $.min_pop_c,
+            zoom_d = $.zoom_d, min_pop_d = $.min_pop_d,
+            tiles_max_zoom = $.tiles_max_zoom,
+            center_lon = $.center_lon,
+            center_lat = $.center_lat,
+            view_zoom = $.view_zoom,
+            title = $.title
+        )
+        yield CitiesByZoomTiledMap(
+            map_path = f.map_path,
+            total_count = f.total_count,
+            tier_a_count = f.tier_a_count,
+            tier_b_count = f.tier_b_count,
+            tier_c_count = f.tier_c_count,
+            tier_d_count = f.tier_d_count
+        )
+    }
+
+    /** Cache-dependent logic for CitiesByZoomTiledMap. */
+    facet CitiesByZoomTiledMapFromCache(
+        cache: OSMCache,
+        zoom_a: Long = 3,  min_pop_a: Long = 5000000,
+        zoom_b: Long = 6,  min_pop_b: Long = 1000000,
+        zoom_c: Long = 8,  min_pop_c: Long = 500000,
+        zoom_d: Long = 10, min_pop_d: Long = 10000,
+        tiles_max_zoom: Long = 14,
+        center_lon: Double = -119.5,
+        center_lat: Double = 37.0,
+        view_zoom: Double = 5.5,
+        title: String = "Cities by zoom"
+    ) => (
+        map_path: String,
+        total_count: Long,
+        tier_a_count: Long,
+        tier_b_count: Long,
+        tier_c_count: Long,
+        tier_d_count: Long
+    ) andThen {
+        places = osm.Population.AllPopulatedPlaces(
+            cache = $.cache,
+            min_population = $.min_pop_d
+        )
+        tiered = osm.Cities.TierCitiesByPopulation(
+            input_path = places.result.output_path,
+            zoom_a = $.zoom_a, min_pop_a = $.min_pop_a,
+            zoom_b = $.zoom_b, min_pop_b = $.min_pop_b,
+            zoom_c = $.zoom_c, min_pop_c = $.min_pop_c,
+            zoom_d = $.zoom_d, min_pop_d = $.min_pop_d
+        )
+        split = osm.Cities.SplitTiers(
+            input_path = tiered.result.output_path,
+            zoom_a = $.zoom_a,
+            zoom_b = $.zoom_b,
+            zoom_c = $.zoom_c,
+            zoom_d = $.zoom_d
+        )
+        tiles_a = osm.Tiles.BuildVectorTiles(
+            geojson_path = split.result.tier_a_path,
+            layer_name = "cities_5M",
+            min_zoom = 0,
+            max_zoom = $.tiles_max_zoom
+        )
+        tiles_b = osm.Tiles.BuildVectorTiles(
+            geojson_path = split.result.tier_b_path,
+            layer_name = "cities_1M",
+            min_zoom = 4,
+            max_zoom = $.tiles_max_zoom
+        )
+        tiles_c = osm.Tiles.BuildVectorTiles(
+            geojson_path = split.result.tier_c_path,
+            layer_name = "cities_500K",
+            min_zoom = 7,
+            max_zoom = $.tiles_max_zoom
+        )
+        tiles_d = osm.Tiles.BuildVectorTiles(
+            geojson_path = split.result.tier_d_path,
+            layer_name = "cities_10K",
+            min_zoom = 9,
+            max_zoom = $.tiles_max_zoom
+        )
+        // Each tier shows a small red dot at the city's center. Tiers are
+        // visually distinguished by *which zooms they appear at*, not by
+        // colour, so the same red works for all four layers.
+        map = osm.viz.RenderTiledMap(
+            tiles = [
+                tiles_a.result.output_path,
+                tiles_b.result.output_path,
+                tiles_c.result.output_path,
+                tiles_d.result.output_path
+            ],
+            layer_names = ["cities_5M", "cities_1M", "cities_500K", "cities_10K"],
+            colors = ["#d62728", "#d62728", "#d62728", "#d62728"],
+            title = $.title,
+            center_lon = $.center_lon,
+            center_lat = $.center_lat,
+            zoom = $.view_zoom
+        )
+        yield CitiesByZoomTiledMapFromCache(
+            map_path = map.result.output_path,
+            total_count = tiered.result.total_count,
+            tier_a_count = split.result.tier_a_count,
+            tier_b_count = split.result.tier_b_count,
+            tier_c_count = split.result.tier_c_count,
+            tier_d_count = split.result.tier_d_count
+        )
+    }
+}
