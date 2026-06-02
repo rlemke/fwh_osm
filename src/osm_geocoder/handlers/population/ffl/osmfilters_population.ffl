@@ -38,6 +38,12 @@ namespace osm.Population {
     event facet FilterByPopulationRange(input_path: String, min_population: Long,
         max_population: Long, place_type: String = "all") => (result: PopulationFilteredFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
 
+    /** Keeps the `n` most-populous features of a populated-places GeoJSON.
+        Bounds an otherwise O(n^2) all-pairs router (osm.Network.RouteLayer) to a
+        band's largest cities — without it, routing a dense low-population band
+        over a continent is millions of pairs. */
+    event facet TopNByPopulation(input_path: String, n: Long = 50) => (result: PopulationFilteredFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
+
     /** Extracts places with population tags from PBF, filtered by type and minimum. */
     event facet ExtractPlacesWithPopulation(cache: OSMCache, place_type: String = "all",
         min_population: Long = 0) => (result: PopulationFilteredFeatures) with Effect(kind = "external") with Cost(tier = "expensive")

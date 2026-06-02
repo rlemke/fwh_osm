@@ -6,6 +6,8 @@ under osm.Population namespace.
 
 import logging
 import os
+import threading
+from contextlib import contextmanager
 from datetime import UTC, datetime
 
 from ..shared.output_cache import cached_result, save_result_meta
@@ -14,7 +16,9 @@ from .population_filter import (
     PopulationFilteredFeatures,
     PopulationStats,
     calculate_population_stats,
+    extract_places_with_population,
     filter_geojson_by_population,
+    top_n_by_population,
 )
 
 log = logging.getLogger(__name__)
@@ -79,6 +83,50 @@ def _make_filter_by_population_handler(facet_name: str):
             log.error("Failed to filter by population: %s", exc)
             if step_log:
                 step_log(f"{facet_name}: FAILED to filter by population: {exc}", level="error")
+            raise
+
+    return handler
+
+
+def _make_top_n_by_population_handler(facet_name: str):
+    """Create handler for TopNByPopulation event facet.
+
+    Keeps the ``n`` most-populous features of a populated-places GeoJSON so a
+    downstream all-pairs router (osm.Network.RouteLayer) stays bounded. Pure
+    compute; result reuses the PopulationFilteredFeatures schema.
+    """
+    qualified = f"{NAMESPACE}.{facet_name}"
+
+    def handler(payload: dict) -> dict:
+        input_path = payload.get("input_path", "")
+        n = int(payload.get("n", 50))
+        step_log = payload.get("_step_log")
+
+        cache_params = {"n": n}
+        input_cache = {"path": input_path, "size": 0}
+        hit = cached_result(qualified, input_cache, cache_params, step_log)
+        if hit is not None:
+            return hit
+
+        if not input_path:
+            return {"result": _empty_result("all", 0, 0)}
+
+        if step_log:
+            step_log(f"{facet_name}: selecting top {n} of {input_path} by population")
+        try:
+            result = top_n_by_population(input_path, n)
+            if step_log:
+                step_log(
+                    f"{facet_name}: kept top {result.feature_count}/{result.original_count} by population",
+                    level="success",
+                )
+            rv = {"result": _result_to_dict(result)}
+            save_result_meta(qualified, input_cache, cache_params, rv)
+            return rv
+        except Exception as exc:
+            log.error("Failed to select top-N by population: %s", exc)
+            if step_log:
+                step_log(f"{facet_name}: FAILED to select top-N: {exc}", level="error")
             raise
 
     return handler
@@ -244,12 +292,113 @@ def _empty_stats() -> dict:
     }
 
 
+@contextmanager
+def _lease_keepalive(heartbeat, interval_seconds: float = 60.0):
+    """Heartbeat from a daemon thread so the task lease stays renewed
+    while a blocking osmium scan runs.
+
+    The pure ``extract_places_with_population`` lib only heartbeats per
+    5 000 *kept* nodes; a population-filtered region (e.g. California,
+    pop≥10 000) keeps far fewer, so the in-loop heartbeat never fires
+    and the task's 5-minute lease expires. This wrapper ticks the
+    runner's ``_task_heartbeat`` callback every ``interval_seconds``
+    independent of the scan loop.
+    """
+    if not callable(heartbeat):
+        yield
+        return
+    stop = threading.Event()
+
+    def _tick():
+        while not stop.wait(interval_seconds):
+            try:
+                heartbeat()
+            except Exception:  # pragma: no cover — keepalive must never crash the handler
+                log.debug("lease keepalive heartbeat failed", exc_info=True)
+
+    thread = threading.Thread(target=_tick, daemon=True, name="osm-lease-keepalive")
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=2.0)
+
+
+def _make_extract_places_handler(facet_name: str, *, fixed_place_type: str | None = None):
+    """Create a handler for a *Places extraction* event facet.
+
+    Used for AllPopulatedPlaces (fixed_place_type=None — payload supplies it),
+    and for the per-type aliases (Cities/Towns/Villages/...) that bake the
+    place_type into the facet name.
+    """
+    qualified = f"{NAMESPACE}.{facet_name}"
+
+    def handler(payload: dict) -> dict:
+        cache = payload.get("cache", {})
+        pbf_path = cache.get("path", "")
+        min_population = int(payload.get("min_population", 0) or 0)
+        place_type = fixed_place_type or payload.get("place_type", "all")
+        step_log = payload.get("_step_log")
+
+        cache_params = {"place_type": place_type, "min_population": min_population}
+        hit = cached_result(qualified, cache, cache_params, step_log)
+        if hit is not None:
+            return hit
+
+        if step_log:
+            step_log(
+                f"{facet_name}: extracting {place_type} from {pbf_path} (pop>={min_population})"
+            )
+        log.info(
+            "%s extracting %s from %s (pop>=%d)",
+            facet_name,
+            place_type,
+            pbf_path,
+            min_population,
+        )
+
+        if not pbf_path:
+            return {"result": _empty_result(place_type, min_population, 0)}
+
+        try:
+            task_heartbeat = payload.get("_task_heartbeat") or payload.get("_heartbeat")
+            with _lease_keepalive(task_heartbeat):
+                result = extract_places_with_population(
+                    pbf_path,
+                    place_type=place_type,
+                    min_population=min_population,
+                    heartbeat=task_heartbeat,
+                )
+            if step_log:
+                step_log(
+                    f"{facet_name}: {result.feature_count}/{result.original_count} kept "
+                    f"({place_type}, pop>={min_population})",
+                    level="success",
+                )
+            rv = {"result": _result_to_dict(result)}
+            save_result_meta(qualified, cache, cache_params, rv)
+            return rv
+        except Exception as exc:
+            log.error("Failed to extract places: %s", exc)
+            if step_log:
+                step_log(
+                    f"{facet_name}: FAILED to extract places: {exc}", level="error"
+                )
+            raise
+
+    return handler
+
+
 # Event facet definitions for handler registration
 POPULATION_FACETS = [
     # Generic filters
     ("FilterByPopulation", _make_filter_by_population_handler),
     ("FilterByPopulationRange", _make_filter_by_population_range_handler),
+    ("TopNByPopulation", _make_top_n_by_population_handler),
     ("PopulationStatistics", _make_population_stats_handler),
+    # PBF → GeoJSON extraction of populated places.
+    ("AllPopulatedPlaces", _make_extract_places_handler),
 ]
 
 
@@ -275,12 +424,23 @@ def handle(payload: dict) -> dict:
 
 
 def register_handlers(runner) -> None:
-    """Register all facets with a RegistryRunner."""
+    """Register all facets with a RegistryRunner.
+
+    AllPopulatedPlaces walks a full regional PBF (potentially gigabytes)
+    inside a blocking osmium C++ loop with sparse heartbeats — it cannot
+    fit in the default 30 s handler timeout. Register it with
+    ``timeout_ms=0`` so it falls back to the runner's global execution
+    timeout (4 h for fwh_osm).
+    """
+    long_running = {"AllPopulatedPlaces"}
     for facet_name in _DISPATCH:
+        short_name = facet_name.split(".")[-1]
+        timeout_ms = 0 if short_name in long_running else 30000
         runner.register_handler(
             facet_name=facet_name,
             module_uri=f"file://{os.path.abspath(__file__)}",
             entrypoint="handle",
+            timeout_ms=timeout_ms,
         )
 
 

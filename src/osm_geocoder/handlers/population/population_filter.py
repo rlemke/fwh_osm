@@ -309,7 +309,12 @@ def extract_places_with_population(
     try:
         with GeoJSONStreamWriter(tmp_path) as writer:
             handler = _PlaceHandler(writer)
-            handler.apply_file(local_pbf, locations=True, idx="flex_mem")
+            # Node-only scan — we read `n.location` directly off each node;
+            # we never resolve way/relation member coordinates. The location
+            # index (`locations=True, idx="flex_mem"`) is therefore dead
+            # overhead that dominates runtime on full-region PBFs (e.g.
+            # California: ~25 min vs ~2 min). Skip it.
+            handler.apply_file(local_pbf)
         ensure_dir(output_path_str)
         shutil.move(tmp_path, output_path_str)
     except Exception:
@@ -485,6 +490,59 @@ def filter_geojson_by_population(
         min_population=min_population,
         max_population=max_population if max_population is not None else 0,
         filter_applied=describe_filter(place_type, min_population, max_population, operator),
+        extraction_date=datetime.now(UTC).isoformat(),
+    )
+
+
+def top_n_by_population(
+    input_path: str | Path,
+    n: int,
+    output_path: str | Path | None = None,
+) -> PopulationFilteredFeatures:
+    """Keep the ``n`` most-populous features of a populated-places GeoJSON.
+
+    Reads ``input_path``, sorts its features by parsed population descending,
+    and writes the top ``n`` to ``output_path`` as a FeatureCollection. This
+    bounds an otherwise O(n^2) all-pairs routing step (osm.Network.RouteLayer)
+    to the ``n`` largest cities of a population band — without it, routing the
+    dense low-population band over a continent is millions of pairs. Features
+    with no parseable population sort last; ``n < 0`` keeps all (sorted).
+    """
+    input_path = str(input_path)
+    if output_path is None:
+        out_dir = resolve_output_dir("osm-population")
+        output_path_str = f"{out_dir}/{uri_stem(input_path)}_top{n}.geojson"
+    else:
+        output_path_str = str(output_path)
+    ensure_dir(output_path_str)
+
+    with get_storage_backend(input_path).open(input_path, "r") as f:
+        geojson = json.load(f)
+    features = geojson.get("features", [])
+    original_count = len(features)
+
+    def _pop(feature) -> int:
+        props = feature.get("properties", {}) or {}
+        pop = parse_population(props.get("population_value"))
+        if pop is None:
+            pop = parse_population(props.get("population"))
+        return pop if pop is not None else -1
+
+    ranked = sorted(features, key=_pop, reverse=True)
+    if n is not None and n >= 0:
+        ranked = ranked[:n]
+
+    with open_output(output_path_str) as f:
+        json.dump({"type": "FeatureCollection", "features": ranked}, f, indent=2)
+
+    return PopulationFilteredFeatures(
+        output_path=output_path_str,
+        feature_count=len(ranked),
+        original_count=original_count,
+        place_type="all",
+        min_population=0,
+        max_population=0,
+        filter_applied=f"top {n} by population",
         extraction_date=datetime.now(UTC).isoformat(),
     )
 

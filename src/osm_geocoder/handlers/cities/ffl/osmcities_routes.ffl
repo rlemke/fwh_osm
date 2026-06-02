@@ -1,0 +1,184 @@
+// Cities AND routes, tiled by population/zoom band, one colour per band.
+//
+// Extends osm.Cities.workflows.CitiesByZoomTiledMap: after tiering the
+// populated places into four disjoint zoom bands (5M / 1M / 500K / 10K ->
+// z3 / z6 / z8 / z10), build the region's freeway graph once and draw the
+// routes BETWEEN the cities of each band over it. Each band gets its own
+// colour, used for both its city dots and its routes, so a "zoom grouping"
+// reads as one colour: megacity corridors at low zoom, progressively denser
+// bands as you zoom in.
+//
+// RouteLayer is all-pairs (O(n^2) lines), so each band's waypoints are first
+// capped to the `route_cap` most-populous cities via TopNByPopulation —
+// otherwise the dense low-population band over a continent is millions of
+// pairs. Bands with <2 cities (e.g. a region with no >=5M metro) yield an
+// empty route layer (RouteLayer tolerates sparse input), so the workflow
+// stays correct for any region.
+//
+// Output is a directory (index.html + 8 PMTiles archives) and MUST be served
+// over HTTP for the PMTiles Range fetches — use scripts/serve-tiled-map.
+
+namespace osm.Cities.routes {
+    use osm.types
+    use osm.ops
+    use osm.Population
+    use osm.Cities
+    use osm.Source.PBF
+    use osm.Network
+    use osm.Tiles
+    use osm.viz
+
+    /** For one region: tier cities into four population/zoom bands, route the
+        top cities of each band over the region's freeway network, and render a
+        zoom-tiled map with one colour per band (dots + routes). */
+    workflow CitiesAndRoutesByZoom(
+        region: String = "California",
+        zoom_a: Long = 3,  min_pop_a: Long = 5000000,
+        zoom_b: Long = 6,  min_pop_b: Long = 1000000,
+        zoom_c: Long = 8,  min_pop_c: Long = 500000,
+        zoom_d: Long = 10, min_pop_d: Long = 10000,
+        route_cap: Long = 50,
+        road_class: String = "major",
+        snap_tolerance_m: Double = 25.0,
+        ref_filter: String = "",
+        tiles_max_zoom: Long = 14,
+        routes_max_zoom: Long = 12,
+        center_lon: Double = -119.5,
+        center_lat: Double = 37.0,
+        view_zoom: Double = 5.5,
+        title: String = "California cities & routes by zoom"
+    ) => (
+        map_path: String,
+        total_count: Long,
+        route_a_count: Long,
+        route_b_count: Long,
+        route_c_count: Long,
+        route_d_count: Long
+    ) andThen {
+        cache = osm.ops.CacheRegion(region = $.region)
+        f = CitiesAndRoutesByZoomFromCache(
+            cache = cache.cache,
+            zoom_a = $.zoom_a, min_pop_a = $.min_pop_a,
+            zoom_b = $.zoom_b, min_pop_b = $.min_pop_b,
+            zoom_c = $.zoom_c, min_pop_c = $.min_pop_c,
+            zoom_d = $.zoom_d, min_pop_d = $.min_pop_d,
+            route_cap = $.route_cap,
+            road_class = $.road_class,
+            snap_tolerance_m = $.snap_tolerance_m,
+            ref_filter = $.ref_filter,
+            tiles_max_zoom = $.tiles_max_zoom,
+            routes_max_zoom = $.routes_max_zoom,
+            center_lon = $.center_lon,
+            center_lat = $.center_lat,
+            view_zoom = $.view_zoom,
+            title = $.title
+        )
+        yield CitiesAndRoutesByZoom(
+            map_path = f.map_path,
+            total_count = f.total_count,
+            route_a_count = f.route_a_count,
+            route_b_count = f.route_b_count,
+            route_c_count = f.route_c_count,
+            route_d_count = f.route_d_count
+        )
+    }
+
+    /** Cache-dependent body for CitiesAndRoutesByZoom. */
+    facet CitiesAndRoutesByZoomFromCache(
+        cache: OSMCache,
+        zoom_a: Long = 3,  min_pop_a: Long = 5000000,
+        zoom_b: Long = 6,  min_pop_b: Long = 1000000,
+        zoom_c: Long = 8,  min_pop_c: Long = 500000,
+        zoom_d: Long = 10, min_pop_d: Long = 10000,
+        route_cap: Long = 50,
+        road_class: String = "major",
+        snap_tolerance_m: Double = 25.0,
+        ref_filter: String = "",
+        tiles_max_zoom: Long = 14,
+        routes_max_zoom: Long = 12,
+        center_lon: Double = -119.5,
+        center_lat: Double = 37.0,
+        view_zoom: Double = 5.5,
+        title: String = "Cities & routes by zoom"
+    ) => (
+        map_path: String,
+        total_count: Long,
+        route_a_count: Long,
+        route_b_count: Long,
+        route_c_count: Long,
+        route_d_count: Long
+    ) andThen {
+        // --- Cities: extract + tier into four disjoint zoom bands ---
+        places = osm.Population.AllPopulatedPlaces(
+            cache = $.cache,
+            min_population = $.min_pop_d
+        )
+        tiered = osm.Cities.TierCitiesByPopulation(
+            input_path = places.result.output_path,
+            zoom_a = $.zoom_a, min_pop_a = $.min_pop_a,
+            zoom_b = $.zoom_b, min_pop_b = $.min_pop_b,
+            zoom_c = $.zoom_c, min_pop_c = $.min_pop_c,
+            zoom_d = $.zoom_d, min_pop_d = $.min_pop_d
+        )
+        split = osm.Cities.SplitTiers(
+            input_path = tiered.result.output_path,
+            zoom_a = $.zoom_a, zoom_b = $.zoom_b, zoom_c = $.zoom_c, zoom_d = $.zoom_d
+        )
+
+        // --- Network: the region's freeway graph, built once ---
+        roads = osm.Source.PBF.ExtractRoads(cache = $.cache, road_class = $.road_class)
+        net = osm.Network.BuildNetwork(
+            edges_path = roads.result.output_path,
+            snap_tolerance_m = $.snap_tolerance_m,
+            ref_filter = $.ref_filter
+        )
+
+        // --- Per-band routes: cap to top-N cities, then all-pairs route ---
+        top_a = osm.Population.TopNByPopulation(input_path = split.result.tier_a_path, n = $.route_cap)
+        routes_a = osm.Network.RouteLayer(network_path = net.result.network_path, points = top_a.result.output_path)
+        top_b = osm.Population.TopNByPopulation(input_path = split.result.tier_b_path, n = $.route_cap)
+        routes_b = osm.Network.RouteLayer(network_path = net.result.network_path, points = top_b.result.output_path)
+        top_c = osm.Population.TopNByPopulation(input_path = split.result.tier_c_path, n = $.route_cap)
+        routes_c = osm.Network.RouteLayer(network_path = net.result.network_path, points = top_c.result.output_path)
+        top_d = osm.Population.TopNByPopulation(input_path = split.result.tier_d_path, n = $.route_cap)
+        routes_d = osm.Network.RouteLayer(network_path = net.result.network_path, points = top_d.result.output_path)
+
+        // --- Tiles: 4 route layers (drawn first/under) + 4 city layers ---
+        rtiles_a = osm.Tiles.BuildVectorTiles(geojson_path = routes_a.result.output_path, layer_name = "routes_5M",   min_zoom = 0, max_zoom = $.routes_max_zoom)
+        rtiles_b = osm.Tiles.BuildVectorTiles(geojson_path = routes_b.result.output_path, layer_name = "routes_1M",   min_zoom = 4, max_zoom = $.routes_max_zoom)
+        rtiles_c = osm.Tiles.BuildVectorTiles(geojson_path = routes_c.result.output_path, layer_name = "routes_500K", min_zoom = 7, max_zoom = $.routes_max_zoom)
+        rtiles_d = osm.Tiles.BuildVectorTiles(geojson_path = routes_d.result.output_path, layer_name = "routes_10K",  min_zoom = 9, max_zoom = $.routes_max_zoom)
+        ctiles_a = osm.Tiles.BuildVectorTiles(geojson_path = split.result.tier_a_path, layer_name = "cities_5M",   min_zoom = 0, max_zoom = $.tiles_max_zoom)
+        ctiles_b = osm.Tiles.BuildVectorTiles(geojson_path = split.result.tier_b_path, layer_name = "cities_1M",   min_zoom = 4, max_zoom = $.tiles_max_zoom)
+        ctiles_c = osm.Tiles.BuildVectorTiles(geojson_path = split.result.tier_c_path, layer_name = "cities_500K", min_zoom = 7, max_zoom = $.tiles_max_zoom)
+        ctiles_d = osm.Tiles.BuildVectorTiles(geojson_path = split.result.tier_d_path, layer_name = "cities_10K",  min_zoom = 9, max_zoom = $.tiles_max_zoom)
+
+        // --- Render: routes under cities; one colour per zoom band ---
+        map = osm.viz.RenderTiledMap(
+            tiles = [
+                rtiles_a.result.output_path, rtiles_b.result.output_path,
+                rtiles_c.result.output_path, rtiles_d.result.output_path,
+                ctiles_a.result.output_path, ctiles_b.result.output_path,
+                ctiles_c.result.output_path, ctiles_d.result.output_path
+            ],
+            layer_names = [
+                "routes_5M", "routes_1M", "routes_500K", "routes_10K",
+                "cities_5M", "cities_1M", "cities_500K", "cities_10K"
+            ],
+            colors = [
+                "#e41a1c", "#ff7f00", "#4daf4a", "#377eb8",
+                "#e41a1c", "#ff7f00", "#4daf4a", "#377eb8"
+            ],
+            title = $.title,
+            center_lon = $.center_lon, center_lat = $.center_lat, zoom = $.view_zoom
+        )
+        yield CitiesAndRoutesByZoomFromCache(
+            map_path = map.result.output_path,
+            total_count = tiered.result.total_count,
+            route_a_count = routes_a.result.route_count,
+            route_b_count = routes_b.result.route_count,
+            route_c_count = routes_c.result.route_count,
+            route_d_count = routes_d.result.route_count
+        )
+    }
+}

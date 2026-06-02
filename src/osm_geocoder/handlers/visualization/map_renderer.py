@@ -716,8 +716,11 @@ def render_tiled_map(
         if s["kind"] == "circle":
             return (f"{{id:'{s['id']}-dot',type:'circle',source:'{s['id']}','source-layer':'{s['layer']}',"
                     f"paint:{{'circle-color':'{s['color']}','circle-radius':4,'circle-stroke-color':'#fff','circle-stroke-width':1}}}},"
-                    f"{{id:'{s['id']}-lbl',type:'symbol',source:'{s['id']}','source-layer':'{s['layer']}',minzoom:4,"
-                    f"layout:{{'text-field':['get','name'],'text-font':['Noto Sans Regular'],'text-size':11,'text-offset':[0,1],'text-anchor':'top'}},"
+                    # Label sits immediately right of the dot, anchored on the dot's
+                    # vertical centre. No minzoom — the tile already drops features
+                    # outside their per-layer zoom range (set in BuildVectorTiles).
+                    f"{{id:'{s['id']}-lbl',type:'symbol',source:'{s['id']}','source-layer':'{s['layer']}',"
+                    f"layout:{{'text-field':['get','name'],'text-font':['Noto Sans Regular'],'text-size':11,'text-offset':[0.7,0],'text-anchor':'left','text-allow-overlap':false,'text-ignore-placement':false}},"
                     f"paint:{{'text-color':'#222','text-halo-color':'#fff','text-halo-width':1.2}}}}")
         return (f"{{id:'{s['id']}',type:'line',source:'{s['id']}','source-layer':'{s['layer']}',"
                 f"paint:{{'line-color':'{s['color']}','line-width':1.2,'line-opacity':0.55}}}}")

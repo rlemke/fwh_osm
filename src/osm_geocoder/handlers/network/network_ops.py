@@ -1101,7 +1101,27 @@ def route_layer(
     _require_deps()
     pts = _parse_points(points)
     if len(pts) < 2:
-        raise ValueError(f"RouteLayer needs >= 2 points, got {len(pts)}")
+        # A population band can legitimately have 0 or 1 cities (e.g. a region
+        # with no >=5M metro). All-pairs routing is undefined there, but a
+        # per-band compose still expects a drawable layer downstream, so emit
+        # an empty FeatureCollection rather than raising — keeping the pipeline
+        # tolerant of sparse bands instead of failing the whole workflow.
+        if output_path is None:
+            output_path = derive_output_path(
+                "osm-network", "routes", str(len(pts)), ext="geojson",
+                run_id=run_id or None,
+            )
+        output_path = str(output_path)
+        ensure_dir(output_path)
+        with open_output(output_path) as f:
+            json.dump({"type": "FeatureCollection", "features": []}, f)
+        return RouteLayerResult(
+            output_path=output_path,
+            route_count=0,
+            reachable_count=0,
+            point_count=len(pts),
+            extraction_date=_now(),
+        )
 
     net = _load_network(network_path, heartbeat)
     if net.g.number_of_nodes() == 0:
