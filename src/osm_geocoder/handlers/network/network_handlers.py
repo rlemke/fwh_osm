@@ -248,12 +248,22 @@ def handle(payload: dict) -> dict:
 
 
 def register_handlers(runner) -> None:
-    """Register all osm.Network facets with a RegistryRunner."""
+    """Register all osm.Network facets with a RegistryRunner.
+
+    BuildNetwork (graph assembly from an edge layer) and RouteLayer /
+    RouteMatrix (single-source Dijkstra per origin) run over the whole
+    network in a blocking loop with sparse heartbeats. Over a continental
+    motorway+trunk graph (millions of edges) they exceed the default 30 s
+    handler timeout, so register every network facet with timeout_ms=0 and
+    let the runner's global execution timeout bound them — same treatment
+    as the full-PBF extractors and AllPopulatedPlaces.
+    """
     for facet_name in _DISPATCH:
         runner.register_handler(
             facet_name=facet_name,
             module_uri=f"file://{os.path.abspath(__file__)}",
             entrypoint="handle",
+            timeout_ms=0,
         )
 
 

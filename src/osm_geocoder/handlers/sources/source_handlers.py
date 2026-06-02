@@ -43,8 +43,16 @@ def register_handlers(runner) -> None:
         f"file://{os.path.abspath(os.path.join(os.path.dirname(__file__), 'geojson_source.py'))}"
     )
 
+    # PBF source facets are full-region osmium scans (Extract*) that read a
+    # whole PBF in a blocking C++ loop with sparse heartbeats. On a large
+    # region (continental NA is ~19 GB) they far exceed the default 30 s
+    # handler timeout and would time-out -> retry -> dead-letter. Register
+    # them with timeout_ms=0 so they fall back to the runner's global
+    # execution timeout, exactly like osm.Population.AllPopulatedPlaces.
     for facet_name in PBF_DISPATCH:
-        runner.register_handler(facet_name=facet_name, module_uri=pbf_uri, entrypoint="handle")
+        runner.register_handler(
+            facet_name=facet_name, module_uri=pbf_uri, entrypoint="handle", timeout_ms=0
+        )
 
     for facet_name in POSTGIS_DISPATCH:
         runner.register_handler(facet_name=facet_name, module_uri=postgis_uri, entrypoint="handle")

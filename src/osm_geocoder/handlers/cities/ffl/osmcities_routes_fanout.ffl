@@ -1,0 +1,161 @@
+// Fan-out cities AND routes by zoom band — continental scale.
+//
+// The fan-out counterpart to osm.Cities.routes.CitiesAndRoutesByZoom: the
+// monolithic version extracts roads + cities from one continental PBF in a
+// single pass, which doesn't scale (ExtractRoads over ~19 GB). Here a
+// foreach fans the per-subregion road + populated-place extraction across
+// the runner fleet (one task per subregion), then a linear fan-in merges
+// the layers, builds the freeway network once, tiers the cities into the
+// four zoom bands, routes the top cities of each band over the network,
+// and renders a zoom-tiled map with one colour per band.
+//
+// This is the genomics fan-out / fan-in split (FFL has no post-foreach
+// aggregation block): the foreach lives in a facet that returns the two
+// aggregated path lists, which the workflow's linear block then consumes.
+
+namespace osm.Cities.routes {
+    use osm.types
+    use osm.Region
+    use osm.cache
+    use osm.Population
+    use osm.Cities
+    use osm.Source.PBF
+    use osm.Network
+    use osm.Transform
+    use osm.Tiles
+    use osm.viz
+
+    /** Per subregion (in parallel via andThen foreach): download the PBF,
+        extract its freeway roads and its populated places, aggregating both
+        into 1-element lists so the runtime's list yield-merge collects the
+        full per-subregion sets for the fan-in. */
+    facet ExtractRoadsAndCitiesAcrossSubregions(
+        region_names: [String],
+        min_population: Long = 10000,
+        road_class: String = "major"
+    ) => (road_paths: [String], city_paths: [String]) andThen {
+        resolved = osm.Region.ResolveRegions(names = $.region_names)
+    } andThen foreach r in resolved.regions {
+        cache = osm.cache.Download(region = $.r)
+        roads = osm.Source.PBF.ExtractRoads(cache = cache.cache, road_class = $.road_class)
+        places = osm.Population.AllPopulatedPlaces(
+            cache = cache.cache,
+            min_population = $.min_population
+        )
+        yield ExtractRoadsAndCitiesAcrossSubregions(
+            road_paths = [roads.result.output_path],
+            city_paths = [places.result.output_path]
+        )
+    }
+
+    /** North America cities + routes by zoom, parallel per-subregion
+        extraction. Same four bands / one-colour-per-band scheme as
+        CitiesAndRoutesByZoom; only the extraction stage fans out. */
+    workflow CitiesAndRoutesByZoomFanout(
+        region_names: [String] = [
+        "north-america/us/alabama", "north-america/us/alaska", "north-america/us/arizona", "north-america/us/arkansas",
+        "north-america/us/california", "north-america/us/colorado", "north-america/us/connecticut", "north-america/us/delaware",
+        "north-america/us/district-of-columbia", "north-america/us/florida", "north-america/us/georgia", "north-america/us/hawaii",
+        "north-america/us/idaho", "north-america/us/illinois", "north-america/us/indiana", "north-america/us/iowa",
+        "north-america/us/kansas", "north-america/us/kentucky", "north-america/us/louisiana", "north-america/us/maine",
+        "north-america/us/maryland", "north-america/us/massachusetts", "north-america/us/michigan", "north-america/us/minnesota",
+        "north-america/us/mississippi", "north-america/us/missouri", "north-america/us/montana", "north-america/us/nebraska",
+        "north-america/us/nevada", "north-america/us/new-hampshire", "north-america/us/new-jersey", "north-america/us/new-mexico",
+        "north-america/us/new-york", "north-america/us/north-carolina", "north-america/us/north-dakota", "north-america/us/ohio",
+        "north-america/us/oklahoma", "north-america/us/oregon", "north-america/us/pennsylvania", "north-america/us/rhode-island",
+        "north-america/us/south-carolina", "north-america/us/south-dakota", "north-america/us/tennessee", "north-america/us/texas",
+        "north-america/us/utah", "north-america/us/vermont", "north-america/us/virginia", "north-america/us/washington",
+        "north-america/us/west-virginia", "north-america/us/wisconsin", "north-america/us/wyoming", "north-america/canada/alberta",
+        "north-america/canada/british-columbia", "north-america/canada/manitoba", "north-america/canada/new-brunswick", "north-america/canada/newfoundland-and-labrador",
+        "north-america/canada/nova-scotia", "north-america/canada/ontario", "north-america/canada/prince-edward-island", "north-america/canada/quebec",
+        "north-america/canada/saskatchewan", "north-america/canada/yukon", "north-america/mexico", "north-america/greenland"
+    ],
+        zoom_a: Long = 3,  min_pop_a: Long = 5000000,
+        zoom_b: Long = 6,  min_pop_b: Long = 1000000,
+        zoom_c: Long = 8,  min_pop_c: Long = 500000,
+        zoom_d: Long = 10, min_pop_d: Long = 10000,
+        route_cap: Long = 40,
+        road_class: String = "major",
+        snap_tolerance_m: Double = 25.0,
+        ref_filter: String = "",
+        tiles_max_zoom: Long = 14,
+        routes_max_zoom: Long = 12,
+        center_lon: Double = -100.0,
+        center_lat: Double = 45.0,
+        view_zoom: Double = 3.0,
+        title: String = "North America cities & routes by zoom (fan-out)"
+    ) => (
+        map_path: String,
+        total_count: Long,
+        route_a_count: Long,
+        route_b_count: Long,
+        route_c_count: Long,
+        route_d_count: Long
+    ) andThen {
+        ext = ExtractRoadsAndCitiesAcrossSubregions(
+            region_names = $.region_names,
+            min_population = $.min_pop_d,
+            road_class = $.road_class
+        )
+        all_roads = osm.Transform.MergeLayers(inputs = ext.road_paths)
+        net = osm.Network.BuildNetwork(
+            edges_path = all_roads.result.output_path,
+            snap_tolerance_m = $.snap_tolerance_m,
+            ref_filter = $.ref_filter
+        )
+        all_cities = osm.Transform.MergeLayers(inputs = ext.city_paths)
+        tiered = osm.Cities.TierCitiesByPopulation(
+            input_path = all_cities.result.output_path,
+            zoom_a = $.zoom_a, min_pop_a = $.min_pop_a,
+            zoom_b = $.zoom_b, min_pop_b = $.min_pop_b,
+            zoom_c = $.zoom_c, min_pop_c = $.min_pop_c,
+            zoom_d = $.zoom_d, min_pop_d = $.min_pop_d
+        )
+        split = osm.Cities.SplitTiers(
+            input_path = tiered.result.output_path,
+            zoom_a = $.zoom_a, zoom_b = $.zoom_b, zoom_c = $.zoom_c, zoom_d = $.zoom_d
+        )
+        top_a = osm.Population.TopNByPopulation(input_path = split.result.tier_a_path, n = $.route_cap)
+        routes_a = osm.Network.RouteLayer(network_path = net.result.network_path, points = top_a.result.output_path)
+        top_b = osm.Population.TopNByPopulation(input_path = split.result.tier_b_path, n = $.route_cap)
+        routes_b = osm.Network.RouteLayer(network_path = net.result.network_path, points = top_b.result.output_path)
+        top_c = osm.Population.TopNByPopulation(input_path = split.result.tier_c_path, n = $.route_cap)
+        routes_c = osm.Network.RouteLayer(network_path = net.result.network_path, points = top_c.result.output_path)
+        top_d = osm.Population.TopNByPopulation(input_path = split.result.tier_d_path, n = $.route_cap)
+        routes_d = osm.Network.RouteLayer(network_path = net.result.network_path, points = top_d.result.output_path)
+        rtiles_a = osm.Tiles.BuildVectorTiles(geojson_path = routes_a.result.output_path, layer_name = "routes_5M",   min_zoom = 0, max_zoom = $.routes_max_zoom)
+        rtiles_b = osm.Tiles.BuildVectorTiles(geojson_path = routes_b.result.output_path, layer_name = "routes_1M",   min_zoom = 4, max_zoom = $.routes_max_zoom)
+        rtiles_c = osm.Tiles.BuildVectorTiles(geojson_path = routes_c.result.output_path, layer_name = "routes_500K", min_zoom = 7, max_zoom = $.routes_max_zoom)
+        rtiles_d = osm.Tiles.BuildVectorTiles(geojson_path = routes_d.result.output_path, layer_name = "routes_10K",  min_zoom = 9, max_zoom = $.routes_max_zoom)
+        ctiles_a = osm.Tiles.BuildVectorTiles(geojson_path = split.result.tier_a_path, layer_name = "cities_5M",   min_zoom = 0, max_zoom = $.tiles_max_zoom)
+        ctiles_b = osm.Tiles.BuildVectorTiles(geojson_path = split.result.tier_b_path, layer_name = "cities_1M",   min_zoom = 4, max_zoom = $.tiles_max_zoom)
+        ctiles_c = osm.Tiles.BuildVectorTiles(geojson_path = split.result.tier_c_path, layer_name = "cities_500K", min_zoom = 7, max_zoom = $.tiles_max_zoom)
+        ctiles_d = osm.Tiles.BuildVectorTiles(geojson_path = split.result.tier_d_path, layer_name = "cities_10K",  min_zoom = 9, max_zoom = $.tiles_max_zoom)
+        map = osm.viz.RenderTiledMap(
+            tiles = [
+                rtiles_a.result.output_path, rtiles_b.result.output_path,
+                rtiles_c.result.output_path, rtiles_d.result.output_path,
+                ctiles_a.result.output_path, ctiles_b.result.output_path,
+                ctiles_c.result.output_path, ctiles_d.result.output_path
+            ],
+            layer_names = [
+                "routes_5M", "routes_1M", "routes_500K", "routes_10K",
+                "cities_5M", "cities_1M", "cities_500K", "cities_10K"
+            ],
+            colors = [
+                "#e41a1c", "#ff7f00", "#4daf4a", "#377eb8",
+                "#e41a1c", "#ff7f00", "#4daf4a", "#377eb8"
+            ],
+            title = $.title,
+            center_lon = $.center_lon, center_lat = $.center_lat, zoom = $.view_zoom
+        )
+        yield CitiesAndRoutesByZoomFanout(
+            map_path = map.result.output_path,
+            total_count = tiered.result.total_count,
+            route_a_count = routes_a.result.route_count,
+            route_b_count = routes_b.result.route_count,
+            route_c_count = routes_c.result.route_count,
+            route_d_count = routes_d.result.route_count
+        )
+    }
+}
