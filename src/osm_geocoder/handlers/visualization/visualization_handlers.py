@@ -246,6 +246,7 @@ def _make_render_tiled_map_handler(facet_name: str):
         center_lon = float(payload.get("center_lon", 0.0) or 0.0)
         center_lat = float(payload.get("center_lat", 20.0) or 20.0)
         zoom = float(payload.get("zoom", 2.0) or 2.0)
+        basemap = payload.get("basemap") or "dark"
         step_log = payload.get("_step_log")
 
         if isinstance(tiles, str):
@@ -259,6 +260,7 @@ def _make_render_tiled_map_handler(facet_name: str):
         cache_params = {
             "layer_names": layer_names, "colors": colors, "title": title,
             "center_lon": center_lon, "center_lat": center_lat, "zoom": zoom,
+            "basemap": basemap,
         }
         hit = cached_result(qualified, cache, cache_params, step_log)
         if hit is not None:
@@ -277,6 +279,7 @@ def _make_render_tiled_map_handler(facet_name: str):
                 layer_names=layer_names if layer_names else None,
                 colors=colors if colors else None,
                 title=title, center_lon=center_lon, center_lat=center_lat, zoom=zoom,
+                basemap=basemap,
             )
             rv = {"result": _result_to_dict(result)}
             save_result_meta(qualified, cache, cache_params, rv)

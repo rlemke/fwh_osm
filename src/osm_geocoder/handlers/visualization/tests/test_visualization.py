@@ -391,5 +391,56 @@ class TestHandlerRegistration:
         assert len(VISUALIZATION_FACETS) == 6  # +RenderTiledMap (MapLibre+PMTiles viewer)
 
 
+class TestRenderTiledMap:
+    """The MapLibre+PMTiles viewer styling (legibility of dots/routes)."""
+
+    def _render(self, tmp_path, basemap="dark", layers=("routes_5M", "cities_5M")):
+        from osm_geocoder.handlers.visualization.map_renderer import render_tiled_map
+
+        tiles = []
+        for name in layers:
+            p = tmp_path / f"{name}.pmtiles"
+            p.write_bytes(b"x")
+            tiles.append(p)
+        out = tmp_path / f"viewer_{basemap}"
+        render_tiled_map(
+            tiles, layer_names=list(layers), title="T", output_path=out, basemap=basemap
+        )
+        return (out / "index.html").read_text()
+
+    def test_default_basemap_is_dark_no_labels(self, tmp_path):
+        html = self._render(tmp_path)
+        assert "dark_nolabels" in html
+        assert "tile.openstreetmap.org" not in html  # full-colour OSM not the default
+        # CARTO round-robins a..d subdomains (MapLibre doesn't expand `{s}`)
+        assert "a.basemaps.cartocdn.com" in html and "d.basemaps.cartocdn.com" in html
+
+    def test_routes_drawn_under_dots_with_casing(self, tmp_path):
+        html = self._render(tmp_path)
+        import re
+
+        ids = re.findall(r"\{id:'([^']+)'", html)
+        assert "layer0-casing" in ids  # line gets a casing for separation
+        last_line = max(i for i, x in enumerate(ids) if x == "layer0" or x.endswith("-casing"))
+        first_dot = min(i for i, x in enumerate(ids) if x.endswith("-dot"))
+        assert last_line < first_dot  # every route sits beneath every city dot
+
+    def test_zoom_interpolated_sizing(self, tmp_path):
+        html = self._render(tmp_path)
+        assert "'interpolate'" in html  # radii/widths scale with zoom
+
+    def test_legend_lists_layers(self, tmp_path):
+        html = self._render(tmp_path)
+        assert "id='legend'" in html
+        assert "routes 5M" in html and "cities 5M" in html
+
+    def test_basemap_osm_and_none(self, tmp_path):
+        osm = self._render(tmp_path, basemap="osm")
+        assert "tile.openstreetmap.org" in osm
+        none = self._render(tmp_path, basemap="none")
+        assert "background-color" in none
+        assert "cartocdn" not in none and "openstreetmap" not in none
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

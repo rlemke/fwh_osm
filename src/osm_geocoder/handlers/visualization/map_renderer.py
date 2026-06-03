@@ -578,10 +578,17 @@ _TILED_HTML_TEMPLATE = """<!DOCTYPE html>
 #title{position:absolute;top:10px;left:50px;z-index:1;background:#fff;padding:8px 12px;border-radius:6px;
        box-shadow:0 2px 5px rgba(0,0,0,.3);font-family:Arial,sans-serif}
 #title h3{margin:0;font-size:16px} #title small{color:#666}
+#legend{position:absolute;bottom:14px;right:14px;z-index:1;background:rgba(20,20,22,.82);color:#eee;
+        padding:8px 11px;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,.4);font-family:Arial,sans-serif;
+        font-size:12px;line-height:1.55}
+#legend b{display:block;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#aaa;margin-bottom:4px}
+#legend .row{display:flex;align-items:center;gap:7px}
+#legend .sw{width:13px;height:13px;border-radius:3px;border:1px solid rgba(255,255,255,.35);flex:none}
 #err{position:absolute;bottom:10px;left:10px;right:10px;z-index:2;background:#fee;color:#900;padding:8px;
      border:1px solid #c66;border-radius:4px;font-family:monospace;font-size:12px;display:none;white-space:pre-wrap}</style>
 </head><body>
 <div id='title'><h3>__TITLE__</h3><small>vector tiles · zoom-tiled (only the current viewport is fetched) · <a href='https://protomaps.com/' target='_blank'>PMTiles</a> + <a href='https://maplibre.org/' target='_blank'>MapLibre</a></small></div>
+<div id='legend'>__LEGEND__</div>
 <div id='map'></div>
 <div id='err'></div>
 <script>
@@ -599,10 +606,8 @@ const map=new maplibregl.Map({
   style:{
     version:8,
     glyphs:'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
-    sources:Object.assign({
-      bg:{type:'raster',tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],tileSize:256,attribution:'© OpenStreetMap'}
-    }, __SOURCES__),
-    layers:[{id:'bg',type:'raster',source:'bg'}].concat(__LAYERS__)
+    sources:Object.assign({__BG_SOURCE__}, __SOURCES__),
+    layers:[__BG_LAYER__].concat(__LAYERS__)
   },
   center:[__CENTER_LON__,__CENTER_LAT__], zoom:__ZOOM__
 });
@@ -627,6 +632,30 @@ def _default_palette(i: int) -> str:
     return palette[i % len(palette)]
 
 
+# Basemap backdrops. Each entry → (theme, JS source fragment, JS layer fragment).
+# `theme` drives foreground contrast (label/stroke/casing colours) so dots and
+# routes read on whichever backdrop is chosen. "none" emits no tile source, just
+# a flat dark background, so the map works offline. CARTO tiles round-robin over
+# a,b,c,d subdomains — MapLibre GL does NOT expand a Leaflet-style `{s}`, so the
+# subdomains are listed explicitly in the tiles array.
+def _carto_tiles(style: str) -> str:
+    urls = ",".join(
+        f"'https://{s}.basemaps.cartocdn.com/{style}/{{z}}/{{x}}/{{y}}.png'"
+        for s in "abcd"
+    )
+    return f"bg:{{type:'raster',tiles:[{urls}],tileSize:256,attribution:'© OpenStreetMap © CARTO'}}"
+
+
+_BASEMAPS = {
+    "dark": ("dark", _carto_tiles("dark_nolabels"), "{id:'bg',type:'raster',source:'bg'}"),
+    "light": ("light", _carto_tiles("light_nolabels"), "{id:'bg',type:'raster',source:'bg'}"),
+    "osm": ("light",
+            "bg:{type:'raster',tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],tileSize:256,attribution:'© OpenStreetMap'}",
+            "{id:'bg',type:'raster',source:'bg'}"),
+    "none": ("dark", "", "{id:'bg',type:'background',paint:{'background-color':'#0a0a0c'}}"),
+}
+
+
 def render_tiled_map(
     tile_paths: list[str | Path],
     layer_names: list[str] | None = None,
@@ -636,6 +665,7 @@ def render_tiled_map(
     center_lon: float = 0.0,
     center_lat: float = 20.0,
     zoom: float = 2.0,
+    basemap: str = "dark",
 ) -> MapResult:
     """Render a MapLibre + PMTiles viewer page for a set of vector-tile layers.
 
@@ -662,8 +692,13 @@ def render_tiled_map(
         colors: per-layer color; defaults to a small palette.
         title: page title.
         center_lon, center_lat, zoom: initial view.
+        basemap: backdrop — ``"dark"`` (default), ``"light"``, ``"osm"`` or
+            ``"none"``. A muted/dark backdrop keeps the thematic dots and routes
+            legible; the full-colour ``"osm"`` raster competes with them.
     """
     import shutil
+
+    theme, bg_source, bg_layer = _BASEMAPS.get(basemap, _BASEMAPS["dark"])
 
     tile_paths = [Path(p) for p in tile_paths]
     if not tile_paths:
@@ -712,23 +747,63 @@ def render_tiled_map(
         f"protocol.add(new pmtiles.PMTiles(here + '{s['file']}'));" for s in sources
     )
 
+    # Foreground contrast adapts to the backdrop so dots/routes/labels read on
+    # either dark or light. Dot strokes, line casings and label haloes flip; the
+    # band colours themselves are kept as authored.
+    if theme == "dark":
+        dot_stroke, text_color, text_halo, casing = "#0d0d0f", "#f2f2f2", "#000", "#000"
+        casing_opacity = 0.55
+    else:
+        dot_stroke, text_color, text_halo, casing = "#ffffff", "#1a1a1a", "#fff", "#fff"
+        casing_opacity = 0.7
+
     def _layer_block(s: dict) -> str:
         if s["kind"] == "circle":
+            # Radius grows with zoom so megacity dots stay prominent low and
+            # smaller cities don't bloat when you zoom in.
+            radius = "['interpolate',['linear'],['zoom'],3,3.5,6,5,10,7.5]"
             return (f"{{id:'{s['id']}-dot',type:'circle',source:'{s['id']}','source-layer':'{s['layer']}',"
-                    f"paint:{{'circle-color':'{s['color']}','circle-radius':4,'circle-stroke-color':'#fff','circle-stroke-width':1}}}},"
+                    f"paint:{{'circle-color':'{s['color']}','circle-radius':{radius},"
+                    f"'circle-stroke-color':'{dot_stroke}','circle-stroke-width':1.4}}}},"
                     # Label sits immediately right of the dot, anchored on the dot's
                     # vertical centre. No minzoom — the tile already drops features
                     # outside their per-layer zoom range (set in BuildVectorTiles).
                     f"{{id:'{s['id']}-lbl',type:'symbol',source:'{s['id']}','source-layer':'{s['layer']}',"
                     f"layout:{{'text-field':['get','name'],'text-font':['Noto Sans Regular'],'text-size':11,'text-offset':[0.7,0],'text-anchor':'left','text-allow-overlap':false,'text-ignore-placement':false}},"
-                    f"paint:{{'text-color':'#222','text-halo-color':'#fff','text-halo-width':1.2}}}}")
-        return (f"{{id:'{s['id']}',type:'line',source:'{s['id']}','source-layer':'{s['layer']}',"
-                f"paint:{{'line-color':'{s['color']}','line-width':1.2,'line-opacity':0.55}}}}")
-    layers_arr = "[" + ",".join(_layer_block(s) for s in sources) + "]"
+                    f"paint:{{'text-color':'{text_color}','text-halo-color':'{text_halo}','text-halo-width':1.3}}}}")
+        # Lines get a wider casing underneath (separation from the backdrop and
+        # from crossing routes) plus a zoom-interpolated main stroke.
+        width = "['interpolate',['linear'],['zoom'],3,1.2,6,2,10,3.2]"
+        casing_w = "['interpolate',['linear'],['zoom'],3,2.6,6,3.8,10,5.4]"
+        return (f"{{id:'{s['id']}-casing',type:'line',source:'{s['id']}','source-layer':'{s['layer']}',"
+                f"layout:{{'line-cap':'round','line-join':'round'}},"
+                f"paint:{{'line-color':'{casing}','line-width':{casing_w},'line-opacity':{casing_opacity}}}}},"
+                f"{{id:'{s['id']}',type:'line',source:'{s['id']}','source-layer':'{s['layer']}',"
+                f"layout:{{'line-cap':'round','line-join':'round'}},"
+                f"paint:{{'line-color':'{s['color']}','line-width':{width},'line-opacity':0.9}}}}")
+    # Casings/dots for ALL line layers must sit beneath ALL city dots, so emit
+    # every line block first, then every circle block.
+    line_blocks = [_layer_block(s) for s in sources if s["kind"] == "line"]
+    dot_blocks = [_layer_block(s) for s in sources if s["kind"] == "circle"]
+    layers_arr = "[" + ",".join(line_blocks + dot_blocks) + "]"
+
+    # Legend: one row per layer (swatch + human label), so it's obvious what the
+    # dots and routes are. Layer names like `cities_5M` / `routes_5M` are
+    # prettified for display.
+    def _pretty(name: str) -> str:
+        return name.replace("_", " ").replace("cities", "cities").strip()
+    legend_rows = "".join(
+        f"<div class='row'><span class='sw' style='background:{s['color']}'></span>{_pretty(s['layer'])}</div>"
+        for s in sources
+    )
+    legend = f"<b>Layers</b>{legend_rows}" if sources else ""
 
     html = (_TILED_HTML_TEMPLATE
             .replace("__TITLE__", title)
             .replace("__PRE_REGISTER__", pre_register)
+            .replace("__BG_SOURCE__", bg_source)
+            .replace("__BG_LAYER__", bg_layer)
+            .replace("__LEGEND__", legend)
             .replace("__SOURCES__", "{" + sources_obj + "}")
             .replace("__LAYERS__", layers_arr)
             .replace("__CENTER_LON__", repr(float(center_lon)))

@@ -44,9 +44,13 @@ namespace osm.viz {
         to it) that MUST be served over HTTP — `file://` is not reliable for the
         Range fetches PMTiles relies on. `layer_names` are the per-PMTiles inner
         layer names (the `-l` value used in BuildVectorTiles); defaults to the
-        file stems. */
+        file stems. `basemap` selects the backdrop — "dark" (default, CARTO
+        dark no-labels: bright bands/routes pop hardest), "light" (CARTO Positron
+        no-labels), "osm" (full-colour OpenStreetMap raster), or "none" (flat dark
+        background, no tiles). */
     event facet RenderTiledMap(tiles: [String], layer_names: [String], colors: [String],
-        title: String = "Tiled map", center_lon: Double = 0.0, center_lat: Double = 20.0, zoom: Double = 2.0) => (result: MapResult) with Effect(kind = "io") with Cost(tier = "cheap")
+        title: String = "Tiled map", center_lon: Double = 0.0, center_lat: Double = 20.0, zoom: Double = 2.0,
+        basemap: String = "dark") => (result: MapResult) with Effect(kind = "io") with Cost(tier = "cheap")
 
     /** Renders a map with custom layer styling. */
     event facet RenderStyledMap(geojson_path: String, style: LayerStyle,

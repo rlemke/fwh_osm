@@ -113,6 +113,17 @@ scripts/ffl-run <bundle>.ffl --workflow osm.Cities.routes.CitiesAndRoutesByZoomF
 scripts/serve-tiled-map 8765 <output_map_dir>
 ```
 
+### Viewer legibility
+
+`osm.viz.RenderTiledMap` renders on a **dark, no-label CARTO backdrop** by
+default so the band-coloured dots and routes pop — a full-colour OSM basemap
+competes with the thematic overlays (its own coloured highways camouflage the
+motorway routes). Routes are drawn with a casing beneath every city dot, dot
+radii and line widths interpolate with zoom, and a **legend** (bottom-right)
+names each band layer. Pick a different backdrop with the `basemap` param:
+`"dark"` (default), `"light"` (CARTO Positron), `"osm"` (full-colour
+OpenStreetMap), or `"none"` (flat dark, no tiles — offline-friendly).
+
 > **Runner image requirements:** tile building needs both `tippecanoe`
 > (mbtiles) and the `pmtiles` CLI (mbtiles → pmtiles) on the runner. Both are
 > baked into the `example-runner` image — if a tiled map renders dots but no
