@@ -30,14 +30,17 @@ namespace osm.cache {
     }
 
     /** Force-refresh the PBF cache for an explicit list of regions. Resolves
-        the names to Regions, then re-downloads each fresh in parallel. Defaults
-        to the eight Geofabrik continent extracts; override `region_names` to
-        target states/countries. */
-    workflow RefreshRegionCaches(region_names: [String] = [
-        "africa", "antarctica", "asia", "australia-oceania",
-        "central-america", "europe", "north-america", "south-america"
-    ]) => (refreshed_paths: [String]) andThen {
-        resolved = osm.Region.ResolveRegions(names = $.region_names)
+        the names to Regions, then re-downloads each fresh in parallel.
+        `expand` (default "subregions") turns a parent name into its leaf
+        extracts, so the default `["north-america"]` refreshes all NA
+        subregions — the working set the fan-out workflows actually consume.
+        Set `expand = "none"` to refresh only the named extracts (e.g. the
+        continent PBFs themselves). */
+    workflow RefreshRegionCaches(
+        region_names: [String] = ["north-america"],
+        expand: String = "subregions"
+    ) => (refreshed_paths: [String]) andThen {
+        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = $.expand)
     } andThen foreach r in resolved.regions {
         dl = osm.cache.Download(region = $.r, cache_policy = "refresh")
         yield RefreshRegionCaches(refreshed_paths = [dl.cache.path])

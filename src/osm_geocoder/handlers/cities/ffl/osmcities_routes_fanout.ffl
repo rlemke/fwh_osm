@@ -34,7 +34,7 @@ namespace osm.Cities.routes {
         min_population: Long = 10000,
         road_class: String = "major"
     ) => (road_paths: [String], city_paths: [String]) andThen {
-        resolved = osm.Region.ResolveRegions(names = $.region_names)
+        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = "subregions")
     } andThen foreach r in resolved.regions {
         cache = osm.cache.Download(region = $.r)
         roads = osm.Source.PBF.ExtractRoads(cache = cache.cache, road_class = $.road_class)
@@ -52,24 +52,12 @@ namespace osm.Cities.routes {
         extraction. Same four bands / one-colour-per-band scheme as
         CitiesAndRoutesByZoom; only the extraction stage fans out. */
     workflow CitiesAndRoutesByZoomFanout(
-        region_names: [String] = [
-        "north-america/us/alabama", "north-america/us/alaska", "north-america/us/arizona", "north-america/us/arkansas",
-        "north-america/us/california", "north-america/us/colorado", "north-america/us/connecticut", "north-america/us/delaware",
-        "north-america/us/district-of-columbia", "north-america/us/florida", "north-america/us/georgia", "north-america/us/hawaii",
-        "north-america/us/idaho", "north-america/us/illinois", "north-america/us/indiana", "north-america/us/iowa",
-        "north-america/us/kansas", "north-america/us/kentucky", "north-america/us/louisiana", "north-america/us/maine",
-        "north-america/us/maryland", "north-america/us/massachusetts", "north-america/us/michigan", "north-america/us/minnesota",
-        "north-america/us/mississippi", "north-america/us/missouri", "north-america/us/montana", "north-america/us/nebraska",
-        "north-america/us/nevada", "north-america/us/new-hampshire", "north-america/us/new-jersey", "north-america/us/new-mexico",
-        "north-america/us/new-york", "north-america/us/north-carolina", "north-america/us/north-dakota", "north-america/us/ohio",
-        "north-america/us/oklahoma", "north-america/us/oregon", "north-america/us/pennsylvania", "north-america/us/rhode-island",
-        "north-america/us/south-carolina", "north-america/us/south-dakota", "north-america/us/tennessee", "north-america/us/texas",
-        "north-america/us/utah", "north-america/us/vermont", "north-america/us/virginia", "north-america/us/washington",
-        "north-america/us/west-virginia", "north-america/us/wisconsin", "north-america/us/wyoming", "north-america/canada/alberta",
-        "north-america/canada/british-columbia", "north-america/canada/manitoba", "north-america/canada/new-brunswick", "north-america/canada/newfoundland-and-labrador",
-        "north-america/canada/nova-scotia", "north-america/canada/ontario", "north-america/canada/prince-edward-island", "north-america/canada/quebec",
-        "north-america/canada/saskatchewan", "north-america/canada/yukon", "north-america/mexico", "north-america/greenland"
-    ],
+        // A single parent name expands to its finest Geofabrik leaf extracts
+        // (ResolveRegions(expand = "subregions") in the facet above): one
+        // "north-america" → all US states + Canadian provinces + Mexico +
+        // Greenland. Pass an explicit list to target specific subregions —
+        // leaf names pass through expansion unchanged.
+        region_names: [String] = ["north-america"],
         zoom_a: Long = 3,  min_pop_a: Long = 5000000,
         zoom_b: Long = 6,  min_pop_b: Long = 1000000,
         zoom_c: Long = 8,  min_pop_c: Long = 500000,

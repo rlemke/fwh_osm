@@ -60,7 +60,8 @@ namespace osm.examples {
     workflow DownloadAcrossRegions(
         region_names: [String],
         prefer_continent: String = "",
-        strict: Boolean = false
+        strict: Boolean = false,
+        expand: String = "none"
     ) => (
         caches: [OSMCache],
         diagnostics: ResolutionDiagnostics
@@ -71,7 +72,8 @@ namespace osm.examples {
         resolved = osm.Region.ResolveRegions(
             names = $.region_names,
             prefer_continent = $.prefer_continent,
-            strict = $.strict
+            strict = $.strict,
+            expand = $.expand
         )
 
         // Scalar yield: `diagnostics` is set once.  If the foreach below
