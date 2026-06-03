@@ -1,0 +1,45 @@
+// Deliberate PBF cache refresh.
+//
+// Day-to-day workflows run with `cache_policy = "prefer_cache"` (or the
+// AFL_OSM_USE_CACHE_IF_PRESENT env) so a cached PBF is used AS-IS — Geofabrik
+// rebuilds every extract daily, so revalidating would re-pull gigabytes for
+// data that is, for most analyses, effectively unchanged.
+//
+// These workflows are the explicit "now actually update the data" path: they
+// force a fresh download (`cache_policy = "refresh"`) for either every region
+// currently cached, or an explicit list. Run them on a schedule or on demand;
+// downstream extraction caches will then re-derive from the fresher PBFs.
+//
+// Prerequisites: compile with osmtypes.ffl, osmregion.ffl, osmcache_download.ffl.
+
+namespace osm.cache {
+    use osm.types
+    use osm.Region
+
+    /** Force-refresh the PBF cache for every region currently cached locally.
+        `ListCachedRegions` enumerates the cache with no network; the foreach
+        re-downloads each region fresh from Geofabrik in parallel across the
+        fleet. The list-typed yield-merge aggregates the refreshed paths. This
+        is the "update all caches" entry point — the inverse of the everyday
+        prefer-cache fast path. */
+    workflow RefreshAllCaches() => (refreshed_paths: [String]) andThen {
+        cached = osm.cache.ListCachedRegions()
+    } andThen foreach r in cached.regions {
+        dl = osm.cache.Download(region = $.r, cache_policy = "refresh")
+        yield RefreshAllCaches(refreshed_paths = [dl.cache.path])
+    }
+
+    /** Force-refresh the PBF cache for an explicit list of regions. Resolves
+        the names to Regions, then re-downloads each fresh in parallel. Defaults
+        to the eight Geofabrik continent extracts; override `region_names` to
+        target states/countries. */
+    workflow RefreshRegionCaches(region_names: [String] = [
+        "africa", "antarctica", "asia", "australia-oceania",
+        "central-america", "europe", "north-america", "south-america"
+    ]) => (refreshed_paths: [String]) andThen {
+        resolved = osm.Region.ResolveRegions(names = $.region_names)
+    } andThen foreach r in resolved.regions {
+        dl = osm.cache.Download(region = $.r, cache_policy = "refresh")
+        yield RefreshRegionCaches(refreshed_paths = [dl.cache.path])
+    }
+}

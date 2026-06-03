@@ -53,10 +53,23 @@ namespace osm.Region {
      *
      *  Names that expand to multiple regions ("Alps") contribute all
      *  their constituents to `regions` and a single entry to
-     *  `diagnostics.expanded` for traceability. */
+     *  `diagnostics.expanded` for traceability.
+     *
+     *  `expand` performs HIERARCHICAL expansion so one parent name can drive
+     *  a whole-continent / whole-country fan-out without listing every
+     *  subregion:
+     *    "none" (default) — resolve each name as-is (a continent stays the
+     *      single continent extract).
+     *    "subregions" — replace each parent with its finest-grained Geofabrik
+     *      leaf extracts: ResolveRegions(names = ["north-america"], expand =
+     *      "subregions") → all US states + Canadian provinces + Mexico +
+     *      Greenland; ["us"] → 51 states; an already-leaf name (a single
+     *      state, or a country with no subdivisions) passes through unchanged.
+     *      Names may be mixed freely. */
     event facet ResolveRegions(names: [String],
         prefer_continent: String = "",
-        strict: Boolean = false) => (regions: [Region], diagnostics: ResolutionDiagnostics) with Effect(kind = "pure") with Cost(tier = "cheap")
+        strict: Boolean = false,
+        expand: String = "none") => (regions: [Region], diagnostics: ResolutionDiagnostics) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Enumerate the known region catalog, optionally filtered.
      *  Examples:

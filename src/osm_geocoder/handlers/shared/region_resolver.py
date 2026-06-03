@@ -1063,3 +1063,49 @@ def list_regions_typed(
         regions = [r for r in regions if _normalize(r.continent) == norm_target]
 
     return regions
+
+
+def _children_index() -> dict[str, list[Region]]:
+    """Map each ``parent_canonical`` to its direct child Regions (full catalog)."""
+    idx: dict[str, list[Region]] = {}
+    for r in list_regions_typed():
+        idx.setdefault(r.parent_canonical, []).append(r)
+    return idx
+
+
+def expand_to_subregions(regions: list[Region]) -> list[Region]:
+    """Replace each parent region with its finest-grained Geofabrik leaf extracts.
+
+    A *leaf* is a region with no children in the catalog. A country/continent
+    with subdivisions expands to them (``us`` → 51 states, ``north-america`` →
+    states + provinces + Mexico + Greenland); a region that is already a leaf
+    (a single state, or a country without subdivisions like ``mexico``) passes
+    through unchanged. This is what keeps fan-out off the un-tractable
+    continent / large-country mega-PBFs.
+
+    Order is preserved and results are de-duplicated by ``geofabrik_path``.
+    """
+    idx = _children_index()
+
+    def _leaves(region: Region, seen_paths: set[str]) -> list[Region]:
+        # Guard against any pathological cycle in the catalog (the Geofabrik
+        # hierarchy is a tree, so this never fires in practice).
+        if region.geofabrik_path in seen_paths:
+            return []
+        seen_paths.add(region.geofabrik_path)
+        kids = idx.get(region.geofabrik_path, [])
+        if not kids:
+            return [region]
+        out: list[Region] = []
+        for k in kids:
+            out.extend(_leaves(k, seen_paths))
+        return out
+
+    result: list[Region] = []
+    emitted: set[str] = set()
+    for r in regions:
+        for leaf in _leaves(r, set()):
+            if leaf.geofabrik_path not in emitted:
+                emitted.add(leaf.geofabrik_path)
+                result.append(leaf)
+    return result

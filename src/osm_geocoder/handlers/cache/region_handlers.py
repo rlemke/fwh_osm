@@ -9,14 +9,33 @@ and composed analysis workflow starts from) plus ``osm.Region.ResolveRegion``
 import os
 from typing import Any
 
-from ..shared.pbf_cache import download_region, to_osm_cache
+from ..shared.pbf_cache import download_region, list_cached_regions, to_osm_cache
 from ..shared.region_resolver import (
     StrictResolutionError,
+    expand_to_subregions,
     list_regions_typed,
     region_from_path,
     resolve,
     resolve_batch,
 )
+
+
+def _download_kwargs(params: dict[str, Any]) -> dict[str, Any]:
+    """Map a ``cache_policy`` string to ``download_region`` keyword args.
+
+    - ``"auto"`` (default): defer to ``AFL_OSM_USE_CACHE_IF_PRESENT``.
+    - ``"prefer_cache"``: use a cached PBF as-is, skip Geofabrik revalidation.
+    - ``"refresh"``: force a fresh download (ignores the cache).
+    - ``"revalidate"`` / ``"strict"``: always revalidate against Geofabrik.
+    """
+    policy = str(params.get("cache_policy") or "auto").strip().lower()
+    if policy == "refresh":
+        return {"force": True}
+    if policy == "prefer_cache":
+        return {"use_cache_if_present": True}
+    if policy in ("revalidate", "strict"):
+        return {"use_cache_if_present": False}
+    return {}  # auto → env-driven default
 
 
 def _download_as_osm_cache(
@@ -60,7 +79,7 @@ def handle_cache_region(params: dict[str, Any]) -> dict[str, Any]:
     # produced via the new Region-driven path or the legacy string entry.
     typed_region = region_from_path(geofabrik_path, query=region).to_dict()
     cache = to_osm_cache(
-        download_region(geofabrik_path), region=typed_region
+        download_region(geofabrik_path, **_download_kwargs(params)), region=typed_region
     )
     if step_log:
         step_log(
@@ -115,7 +134,9 @@ def handle_region_download(params: dict[str, Any]) -> dict[str, Any]:
     # Pass the input Region through verbatim so OSMCache.region carries the
     # caller's typed metadata (name, level, continent, ...) rather than the
     # path-only fallback.
-    cache = to_osm_cache(download_region(geofabrik_path), region=region)
+    cache = to_osm_cache(
+        download_region(geofabrik_path, **_download_kwargs(params)), region=region
+    )
     if step_log:
         display = region.get("name") or geofabrik_path
         source = cache.get("source", "unknown")
@@ -124,6 +145,26 @@ def handle_region_download(params: dict[str, Any]) -> dict[str, Any]:
             f"wasInCache={cache.get('wasInCache', False)})"
         )
     return {"cache": cache}
+
+
+def handle_list_cached_regions(params: dict[str, Any]) -> dict[str, Any]:
+    """Return every region currently present in the local PBF cache.
+
+    Backs ``osm.cache.ListCachedRegions() => (regions: [Region])``. Scans the
+    cache sidecars (no Geofabrik contact) and reverse-maps each entry to a
+    typed Region — the input side of a deliberate cache-refresh foreach:
+
+        cached = osm.cache.ListCachedRegions()
+        andThen foreach r in cached.regions {
+            osm.cache.Download(region = $.r, cache_policy = "refresh")
+        }
+    """
+    step_log = params.get("_step_log")
+    keys = list_cached_regions()
+    regions = [region_from_path(k).to_dict() for k in keys]
+    if step_log:
+        step_log(f"ListCachedRegions: {len(regions)} region(s) in the PBF cache")
+    return {"regions": regions}
 
 
 def handle_resolve_region(params: dict[str, Any]) -> dict[str, Any]:
@@ -194,6 +235,7 @@ def handle_resolve_regions(params: dict[str, Any]) -> dict[str, Any]:
     names = params.get("names") or []
     prefer_continent = params.get("prefer_continent", "") or None
     strict = bool(params.get("strict", False))
+    expand = str(params.get("expand", "none") or "none").strip().lower()
     step_log = params.get("_step_log")
 
     try:
@@ -205,16 +247,26 @@ def handle_resolve_regions(params: dict[str, Any]) -> dict[str, Any]:
             step_log(f"ResolveRegions: strict failure — {exc}")
         raise
 
+    # Hierarchical expansion: turn a parent name ("north-america", "us") into
+    # its finest-grained Geofabrik leaf extracts, so a single name can drive a
+    # whole-continent / whole-country fan-out without listing every subregion.
+    regions = result.regions
+    if expand in ("subregions", "leaves", "subnational"):
+        before = len(regions)
+        regions = expand_to_subregions(regions)
+        if step_log:
+            step_log(f"ResolveRegions: expand='{expand}' {before} → {len(regions)} subregions")
+
     if step_log:
         step_log(
-            f"ResolveRegions: {len(names)} input → {len(result.regions)} regions "
+            f"ResolveRegions: {len(names)} input → {len(regions)} regions "
             f"(unresolved={len(result.diagnostics.unresolved)}, "
             f"ambiguous={len(result.diagnostics.ambiguous)}, "
             f"expanded={len(result.diagnostics.expanded)})"
         )
 
     return {
-        "regions": [r.to_dict() for r in result.regions],
+        "regions": [r.to_dict() for r in regions],
         "diagnostics": result.diagnostics.to_dict(),
     }
 
@@ -252,6 +304,7 @@ def handle_list_regions(params: dict[str, Any]) -> dict[str, Any]:
 _DISPATCH = {
     "osm.ops.CacheRegion": handle_cache_region,
     "osm.cache.Download": handle_region_download,
+    "osm.cache.ListCachedRegions": handle_list_cached_regions,
     "osm.Region.ResolveRegion": handle_resolve_region,
     "osm.Region.ResolveRegions": handle_resolve_regions,
     "osm.Region.ListRegions": handle_list_regions,

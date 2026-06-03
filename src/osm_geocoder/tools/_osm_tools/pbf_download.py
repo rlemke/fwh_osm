@@ -122,6 +122,11 @@ def _request(url: str, method: str = "GET") -> urllib.request.Request:
     return req
 
 
+def _use_cache_if_present() -> bool:
+    """True when ``AFL_OSM_USE_CACHE_IF_PRESENT`` opts into pinned-cache mode."""
+    return os.environ.get("AFL_OSM_USE_CACHE_IF_PRESENT", "").lower() in ("1", "true", "yes")
+
+
 def fetch_md5(url: str) -> str:
     """Fetch Geofabrik's ``.md5`` file for ``url``; return the hex digest."""
     md5_url = url + ".md5"
@@ -246,6 +251,23 @@ def _stream_download_urllib(
     return size, sha.hexdigest(), md5.hexdigest().lower()
 
 
+def list_cached_regions(*, storage: Storage | None = None) -> list[str]:
+    """Return the Geofabrik region keys currently present in the PBF cache.
+
+    Walks the ``osm/pbf`` cache sidecars and reverse-maps each to its region
+    key (``north-america/us/california``, ...), sorted. Does NOT contact
+    Geofabrik. Use to drive a deliberate cache-refresh over exactly what's
+    cached.
+    """
+    storage = storage or LocalStorage()
+    out: list[str] = []
+    for entry in sidecar.list_entries(NAMESPACE, CACHE_TYPE, storage):
+        reg = relative_path_to_region(entry.get("relative_path", ""))
+        if reg:
+            out.append(reg)
+    return sorted(set(out))
+
+
 def is_region_cached(
     region: str, *, storage: Storage | None = None
 ) -> bool:
@@ -286,16 +308,47 @@ def download_region(
     *,
     storage: Storage | None = None,
     force: bool = False,
+    use_cache_if_present: bool | None = None,
     on_progress: ProgressCallback | None = None,
 ) -> DownloadResult:
     """Download a Geofabrik PBF for ``region`` into the OSM cache.
 
     Thread-safe: concurrent calls for the same region serialize on a
     per-region lock so only one download happens.
+
+    ``use_cache_if_present`` controls pinned-cache mode per call:
+    ``None`` (default) defers to the ``AFL_OSM_USE_CACHE_IF_PRESENT`` env,
+    ``True`` forces it on, ``False`` forces normal revalidation. ``force=True``
+    always re-downloads and overrides both.
     """
     storage = storage or LocalStorage()
     rel_path, url = region_to_paths(region)
     cache_file = sidecar.cache_path(NAMESPACE, CACHE_TYPE, rel_path, storage)
+
+    # Offline / pinned-cache mode: if the region is already cached, use it AS-IS
+    # without contacting Geofabrik. Geofabrik rebuilds every PBF daily with a new
+    # md5, so the normal freshness check treats an older-but-valid cache as stale
+    # and re-downloads gigabytes — undesirable when an existing extract is fine
+    # (reproducing a map, working offline, or when upstream is slow/flaky). Opt-in
+    # per call (use_cache_if_present) or globally (AFL_OSM_USE_CACHE_IF_PRESENT);
+    # `force=True` still bypasses it.
+    prefer_cache = _use_cache_if_present() if use_cache_if_present is None else use_cache_if_present
+    if not force and prefer_cache and is_region_cached(region, storage=storage):
+        side = sidecar_entry_for(region, storage=storage) or {}
+        source = side.get("source", {})
+        return DownloadResult(
+            region=region,
+            path=cache_file,
+            relative_path=rel_path,
+            source_url=source.get("url", url),
+            size_bytes=side.get("size_bytes", storage.size(cache_file)),
+            sha256=side.get("sha256", ""),
+            md5=source.get("source_checksum", {}).get("value", ""),
+            source_timestamp=source.get("source_timestamp"),
+            downloaded_at=source.get("downloaded_at", ""),
+            was_cached=True,
+            sidecar=side,
+        )
 
     with _region_lock(region):
         storage.mkdir_p(Storage.dirname(cache_file))

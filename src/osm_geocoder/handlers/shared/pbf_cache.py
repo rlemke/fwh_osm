@@ -33,6 +33,7 @@ from _osm_tools.pbf_download import (  # noqa: E402,F401
     cached_path,
     download_region,
     is_region_cached,
+    list_cached_regions,
     manifest_entry_for,
     sidecar_entry_for,
     to_osm_cache,

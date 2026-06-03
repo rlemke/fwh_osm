@@ -774,3 +774,61 @@ class TestRegionToDict:
         assert d["expanded"][0]["query"] == "Alps"
         assert d["expanded"][0]["feature_name"] == "alps"
         assert len(d["expanded"][0]["regions"]) == 7
+
+
+# ---------------------------------------------------------------------------
+# expand_to_subregions — hierarchical parent → leaf-extract expansion
+# ---------------------------------------------------------------------------
+
+
+class TestExpandToSubregions:
+    """Verify a single parent name expands to its finest Geofabrik leaves."""
+
+    def _resolve(self, name):
+        from osm_geocoder.handlers.shared.region_resolver import resolve_batch
+
+        return resolve_batch(names=[name]).regions
+
+    def test_continent_expands_to_leaves(self):
+        from osm_geocoder.handlers.shared.region_resolver import (
+            _children_index,
+            expand_to_subregions,
+        )
+
+        na = self._resolve("north-america")
+        assert [r.geofabrik_path for r in na] == ["north-america"]  # un-expanded today
+
+        leaves = expand_to_subregions(na)
+        paths = [r.geofabrik_path for r in leaves]
+        # The continent extract itself must NOT survive — only its leaves.
+        assert "north-america" not in paths
+        assert "north-america/us/california" in paths
+        assert len(paths) > 50  # states + provinces + Mexico + Greenland
+        # Every result is a genuine leaf (no further children in the catalog).
+        idx = _children_index()
+        assert all(not idx.get(p) for p in paths)
+
+    def test_country_with_subdivisions_expands(self):
+        from osm_geocoder.handlers.shared.region_resolver import expand_to_subregions
+
+        states = expand_to_subregions(self._resolve("us"))
+        paths = [r.geofabrik_path for r in states]
+        assert "north-america/us" not in paths
+        assert "north-america/us/california" in paths
+        assert len(paths) == 51  # 50 states + DC
+
+    def test_leaf_passes_through_unchanged(self):
+        from osm_geocoder.handlers.shared.region_resolver import expand_to_subregions
+
+        ca = self._resolve("north-america/us/california")
+        leaves = expand_to_subregions(ca)
+        assert [r.geofabrik_path for r in leaves] == ["north-america/us/california"]
+
+    def test_dedup_across_overlapping_inputs(self):
+        from osm_geocoder.handlers.shared.region_resolver import expand_to_subregions
+
+        # "us" (→ all states) plus an explicit state must not double-count it.
+        mixed = self._resolve("us") + self._resolve("north-america/us/texas")
+        out = expand_to_subregions(mixed)
+        paths = [r.geofabrik_path for r in out]
+        assert paths.count("north-america/us/texas") == 1

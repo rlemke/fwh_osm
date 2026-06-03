@@ -104,10 +104,11 @@ class TestOsmFilterHandlers:
 class TestOsmRegionHandlers:
     def test_dispatch_keys(self):
         mod = _osm_import("region_handlers")
-        # Post cross-region migration: ListRegions, ResolveRegion,
-        # ResolveRegions, osm.cache.Download, osm.ops.CacheRegion.
-        assert len(mod._DISPATCH) == 5
+        # ListRegions, ResolveRegion, ResolveRegions, osm.cache.Download,
+        # osm.cache.ListCachedRegions, osm.ops.CacheRegion.
+        assert len(mod._DISPATCH) == 6
         assert "osm.Region.ResolveRegion" in mod._DISPATCH
+        assert "osm.cache.ListCachedRegions" in mod._DISPATCH
 
     def test_handle_dispatches(self):
         mod = _osm_import("region_handlers")
