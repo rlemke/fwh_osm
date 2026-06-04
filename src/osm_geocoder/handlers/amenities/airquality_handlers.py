@@ -16,6 +16,7 @@ from typing import Any
 
 from facetwork.config import get_output_base
 
+from ..shared._output import ensure_dir, open_output, read_storage_json
 from ..shared.output_cache import cached_result, save_result_meta
 
 log = logging.getLogger(__name__)
@@ -152,7 +153,8 @@ def handle_fetch_air_quality(payload: dict) -> dict:
         output_path = os.path.join(output_dir, f"airquality-{parameter}.geojson")
 
         geojson = {"type": "FeatureCollection", "features": features}
-        with open(output_path, "w") as f:
+        ensure_dir(output_path)
+        with open_output(output_path, "w") as f:
             json.dump(geojson, f)
 
         avg_value = sum(values) / len(values) if values else 0.0
@@ -217,10 +219,8 @@ def handle_correlate(payload: dict) -> dict:
         return hit
 
     try:
-        with open(schools_path) as f:
-            schools_data = json.load(f)
-        with open(air_quality_path) as f:
-            stations_data = json.load(f)
+        schools_data = read_storage_json(schools_path)
+        stations_data = read_storage_json(air_quality_path)
     except (FileNotFoundError, json.JSONDecodeError) as e:
         log.error("Failed to load input files: %s", e)
         return {"result": _empty_correlation_result()}
@@ -285,7 +285,8 @@ def handle_correlate(payload: dict) -> dict:
     output_path = os.path.join(output_dir, "school-exposure.geojson")
 
     geojson = {"type": "FeatureCollection", "features": correlated_features}
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump(geojson, f)
 
     matched = len(correlated_features)
@@ -336,8 +337,7 @@ def handle_exposure_stats(payload: dict) -> dict:
         return hit
 
     try:
-        with open(input_path) as f:
-            data = json.load(f)
+        data = read_storage_json(input_path)
     except (FileNotFoundError, json.JSONDecodeError) as e:
         log.error("Failed to load exposure data: %s", e)
         return {"stats": _empty_stats()}

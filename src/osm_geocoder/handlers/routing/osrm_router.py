@@ -32,7 +32,7 @@ import math
 import os
 from datetime import UTC, datetime
 
-from ..shared._output import resolve_output_dir
+from ..shared._output import ensure_dir, open_output, resolve_output_dir
 
 log = logging.getLogger(__name__)
 
@@ -151,7 +151,8 @@ def _handle_route(payload: dict) -> dict:
             },
         }],
     }
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump(geojson, f)
 
     if step_log:
@@ -256,7 +257,8 @@ def _handle_multi_stop(payload: dict) -> dict:
 
     output_path = os.path.join(_output_dir(), f"osrm-multi-{len(waypoints)}pts-{profile}.geojson")
     geojson = {"type": "FeatureCollection", "features": features}
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump(geojson, f)
 
     if step_log:
@@ -368,7 +370,8 @@ def _handle_isochrone(payload: dict) -> dict:
             },
         }],
     }
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump(geojson, f)
 
     if step_log:
@@ -491,7 +494,8 @@ def _handle_matrix(payload: dict) -> dict:
 
     labels = [p.get("name", f"p{i}") for i, p in enumerate(points)]
     output_path = os.path.join(_output_dir(), f"osrm-matrix-{len(points)}pts-{profile}.json")
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump({"labels": labels, "durations": durations, "distances": distances,
                    "profile": profile, "backend": backend}, f)
 
@@ -596,7 +600,8 @@ def _handle_map_match(payload: dict) -> dict:
                            "distance_km": distance_km, "profile": profile},
         }],
     }
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump(geojson, f)
 
     if step_log:
@@ -675,7 +680,8 @@ def _handle_trip(payload: dict) -> dict:
                            "profile": profile},
         }],
     }
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump(geojson, f)
 
     if step_log:

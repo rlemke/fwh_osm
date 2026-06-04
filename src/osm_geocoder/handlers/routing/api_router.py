@@ -23,7 +23,7 @@ import os
 import time
 from datetime import UTC, datetime
 
-from ..shared._output import resolve_output_dir
+from ..shared._output import ensure_dir, open_output, resolve_output_dir
 
 log = logging.getLogger(__name__)
 
@@ -236,7 +236,8 @@ def _write_route_geojson(
             }
         ],
     }
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump(geojson, f)
 
 
@@ -419,7 +420,8 @@ def _handle_multi_stop(payload: dict) -> dict:
 
     output_path = os.path.join(_output_dir(), f"multi-stop-{len(waypoints)}pts-{profile}.geojson")
     geojson = {"type": "FeatureCollection", "features": all_features}
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump(geojson, f)
 
     backend = "openrouteservice" if _use_ors() else "osrm-api"
@@ -482,7 +484,8 @@ def _handle_isochrone(payload: dict) -> dict:
         data = _ors_isochrone((center_lon, center_lat), time_minutes, profile)
         if data and data.get("features"):
             backend = "openrouteservice"
-            with open(output_path, "w") as f:
+            ensure_dir(output_path)
+            with open_output(output_path, "w") as f:
                 json.dump(data, f)
         else:
             # Fallback: approximate circle
@@ -538,7 +541,8 @@ def _write_isochrone_estimate(
             }
         ],
     }
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump(geojson, f)
 
 

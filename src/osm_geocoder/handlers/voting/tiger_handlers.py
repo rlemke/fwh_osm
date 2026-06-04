@@ -10,6 +10,7 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ..shared._output import ensure_dir, open_output, read_storage_json
 from ..shared.output_cache import cached_result, save_result_meta
 from .tiger_downloader import (
     DISTRICT_CONGRESSIONAL,
@@ -415,8 +416,7 @@ def _make_filter_districts_handler(facet_name: str):
             }
 
         try:
-            with open(input_path) as f:
-                geojson = json.load(f)
+            geojson = read_storage_json(input_path)
 
             features = geojson.get("features", [])
             filtered = [f for f in features if f.get("properties", {}).get(attribute) == value]
@@ -435,7 +435,8 @@ def _make_filter_districts_handler(facet_name: str):
                 "features": filtered,
             }
 
-            with open(output_path, "w") as f:
+            ensure_dir(output_path)
+            with open_output(output_path, "w") as f:
                 json.dump(output_geojson, f)
 
             rv = {

@@ -13,6 +13,8 @@ from typing import Any
 
 from facetwork.config import get_output_base
 
+from ..shared._output import ensure_dir, open_output, read_storage_json
+
 log = logging.getLogger(__name__)
 
 NAMESPACE = "osm.Routing"
@@ -34,8 +36,7 @@ def _load_cities_geojson(cities_path: str) -> list[dict[str, Any]]:
 
     Returns a list of feature dicts with name, population, and coordinates.
     """
-    with open(cities_path) as f:
-        data = json.load(f)
+    data = read_storage_json(cities_path)
 
     cities = []
     for feature in data.get("features", []):
@@ -314,7 +315,8 @@ def compute_pairwise_routes(payload: dict) -> dict:
         "features": features,
     }
 
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump(geojson, f)
 
     route_count = len(features)

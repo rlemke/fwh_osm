@@ -21,6 +21,7 @@ try:
 except ImportError:
     HAS_REQUESTS = False
 
+from ..shared._output import ensure_dir, open_output, read_storage_json
 from .zoom_graph import RoadGraph, _haversine_m
 
 GRAPHHOPPER_API_URL = os.environ.get("GRAPHHOPPER_API_URL", "http://localhost:8989")
@@ -172,8 +173,7 @@ def build_anchors(graph: RoadGraph, cities_path: str, zoom_level: int) -> list[i
     # Load cities
     cities: list[tuple[float, float, int]] = []  # (lon, lat, population)
     try:
-        with open(cities_path, encoding="utf-8") as f:
-            geojson = json.load(f)
+        geojson = read_storage_json(cities_path)
         for feat in geojson.get("features", []):
             props = feat.get("properties", {})
             pop = props.get("population", 0)
@@ -484,24 +484,24 @@ def compute_sbs_for_zoom(
 
 def save_sbs(sbs: dict[int, float], path: str) -> None:
     """Save SBS scores to JSON file."""
-    with open(path, "w", encoding="utf-8") as f:
+    ensure_dir(path)
+    with open_output(path, "w") as f:
         json.dump({str(k): v for k, v in sbs.items()}, f)
 
 
 def load_sbs(path: str) -> dict[int, float]:
     """Load SBS scores from JSON file."""
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
+    data = read_storage_json(path)
     return {int(k): v for k, v in data.items()}
 
 
 def save_anchors(anchors: list[int], path: str) -> None:
     """Save anchor node list to JSON file."""
-    with open(path, "w", encoding="utf-8") as f:
+    ensure_dir(path)
+    with open_output(path, "w") as f:
         json.dump(anchors, f)
 
 
 def load_anchors(path: str) -> list[int]:
     """Load anchor node list from JSON file."""
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    return read_storage_json(path)

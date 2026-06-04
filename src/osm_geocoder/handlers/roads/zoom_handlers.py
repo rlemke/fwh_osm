@@ -12,6 +12,7 @@ from pathlib import Path
 
 from facetwork.config import get_output_base
 
+from ..shared._output import ensure_dir, open_output, read_storage_json
 from ..shared.output_cache import cached_result, save_result_meta, with_output_cache
 from .zoom_builder import (
     _empty_metrics,
@@ -247,7 +248,8 @@ def _make_compute_scores_handler(facet_name: str):
 
             out_dir = Path(graph_path).parent
             scores_path = str(out_dir / "scores.json")
-            with open(scores_path, "w", encoding="utf-8") as f:
+            ensure_dir(scores_path)
+            with open_output(scores_path, "w") as f:
                 serializable = {
                     str(z): {str(eid): s for eid, s in z_scores.items()}
                     for z, z_scores in scores.items()
@@ -393,8 +395,7 @@ def _make_select_edges_handler(facet_name: str):
             graph = RoadGraph.load(graph_path)
 
             # Load scores
-            with open(scores_path, encoding="utf-8") as f:
-                raw = json.load(f)
+            raw = read_storage_json(scores_path)
             scores = {
                 int(z): {int(eid): s for eid, s in z_scores.items()} for z, z_scores in raw.items()
             }
@@ -420,7 +421,8 @@ def _make_select_edges_handler(facet_name: str):
 
             out_dir = Path(graph_path).parent
             assignments_path = str(out_dir / "assignments.json")
-            with open(assignments_path, "w", encoding="utf-8") as f:
+            ensure_dir(assignments_path)
+            with open_output(assignments_path, "w") as f:
                 json.dump({str(k): v for k, v in assignments.items()}, f)
 
             if step_log:
@@ -469,8 +471,7 @@ def _make_export_zoom_layers_handler(facet_name: str):
             from .zoom_builder import _export_zoom_geojson
 
             graph = RoadGraph.load(graph_path)
-            with open(assignments_path, encoding="utf-8") as f:
-                raw = json.load(f)
+            raw = read_storage_json(assignments_path)
             assignments = {int(k): v for k, v in raw.items()}
 
             out = Path(output_dir)

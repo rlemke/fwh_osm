@@ -11,6 +11,7 @@ from collections import defaultdict
 
 log = logging.getLogger(__name__)
 
+from ..shared._output import ensure_dir, open_output, read_storage_json
 from .zoom_graph import RoadGraph, _haversine_m
 from .zoom_sbs import (
     HAS_REQUESTS,
@@ -239,8 +240,7 @@ def _load_settlements(
     Returns list of (name, lon, lat, population, place_type).
     """
     try:
-        with open(cities_path, encoding="utf-8") as f:
-            geojson = json.load(f)
+        geojson = read_storage_json(cities_path)
     except (OSError, json.JSONDecodeError) as e:
         log.warning("Could not load cities: %s", e)
         return []
@@ -541,7 +541,8 @@ def _sample_radial_pairs(
 
 def save_bypass_flags(flags: dict[int, str], path: str) -> None:
     """Save bypass flags to JSON file."""
-    with open(path, "w", encoding="utf-8") as f:
+    ensure_dir(path)
+    with open_output(path, "w") as f:
         json.dump({str(k): v for k, v in flags.items()}, f)
 
 
@@ -550,8 +551,7 @@ def load_bypass_flags(path: str) -> dict[int, str]:
     if not path:
         return {}
     try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
+        data = read_storage_json(path)
         return {int(k): v for k, v in data.items()}
     except (OSError, json.JSONDecodeError):
         return {}
@@ -559,7 +559,8 @@ def load_bypass_flags(path: str) -> dict[int, str]:
 
 def save_ring_flags(flags: dict[int, bool], path: str) -> None:
     """Save ring flags to JSON file."""
-    with open(path, "w", encoding="utf-8") as f:
+    ensure_dir(path)
+    with open_output(path, "w") as f:
         json.dump({str(k): v for k, v in flags.items()}, f)
 
 
@@ -568,8 +569,7 @@ def load_ring_flags(path: str) -> dict[int, bool]:
     if not path:
         return {}
     try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
+        data = read_storage_json(path)
         return {int(k): v for k, v in data.items()}
     except (OSError, json.JSONDecodeError):
         return {}

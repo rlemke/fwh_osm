@@ -12,6 +12,8 @@ from typing import Any
 
 import requests
 
+from ..shared._output import ensure_dir, open_output, read_storage_json
+
 # Conversion constants
 METERS_TO_FEET = 3.28084
 FEET_TO_METERS = 0.3048
@@ -196,8 +198,7 @@ def handle_enrich_with_elevation(params: dict[str, Any]) -> dict[str, Any]:
         step_log(f"EnrichWithElevation: enriching {input_path} with {dem_source} elevation data")
 
     # Read input GeoJSON
-    with open(input_path) as f:
-        geojson = json.load(f)
+    geojson = read_storage_json(input_path)
 
     features = geojson.get("features", [])
     enriched_routes = []
@@ -233,7 +234,8 @@ def handle_enrich_with_elevation(params: dict[str, Any]) -> dict[str, Any]:
         "features": output_features,
     }
 
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump(output_geojson, f)
 
     if step_log:
@@ -269,8 +271,7 @@ def handle_filter_by_max_elevation(params: dict[str, Any]) -> dict[str, Any]:
     if step_log:
         step_log(f"FilterByMaxElevation: filtering {input_path} above {threshold_ft} ft")
 
-    with open(input_path) as f:
-        geojson = json.load(f)
+    geojson = read_storage_json(input_path)
 
     features = geojson.get("features", [])
     matched = []
@@ -292,7 +293,8 @@ def handle_filter_by_max_elevation(params: dict[str, Any]) -> dict[str, Any]:
         "features": matched,
     }
 
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump(output_geojson, f)
 
     if step_log:
@@ -328,8 +330,7 @@ def handle_filter_by_min_elevation(params: dict[str, Any]) -> dict[str, Any]:
     if step_log:
         step_log(f"FilterByMinElevation: filtering {input_path} below {threshold_ft} ft")
 
-    with open(input_path) as f:
-        geojson = json.load(f)
+    geojson = read_storage_json(input_path)
 
     features = geojson.get("features", [])
     matched = []
@@ -350,7 +351,8 @@ def handle_filter_by_min_elevation(params: dict[str, Any]) -> dict[str, Any]:
         "features": matched,
     }
 
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump(output_geojson, f)
 
     if step_log:
@@ -386,8 +388,7 @@ def handle_filter_by_elevation_gain(params: dict[str, Any]) -> dict[str, Any]:
     if step_log:
         step_log(f"FilterByElevationGain: filtering {input_path} for gain >= {min_gain_ft} ft")
 
-    with open(input_path) as f:
-        geojson = json.load(f)
+    geojson = read_storage_json(input_path)
 
     features = geojson.get("features", [])
     matched = []
@@ -408,7 +409,8 @@ def handle_filter_by_elevation_gain(params: dict[str, Any]) -> dict[str, Any]:
         "features": matched,
     }
 
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump(output_geojson, f)
 
     if step_log:
@@ -448,8 +450,7 @@ def handle_filter_by_elevation_range(params: dict[str, Any]) -> dict[str, Any]:
             f"FilterByElevationRange: filtering {input_path} for range {min_elev}-{max_elev} ft"
         )
 
-    with open(input_path) as f:
-        geojson = json.load(f)
+    geojson = read_storage_json(input_path)
 
     features = geojson.get("features", [])
     matched = []
@@ -474,7 +475,8 @@ def handle_filter_by_elevation_range(params: dict[str, Any]) -> dict[str, Any]:
         "features": matched,
     }
 
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump(output_geojson, f)
 
     if step_log:
