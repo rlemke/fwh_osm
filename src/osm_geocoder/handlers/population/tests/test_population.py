@@ -530,28 +530,32 @@ class TestHandlerRegistration:
 
     def test_population_facets_count(self):
         """Test expected number of population facets."""
-        assert len(POPULATION_FACETS) == 3
+        assert len(POPULATION_FACETS) == 5
 
     def test_population_facets_names(self):
         """Test population facet names."""
         names = [name for name, _ in POPULATION_FACETS]
         assert "FilterByPopulation" in names
         assert "FilterByPopulationRange" in names
+        assert "TopNByPopulation" in names
         assert "PopulationStatistics" in names
+        assert "AllPopulatedPlaces" in names
 
     def test_register_population_handlers(self):
         """Test handler registration with mock poller."""
         poller = MagicMock()
         register_population_handlers(poller)
 
-        # Should register 3 handlers
-        assert poller.register.call_count == 3
+        # Registers one handler per declared facet.
+        assert poller.register.call_count == len(POPULATION_FACETS)
 
         # Verify qualified names are used
         call_args = [call[0][0] for call in poller.register.call_args_list]
         assert f"{NAMESPACE}.FilterByPopulation" in call_args
         assert f"{NAMESPACE}.FilterByPopulationRange" in call_args
+        assert f"{NAMESPACE}.TopNByPopulation" in call_args
         assert f"{NAMESPACE}.PopulationStatistics" in call_args
+        assert f"{NAMESPACE}.AllPopulatedPlaces" in call_args
 
     def test_namespace_value(self):
         """Test namespace is correct."""

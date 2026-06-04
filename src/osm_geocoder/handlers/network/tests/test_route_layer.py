@@ -76,7 +76,15 @@ def test_route_layer_unreachable_pair_still_drawn(tmp_path, monkeypatch):
     assert all(f["properties"]["reached_b"] is False for f in fc["features"])
 
 
-def test_route_layer_needs_two_points(tmp_path, monkeypatch):
+def test_route_layer_tolerates_fewer_than_two_points(tmp_path, monkeypatch):
+    # A sparse band can legitimately have 0 or 1 points (e.g. a region with no
+    # >=5M metro). All-pairs routing is undefined there, but a per-band compose
+    # downstream still expects a drawable layer, so route_layer emits an empty
+    # FeatureCollection rather than raising.
     net = _build(tmp_path, monkeypatch, _CHAIN)
-    with pytest.raises(ValueError, match=">= 2 points"):
-        ops.route_layer(net, json.dumps([{"lon": 0, "lat": 0, "name": "A"}]))
+    res = ops.route_layer(net, json.dumps([{"lon": 0, "lat": 0, "name": "A"}]))
+    assert res.point_count == 1
+    assert res.route_count == 0
+    assert res.reachable_count == 0
+    fc = json.loads(Path(res.output_path).read_text())
+    assert fc == {"type": "FeatureCollection", "features": []}
