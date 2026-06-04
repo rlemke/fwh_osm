@@ -859,8 +859,7 @@ def write_master_index(storage: Any = None) -> None:
         key=lambda e: (e.get("extra") or {}).get("region", ""),
     )
     out_path = master_index_path(s)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(_master_index_html(entries), encoding="utf-8")
+    s.write_text_atomic(str(out_path), _master_index_html(entries))
 
 
 def list_rendered(storage: Any = None) -> list[dict[str, Any]]:

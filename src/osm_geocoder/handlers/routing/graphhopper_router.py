@@ -22,7 +22,7 @@ import logging
 import math
 import os
 
-from ..shared._output import resolve_output_dir
+from ..shared._output import ensure_dir, open_output, resolve_output_dir
 
 log = logging.getLogger(__name__)
 
@@ -106,7 +106,8 @@ def _handle_route(payload: dict) -> dict:
 
     slug = f"{from_name or 'origin'}-{to_name or 'dest'}-{profile}".replace(" ", "_")
     output_path = os.path.join(_output_dir(), f"graphhopper-route-{slug}.geojson")
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump({"type": "FeatureCollection", "features": [{
             "type": "Feature", "geometry": {"type": "LineString", "coordinates": coords},
             "properties": {"from": from_name, "to": to_name, "distance_km": distance_km,
@@ -152,7 +153,8 @@ def _handle_isochrone(payload: dict) -> dict:
         _output_dir(),
         f"graphhopper-isochrone-{center_name or 'center'}-{time_minutes}min-{profile}.geojson".replace(" ", "_"),
     )
-    with open(output_path, "w") as f:
+    ensure_dir(output_path)
+    with open_output(output_path, "w") as f:
         json.dump({"type": "FeatureCollection", "features": features}, f)
 
     if step_log:

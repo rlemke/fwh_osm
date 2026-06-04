@@ -53,6 +53,36 @@ def open_output(path: str, mode: str = "w") -> IO:
     return backend.open(path, mode)
 
 
+def open_input(path: str, mode: str = "r") -> IO:
+    """Open a file for reading using the correct storage backend.
+
+    The read-side counterpart to :func:`open_output`. Local paths and remote
+    URIs (``hdfs://`` / ``s3://``) are dispatched to the matching backend, so a
+    handler reads a durable artifact identically wherever it lives.
+    """
+    backend = get_storage_backend(path)
+    return backend.open(path, mode)
+
+
+def read_storage_text(path: str, encoding: str = "utf-8") -> str:
+    """Read a (possibly remote) text artifact fully into a string.
+
+    Reads as bytes then decodes so behaviour is identical across the local /
+    HDFS / S3 backends. Use for durable, modest-size artifacts (graph JSON,
+    summaries, sidecars) — NOT for multi-GB GeoJSON, which should be streamed
+    locally via :func:`iter_geojson_features`.
+    """
+    with open_input(path, "rb") as f:
+        return f.read().decode(encoding)
+
+
+def read_storage_json(path: str):
+    """Read and parse a (possibly remote) JSON artifact into Python objects."""
+    import json
+
+    return json.loads(read_storage_text(path))
+
+
 def _slugify_discriminators(discriminators: tuple) -> str:
     """Build a deterministic, collision-safe slug from a tuple of discriminators.
 

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from facetwork.runtime.storage import localize
 
-from ..shared._output import ensure_dir, open_output
+from ..shared._output import ensure_dir, open_output, read_storage_json
 from ..shared.scan_progress import ScanProgressTracker, get_file_size
 
 log = logging.getLogger(__name__)
@@ -238,8 +238,7 @@ class RoadGraph:
     @classmethod
     def load(cls, path: str) -> "RoadGraph":
         """Load graph from JSON file."""
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
+        data = read_storage_json(path)
 
         graph = cls()
 

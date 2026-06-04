@@ -314,7 +314,7 @@ def render_map_html(
     m.get_root().html.add_child(folium.Element(title_html))
 
     # Save map
-    m.save(str(output_path))
+    _save_map_html(m, str(output_path))
 
     return MapResult(
         output_path=str(output_path),

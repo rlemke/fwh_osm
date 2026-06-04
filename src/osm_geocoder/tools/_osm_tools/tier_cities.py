@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .storage import get_storage
+
 log = logging.getLogger(__name__)
 
 
@@ -186,8 +188,8 @@ def tier_cities(
 
     sorted_tiers = tuple(sorted(tiers, key=lambda t: t.min_population, reverse=True))
 
-    with open(input_path, encoding="utf-8") as fp:
-        data = json.load(fp)
+    s = get_storage()
+    data = json.loads(s.read_text(input_path))
 
     features_in = data.get("features") or []
     features_out: list[dict] = []
@@ -209,9 +211,6 @@ def tier_cities(
         features_out.append(annotated)
         counts[tier.zoom] = counts.get(tier.zoom, 0) + 1
 
-    out_dir = Path(output_path).parent
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     payload = {
         "type": "FeatureCollection",
         "features": features_out,
@@ -223,8 +222,7 @@ def tier_cities(
             for t in sorted_tiers
         },
     }
-    with open(output_path, "w", encoding="utf-8") as fp:
-        json.dump(payload, fp)
+    s.write_text_atomic(output_path, json.dumps(payload))
 
     log.info(
         "tier_cities: %d input features → %d tiered (counts=%s)",
@@ -266,10 +264,9 @@ def split_by_tier(
     """
     input_path = str(input_path)
     output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    with open(input_path, encoding="utf-8") as fp:
-        data = json.load(fp)
+    s = get_storage()
+    data = json.loads(s.read_text(input_path))
 
     buckets: dict[int, list[dict]] = {z: [] for z in zooms}
     for feature in data.get("features", []):
@@ -288,11 +285,10 @@ def split_by_tier(
     counts: dict[int, int] = {}
     for zoom, features in buckets.items():
         path = str(output_dir / f"{basename}_z{zoom}.geojson")
-        with open(path, "w", encoding="utf-8") as fp:
-            json.dump(
-                {"type": "FeatureCollection", "features": features},
-                fp,
-            )
+        s.write_text_atomic(
+            path,
+            json.dumps({"type": "FeatureCollection", "features": features}),
+        )
         paths[zoom] = path
         counts[zoom] = len(features)
 

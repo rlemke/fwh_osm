@@ -17,6 +17,8 @@ log = logging.getLogger(__name__)
 
 from facetwork.config import get_output_base
 
+from ..shared._output import ensure_dir, open_output
+
 _LOCAL_OUTPUT = get_output_base()
 
 from .zoom_detection import (
@@ -190,8 +192,8 @@ def _ensure_cities_file(pbf_path: str, cities_path: str) -> None:
         return
 
     # Create empty cities GeoJSON as fallback
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with open(cities_path, "w", encoding="utf-8") as f:
+    ensure_dir(cities_path)
+    with open_output(cities_path, "w") as f:
         json.dump({"type": "FeatureCollection", "features": []}, f)
 
 
@@ -263,7 +265,8 @@ def _export_results(
     }
 
     metrics_path = str(out / "metrics.json")
-    with open(metrics_path, "w", encoding="utf-8") as f:
+    ensure_dir(metrics_path)
+    with open_output(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2)
 
     # Result
@@ -317,7 +320,8 @@ def _export_csv(
         ]
     )
 
-    with open(path, "w", newline="", encoding="utf-8") as f:
+    ensure_dir(path)
+    with open_output(path, "w") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
 
@@ -360,7 +364,8 @@ def _export_jsonl(
     path: str,
 ) -> None:
     """Export per-edge data to JSON Lines."""
-    with open(path, "w", encoding="utf-8") as f:
+    ensure_dir(path)
+    with open_output(path, "w") as f:
         for edge in graph.edges:
             eid = edge.edge_id
             if eid not in assignments:
@@ -422,7 +427,8 @@ def _export_zoom_geojson(
         )
 
     geojson = {"type": "FeatureCollection", "features": features}
-    with open(path, "w", encoding="utf-8") as f:
+    ensure_dir(path)
+    with open_output(path, "w") as f:
         json.dump(geojson, f)
 
     log.info("Exported z%d GeoJSON: %d features → %s", zoom, len(features), path)

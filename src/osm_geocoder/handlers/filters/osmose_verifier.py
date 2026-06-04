@@ -20,7 +20,7 @@ from typing import Any
 
 from facetwork.runtime.storage import localize
 
-from ..shared._output import ensure_dir, open_output, resolve_output_dir
+from ..shared._output import ensure_dir, open_output, read_storage_json, resolve_output_dir
 from ..shared.scan_progress import ScanProgressTracker, get_file_size
 
 log = logging.getLogger(__name__)
@@ -587,8 +587,7 @@ def verify_geojson(
     issues: list[dict[str, Any]] = []
 
     try:
-        with open(input_path) as f:
-            data = json.load(f)
+        data = read_storage_json(input_path)
     except (FileNotFoundError, json.JSONDecodeError) as e:
         log.error("Failed to load GeoJSON: %s", e)
         return _empty_verify_result(), VerifySummaryData()
@@ -726,8 +725,7 @@ def compute_verify_summary(input_path: str) -> VerifySummaryData:
         VerifySummaryData with tallied counts.
     """
     try:
-        with open(input_path) as f:
-            data = json.load(f)
+        data = read_storage_json(input_path)
     except (FileNotFoundError, json.JSONDecodeError) as e:
         log.error("Failed to load verification data: %s", e)
         return VerifySummaryData()
