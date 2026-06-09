@@ -22,7 +22,12 @@ from pathlib import Path
 from typing import Any
 
 from _osm_tools import sidecar
-from _osm_tools.storage import LocalStorage, Storage, get_storage
+from _osm_tools.storage import (
+    LocalStorage,
+    Storage,
+    get_storage,
+    local_staging_subdir,
+)
 
 NAMESPACE = "osm"
 SOURCE_CACHE_TYPE = "pbf"
@@ -114,12 +119,24 @@ def _sha256_file(path: Path) -> tuple[int, str]:
 
 
 def _staging_path(region: str, fmt: str, storage: Any = None) -> Path:
-    """Stage adjacent to destination unless ``AFL_CONVERT_STAGING=tmp``."""
-    if (os.environ.get("AFL_CONVERT_STAGING") or "").lower() == "tmp":
-        base = tempfile.gettempdir()
-        safe = region.replace("/", "_")
-        return Path(base) / "facetwork-geojson-staging" / f"{safe}-latest.{FORMAT_EXT[fmt]}.tmp"
-    out = geojson_abs_path(region, fmt, storage)
+    """Local path for osmium's output before it's finalized to ``storage``.
+
+    On object-store backends (S3/MinIO, HDFS) the destination is an ``s3://`` /
+    ``hdfs://`` URI — NOT a local path — so staging MUST live on local scratch;
+    only ``finalize_from_local`` uploads it. Staging "adjacent to destination"
+    there would resolve, via ``geojson_abs_path``'s ``Path()``, to a mangled
+    ``s3:/…`` path written on the container's internal disk (which previously
+    ENOSPC-crashed mongo). ``local_staging_subdir`` roots staging at
+    ``AFL_LOCAL_SCRATCH`` (the external scratch disk). For local storage, stage
+    adjacent to the destination (same FS → atomic rename).
+    """
+    s = storage or get_storage()
+    safe = region.replace("/", "_")
+    fname = f"{safe}-latest.{FORMAT_EXT[fmt]}.tmp"
+    force_local_scratch = (os.environ.get("AFL_CONVERT_STAGING") or "").lower() == "tmp"
+    if force_local_scratch or getattr(s, "name", "local") != "local":
+        return Path(local_staging_subdir("facetwork-geojson-staging")) / fname
+    out = geojson_abs_path(region, fmt, s)
     return out.with_name(out.name + ".tmp")
 
 

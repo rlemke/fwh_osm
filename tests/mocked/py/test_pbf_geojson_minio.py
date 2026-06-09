@@ -82,3 +82,31 @@ def test_convert_region_localizes_s3_source_before_osmium(tmp_path, monkeypatch)
     assert calls["finalized"] == out_uri
     assert calls["finalized"].startswith("s3://afl-cache/cache/osm/geojson/")
     assert res.region == region and res.was_cached is False
+
+
+def test_staging_path_for_object_store_is_local_scratch(tmp_path, monkeypatch):
+    """On S3/MinIO the destination is an s3:// URI; osmium's output must stage on
+    LOCAL scratch (AFL_LOCAL_SCRATCH), never "adjacent to" the s3 dest (which
+    would mangle to s3:/… on the container's internal disk and ENOSPC mongo)."""
+    monkeypatch.setenv("AFL_LOCAL_SCRATCH", str(tmp_path))
+
+    class FakeS3:
+        name = "s3"
+
+    sp = pd._staging_path("europe/germany", "geojson", FakeS3())
+    sp = str(sp)
+    assert "s3:" not in sp                       # not the mangled s3 path
+    assert sp.startswith("/")                     # a real local filesystem path
+    assert "facetwork-geojson-staging" in sp      # the local staging subtree
+    assert sp.endswith("europe_germany-latest.geojson.tmp")
+
+
+def test_staging_path_for_local_is_adjacent(tmp_path, monkeypatch):
+    monkeypatch.setattr(pd, "geojson_abs_path",
+                        lambda r, f, s=None: pd.Path(str(tmp_path / "out.geojson")))
+
+    class FakeLocal:
+        name = "local"
+
+    sp = str(pd._staging_path("x", "geojson", FakeLocal()))
+    assert sp == str(tmp_path / "out.geojson.tmp")
