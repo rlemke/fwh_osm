@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from _osm_tools import sidecar
-from _osm_tools.storage import LocalStorage
+from _osm_tools.storage import LocalStorage, Storage, get_storage
 
 NAMESPACE = "osm"
 CACHE_TYPE = "pbf-clips"
@@ -123,7 +123,7 @@ def clip_rel_path(name: str) -> str:
 
 def clipped_path(name: str, storage: Any = None) -> str:
     """Absolute cache path for a clip."""
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return sidecar.cache_path(NAMESPACE, CACHE_TYPE, clip_rel_path(name), s)
 
 
@@ -138,7 +138,7 @@ def clip_region_key(name: str) -> str:
 
 
 def _source_pbf_path(region: str, storage: Any = None) -> Path:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return Path(sidecar.cache_path(NAMESPACE, SOURCE_CACHE_TYPE, f"{region}-latest.osm.pbf", s))
 
 
@@ -226,7 +226,7 @@ def is_up_to_date(
     storage: Any = None,
 ) -> bool:
     """True if the cached clip still matches source SHA and clip spec."""
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     rel = clip_rel_path(name)
     existing = sidecar.read_sidecar(NAMESPACE, CACHE_TYPE, rel, s)
     if not existing:
@@ -264,7 +264,7 @@ def clip_pbf(
         raise ClipError(
             f"clip name must not be empty or contain '/'. got: {name!r}"
         )
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     spec = build_spec(bbox=bbox, polygon_path=polygon_path)
 
     source_rel = f"{source_region}-latest.osm.pbf"
@@ -402,5 +402,5 @@ def clip_pbf(
 
 def list_clips(storage: Any = None) -> list[dict[str, Any]]:
     """Return every clip currently cached as a sidecar dict."""
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return sidecar.list_entries(NAMESPACE, CACHE_TYPE, s)

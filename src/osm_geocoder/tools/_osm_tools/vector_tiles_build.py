@@ -27,7 +27,7 @@ from typing import Any
 
 from _osm_tools import sidecar
 from _osm_tools.pbf_extract import CATEGORIES
-from _osm_tools.storage import LocalStorage
+from _osm_tools.storage import LocalStorage, Storage, get_storage
 
 NAMESPACE = "osm"
 OUTPUT_CACHE_TYPE = "vector_tiles"
@@ -74,12 +74,12 @@ def _source_rel_path(source: str, region: str) -> str:
 
 
 def _source_abs_path(source: str, region: str, storage: Any = None) -> Path:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return Path(sidecar.cache_path(NAMESPACE, _source_cache_type(source), _source_rel_path(source, region), s))
 
 
 def _source_sidecar(source: str, region: str, storage: Any = None) -> dict | None:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return sidecar.read_sidecar(NAMESPACE, _source_cache_type(source), _source_rel_path(source, region), s)
 
 
@@ -112,7 +112,7 @@ def tileset_rel_path(region: str, source: str) -> str:
 
 
 def tileset_abs_path(region: str, source: str, storage: Any = None) -> Path:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return Path(sidecar.cache_path(NAMESPACE, OUTPUT_CACHE_TYPE, tileset_rel_path(region, source), s))
 
 
@@ -173,7 +173,7 @@ def is_up_to_date(
     sidecar itself before calling us, and again in the cached-hit
     return path where we'd re-read the output sidecar otherwise.
     """
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     rel = tileset_rel_path(region, source)
     existing = existing_sidecar
     if existing is None:
@@ -222,7 +222,7 @@ def build_tiles(
             f"invalid zoom range: min={min_zoom} max={max_zoom} (must satisfy 0 <= min <= max <= 22)"
         )
     effective_layer_name = layer_name or source
-    s = storage or LocalStorage()
+    s = storage or get_storage()
 
     src_side = _source_sidecar(source, region, s)
     if not src_side:

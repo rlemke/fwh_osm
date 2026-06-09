@@ -37,6 +37,7 @@ from _osm_tools.storage import (
     LocalStorage,
     Storage,
     cache_root,
+    get_storage,
     locks_root,
     staging_root,
 )
@@ -46,7 +47,7 @@ SIDECAR_SUFFIX = ".meta.json"
 
 
 def _storage(storage: Storage | None) -> Storage:
-    return storage if storage is not None else LocalStorage()
+    return storage if storage is not None else get_storage()
 
 
 def utcnow_iso() -> str:

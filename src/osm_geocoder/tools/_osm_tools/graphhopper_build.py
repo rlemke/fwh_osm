@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from _osm_tools import sidecar
-from _osm_tools.storage import LocalStorage
+from _osm_tools.storage import LocalStorage, Storage, get_storage
 
 NAMESPACE = "osm"
 SOURCE_CACHE_TYPE = "pbf"
@@ -98,7 +98,7 @@ def pbf_rel_path(region: str) -> str:
 
 
 def pbf_abs_path(region: str, storage: Any = None) -> Path:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return Path(sidecar.cache_path(NAMESPACE, SOURCE_CACHE_TYPE, pbf_rel_path(region), s))
 
 
@@ -108,7 +108,7 @@ def graph_rel_path(region: str, profile: str) -> str:
 
 
 def graph_abs_path(region: str, profile: str, storage: Any = None) -> Path:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return Path(sidecar.cache_path(NAMESPACE, OUTPUT_CACHE_TYPE, graph_rel_path(region, profile), s))
 
 
@@ -177,7 +177,7 @@ def is_up_to_date(
     """True if cached graph matches source PBF SHA and GraphHopper version."""
     if profile not in PROFILES:
         return False
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     rel = graph_rel_path(region, profile)
     existing = sidecar.read_sidecar(NAMESPACE, OUTPUT_CACHE_TYPE, rel, s)
     if not existing:
@@ -291,7 +291,7 @@ def build_graph(
         raise BuildError(
             f"unknown profile: {profile!r}. Valid: {', '.join(PROFILES)}"
         )
-    s = storage or LocalStorage()
+    s = storage or get_storage()
 
     pbf_rel = pbf_rel_path(region)
     pbf_side = sidecar.read_sidecar(NAMESPACE, SOURCE_CACHE_TYPE, pbf_rel, s)
