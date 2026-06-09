@@ -195,7 +195,13 @@ def _already_cached(
 
 
 STREAM_CHUNK_SIZE = 64 * 1024
-READ_TIMEOUT_SECONDS = 120
+# Per-read (between-chunks) socket timeout. Continent extracts (europe ~30GB,
+# north-america ~15GB) often redirect to slow mirrors (e.g. ftp5.gwdg.de) that
+# stall for long stretches; the 120s default trips a read timeout mid-transfer
+# and — because there's no HTTP resume — the whole multi-GB download restarts
+# from zero, easily exhausting retries. Tunable via AFL_OSM_READ_TIMEOUT_SECONDS;
+# default raised to 600s so a slow-but-alive mirror isn't killed.
+READ_TIMEOUT_SECONDS = int(os.environ.get("AFL_OSM_READ_TIMEOUT_SECONDS") or 600)
 CONNECT_TIMEOUT_SECONDS = 30
 
 
