@@ -41,7 +41,7 @@ except ImportError:  # pragma: no cover - optional, only needed for bulk streami
     requests = None
 
 from _osm_tools import sidecar
-from _osm_tools.storage import LocalStorage, Storage, local_staging_subdir
+from _osm_tools.storage import LocalStorage, Storage, get_storage, local_staging_subdir
 
 NAMESPACE = "osm"
 CACHE_TYPE = "pbf"
@@ -136,6 +136,24 @@ def fetch_md5(url: str) -> str:
     if not parts or len(parts[0]) != 32:
         raise DownloadError(f"Unexpected .md5 body from {md5_url}: {body!r}")
     return parts[0].lower()
+
+
+def fetch_md5_or_none(url: str) -> str | None:
+    """Like :func:`fetch_md5`, but return ``None`` when Geofabrik publishes
+    no ``.md5`` for this extract (HTTP 404).
+
+    Some extracts (e.g. combined regions and certain small areas) ship a
+    ``.pbf`` with no companion checksum file. A *missing* checksum is not
+    evidence of corruption — unlike a *mismatched* one — so callers may
+    proceed and anchor integrity on the locally-computed sha256 instead of
+    treating the region as permanently un-cacheable.
+    """
+    try:
+        return fetch_md5(url)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
 
 
 def head_last_modified(url: str) -> str | None:
@@ -259,7 +277,7 @@ def list_cached_regions(*, storage: Storage | None = None) -> list[str]:
     Geofabrik. Use to drive a deliberate cache-refresh over exactly what's
     cached.
     """
-    storage = storage or LocalStorage()
+    storage = storage or get_storage()
     out: list[str] = []
     for entry in sidecar.list_entries(NAMESPACE, CACHE_TYPE, storage):
         reg = relative_path_to_region(entry.get("relative_path", ""))
@@ -276,7 +294,7 @@ def is_region_cached(
     Does NOT contact Geofabrik. For freshness checks use ``download_region``
     and inspect ``was_cached``.
     """
-    storage = storage or LocalStorage()
+    storage = storage or get_storage()
     rel_path, _ = region_to_paths(region)
     return sidecar.exists_and_valid(NAMESPACE, CACHE_TYPE, rel_path, storage)
 
@@ -285,7 +303,7 @@ def sidecar_entry_for(
     region: str, *, storage: Storage | None = None
 ) -> dict[str, Any] | None:
     """Return the sidecar dict for ``region`` if present, else ``None``."""
-    storage = storage or LocalStorage()
+    storage = storage or get_storage()
     rel_path, _ = region_to_paths(region)
     return sidecar.read_sidecar(NAMESPACE, CACHE_TYPE, rel_path, storage)
 
@@ -298,7 +316,7 @@ def cached_path(
     region: str, *, storage: Storage | None = None
 ) -> str:
     """Return the absolute cache path for ``region`` (whether or not it exists)."""
-    storage = storage or LocalStorage()
+    storage = storage or get_storage()
     rel_path, _ = region_to_paths(region)
     return sidecar.cache_path(NAMESPACE, CACHE_TYPE, rel_path, storage)
 
@@ -321,7 +339,7 @@ def download_region(
     ``True`` forces it on, ``False`` forces normal revalidation. ``force=True``
     always re-downloads and overrides both.
     """
-    storage = storage or LocalStorage()
+    storage = storage or get_storage()
     rel_path, url = region_to_paths(region)
     cache_file = sidecar.cache_path(NAMESPACE, CACHE_TYPE, rel_path, storage)
 
@@ -353,10 +371,11 @@ def download_region(
     with _region_lock(region):
         storage.mkdir_p(Storage.dirname(cache_file))
 
-        expected_md5 = fetch_md5(url)
+        expected_md5 = fetch_md5_or_none(url)
+        had_upstream_md5 = expected_md5 is not None
         source_ts = head_last_modified(url)
 
-        if not force:
+        if not force and had_upstream_md5:
             side = _already_cached(rel_path, expected_md5, storage)
             if side is not None:
                 source = side.get("source", {})
@@ -390,7 +409,16 @@ def download_region(
                 os.unlink(staged)
             raise
 
-        if md5_hex != expected_md5:
+        if not had_upstream_md5:
+            # Geofabrik publishes no .md5 for this extract (404). A missing
+            # checksum is not corruption evidence — accept the COMPLETE
+            # download, anchored by the locally-computed sha256.
+            logger.warning(
+                "No upstream .md5 for %s (Geofabrik publishes none); accepting "
+                "%d-byte download verified by sha256=%s.", region, size, sha256_hex
+            )
+            expected_md5 = md5_hex
+        elif md5_hex != expected_md5:
             # Geofabrik's .md5 and .pbf are briefly inconsistent during its daily
             # rebuild; for multi-GB files we fetch the .md5 before the long
             # download finishes. Re-fetch the current .md5 (the one we read may be
@@ -421,7 +449,8 @@ def download_region(
             "source_checksum": {
                 "algo": "md5",
                 "value": md5_hex,
-                "url": url + ".md5",
+                "url": (url + ".md5") if had_upstream_md5 else None,
+                "computed": not had_upstream_md5,
             },
             "source_timestamp": source_ts,
             "downloaded_at": downloaded_at,
@@ -472,7 +501,7 @@ def regions_from_pbf_cache(
     mtime. Pass ``use_index=False`` to force a fresh walk (e.g. for
     diagnostics).
     """
-    storage = storage or LocalStorage()
+    storage = storage or get_storage()
     paths: list[str]
     if use_index:
         # Soft-import cache_index so unit tests that stub storage
