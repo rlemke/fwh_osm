@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from _osm_tools import sidecar
-from _osm_tools.storage import LocalStorage
+from _osm_tools.storage import LocalStorage, Storage, get_storage
 
 NAMESPACE = "osm"
 SOURCE_CACHE_TYPE = "pbf"
@@ -79,7 +79,7 @@ def pbf_rel_path(region: str) -> str:
 
 
 def pbf_abs_path(region: str, storage: Any = None) -> Path:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return Path(sidecar.cache_path(NAMESPACE, SOURCE_CACHE_TYPE, pbf_rel_path(region), s))
 
 
@@ -89,7 +89,7 @@ def shapefile_rel_path(region: str) -> str:
 
 
 def shapefile_abs_path(region: str, storage: Any = None) -> Path:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return Path(sidecar.cache_path(NAMESPACE, OUTPUT_CACHE_TYPE, shapefile_rel_path(region), s))
 
 
@@ -168,7 +168,7 @@ def is_up_to_date(
     storage: Any = None,
 ) -> bool:
     """True if the cached bundle still satisfies the request."""
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     out_rel = shapefile_rel_path(region)
     existing = sidecar.read_sidecar(NAMESPACE, OUTPUT_CACHE_TYPE, out_rel, s)
     if not existing:
@@ -201,7 +201,7 @@ def convert_region(
 ) -> ConvertResult:
     """Convert a region's PBF to a multi-layer shapefile bundle."""
     layers_tuple = normalize_layers(layers)
-    s = storage or LocalStorage()
+    s = storage or get_storage()
 
     pbf_rel = pbf_rel_path(region)
     pbf_side = sidecar.read_sidecar(NAMESPACE, SOURCE_CACHE_TYPE, pbf_rel, s)

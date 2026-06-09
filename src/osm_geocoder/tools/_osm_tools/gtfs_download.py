@@ -38,7 +38,7 @@ except ImportError:  # pragma: no cover
     requests = None
 
 from _osm_tools import sidecar
-from _osm_tools.storage import LocalStorage
+from _osm_tools.storage import LocalStorage, Storage, get_storage
 
 NAMESPACE = "gtfs"
 CACHE_TYPE = "feeds"
@@ -86,7 +86,7 @@ def feed_rel_path(agency: str) -> str:
 
 
 def feed_abs_path(agency: str, storage: Any = None) -> Path:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return Path(sidecar.cache_path(NAMESPACE, CACHE_TYPE, feed_rel_path(agency), s))
 
 
@@ -196,7 +196,7 @@ def _parse_feed_info(zip_path: Path) -> dict[str, Any]:
 
 def is_up_to_date_cheap(agency: str, url: str, storage: Any = None) -> bool:
     """Local sidecar + one HEAD request for freshness."""
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     rel = feed_rel_path(agency)
     existing = sidecar.read_sidecar(NAMESPACE, CACHE_TYPE, rel, s)
     if not existing:
@@ -222,7 +222,7 @@ def is_up_to_date_cheap(agency: str, url: str, storage: Any = None) -> bool:
 
 
 def is_cached_locally(agency: str, storage: Any = None) -> bool:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     rel = feed_rel_path(agency)
     existing = sidecar.read_sidecar(NAMESPACE, CACHE_TYPE, rel, s)
     if not existing:
@@ -257,7 +257,7 @@ def download(
         raise DownloadError(f"agency must be non-empty and contain no '/': {agency!r}")
     if not url:
         raise DownloadError("url is required")
-    s = storage or LocalStorage()
+    s = storage or get_storage()
 
     with _agency_lock(agency):
         out_abs = feed_abs_path(agency, s)
@@ -355,7 +355,7 @@ def download(
 
 
 def list_feeds(storage: Any = None) -> list[dict[str, Any]]:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     out = sidecar.list_entries(NAMESPACE, CACHE_TYPE, s)
     out.sort(key=lambda e: (e.get("extra") or {}).get("agency", ""))
     return out

@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any
 
 from _osm_tools import sidecar
-from _osm_tools.storage import LocalStorage
+from _osm_tools.storage import LocalStorage, Storage, get_storage
 
 NAMESPACE = "osm"
 SOURCE_CACHE_TYPE = "pbf"
@@ -398,7 +398,7 @@ def pbf_rel_path(region: str) -> str:
 
 
 def pbf_abs_path(region: str, storage: Any = None) -> Path:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return Path(sidecar.cache_path(NAMESPACE, SOURCE_CACHE_TYPE, pbf_rel_path(region), s))
 
 
@@ -407,7 +407,7 @@ def extract_rel_path(region: str) -> str:
 
 
 def extract_abs_path(region: str, category: str, storage: Any = None) -> Path:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return Path(sidecar.cache_path(NAMESPACE, category, extract_rel_path(region), s))
 
 
@@ -465,7 +465,7 @@ def is_up_to_date(
     storage: Any = None,
 ) -> bool:
     """True if the cached extract reflects both source PBF SHA and filter_version."""
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     cat = CATEGORIES[category]
     out_rel = extract_rel_path(region)
     existing = sidecar.read_sidecar(NAMESPACE, category, out_rel, s)
@@ -497,7 +497,7 @@ def extract_region(
             f"Valid: {', '.join(sorted(CATEGORIES))}"
         )
     cat = CATEGORIES[category]
-    s = storage or LocalStorage()
+    s = storage or get_storage()
 
     pbf_rel = pbf_rel_path(region)
     pbf_side = sidecar.read_sidecar(NAMESPACE, SOURCE_CACHE_TYPE, pbf_rel, s)

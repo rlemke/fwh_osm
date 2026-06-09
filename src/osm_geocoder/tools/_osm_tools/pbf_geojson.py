@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from _osm_tools import sidecar
-from _osm_tools.storage import LocalStorage
+from _osm_tools.storage import LocalStorage, Storage, get_storage
 
 NAMESPACE = "osm"
 SOURCE_CACHE_TYPE = "pbf"
@@ -72,7 +72,7 @@ def pbf_rel_path(region: str) -> str:
 
 
 def pbf_abs_path(region: str, storage: Any = None) -> Path:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return Path(sidecar.cache_path(NAMESPACE, SOURCE_CACHE_TYPE, pbf_rel_path(region), s))
 
 
@@ -81,7 +81,7 @@ def geojson_rel_path(region: str, fmt: str) -> str:
 
 
 def geojson_abs_path(region: str, fmt: str, storage: Any = None) -> Path:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return Path(sidecar.cache_path(NAMESPACE, OUTPUT_CACHE_TYPE, geojson_rel_path(region, fmt), s))
 
 
@@ -131,7 +131,7 @@ def is_up_to_date(
     storage: Any = None,
 ) -> bool:
     """True if the cached GeoJSON still matches the source PBF's SHA-256."""
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     out_rel = geojson_rel_path(region, fmt)
     existing = sidecar.read_sidecar(NAMESPACE, OUTPUT_CACHE_TYPE, out_rel, s)
     if not existing:
@@ -157,7 +157,7 @@ def convert_region(
     """Convert a region's PBF to GeoJSON. Thread-safe per (region, fmt)."""
     if fmt not in FORMAT_EXT:
         raise ConversionError(f"unknown format: {fmt!r} (valid: {', '.join(FORMAT_EXT)})")
-    s = storage or LocalStorage()
+    s = storage or get_storage()
 
     pbf_rel = pbf_rel_path(region)
     pbf_side = sidecar.read_sidecar(NAMESPACE, SOURCE_CACHE_TYPE, pbf_rel, s)

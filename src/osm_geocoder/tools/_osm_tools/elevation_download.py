@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from _osm_tools import sidecar
-from _osm_tools.storage import LocalStorage
+from _osm_tools.storage import LocalStorage, Storage, get_storage
 
 NAMESPACE = "elevation"
 CACHE_TYPE = "srtm"
@@ -80,7 +80,7 @@ def raster_rel_path(name: str) -> str:
 
 
 def raster_abs_path(name: str, storage: Any = None) -> Path:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return Path(sidecar.cache_path(NAMESPACE, CACHE_TYPE, raster_rel_path(name), s))
 
 
@@ -166,7 +166,7 @@ def is_up_to_date(
     bbox: tuple[float, float, float, float],
     storage: Any = None,
 ) -> bool:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     rel = raster_rel_path(name)
     existing = sidecar.read_sidecar(NAMESPACE, CACHE_TYPE, rel, s)
     if not existing:
@@ -204,7 +204,7 @@ def download_elevation(
         raise ElevationError(
             f"unknown source: {source!r}. Supported: {', '.join(SUPPORTED_SOURCES)}"
         )
-    s = storage or LocalStorage()
+    s = storage or get_storage()
 
     with _build_lock(name):
         out_abs = raster_abs_path(name, s)
@@ -332,7 +332,7 @@ def download_elevation(
 
 
 def list_rasters(storage: Any = None) -> list[dict[str, Any]]:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     out = sidecar.list_entries(NAMESPACE, CACHE_TYPE, s)
     out.sort(key=lambda e: (e.get("extra") or {}).get("name", ""))
     return out

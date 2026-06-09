@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from _osm_tools import sidecar
-from _osm_tools.storage import LocalStorage, Storage
+from _osm_tools.storage import LocalStorage, Storage, get_storage
 from _osm_tools.vector_tiles_build import tileset_abs_path
 
 NAMESPACE = "osm"
@@ -82,12 +82,12 @@ def html_rel_path(region: str) -> str:
 
 
 def html_abs_path(region: str, storage: Any = None) -> Path:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return Path(sidecar.cache_path(NAMESPACE, OUTPUT_CACHE_TYPE, html_rel_path(region), s))
 
 
 def master_index_path(storage: Any = None) -> Path:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     return Path(sidecar.cache_dir(NAMESPACE, OUTPUT_CACHE_TYPE, s)) / "index.html"
 
 
@@ -605,7 +605,7 @@ def _html_template(
 
 def _discover_sources(region: str, storage: Any = None) -> list[tuple[str, str, str]]:
     """Return ``[(source_name, pmtiles_abs_path, sha256), ...]`` from vector_tiles sidecars."""
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     prefix = f"{region}-latest/"
     suffix = ".pmtiles"
     out: list[tuple[str, str, str]] = []
@@ -628,7 +628,7 @@ def is_up_to_date(
     sources: list[tuple[str, str, str]],
     storage: Any = None,
 ) -> bool:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     rel = html_rel_path(region)
     existing = sidecar.read_sidecar(NAMESPACE, OUTPUT_CACHE_TYPE, rel, s)
     if not existing:
@@ -684,7 +684,7 @@ def render_region(
     storage: Any = None,
 ) -> RenderResult:
     """Generate per-region HTML + style.json under ``html/<region>-latest/``."""
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     with _render_lock(region):
         sources = _discover_sources(region, s)
         if not sources:
@@ -853,7 +853,7 @@ def _master_index_html(entries: list[dict[str, Any]]) -> str:
 
 def write_master_index(storage: Any = None) -> None:
     """Regenerate ``html/index.html`` from the current sidecars."""
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     entries = sorted(
         sidecar.list_entries(NAMESPACE, OUTPUT_CACHE_TYPE, s),
         key=lambda e: (e.get("extra") or {}).get("region", ""),
@@ -863,7 +863,7 @@ def write_master_index(storage: Any = None) -> None:
 
 
 def list_rendered(storage: Any = None) -> list[dict[str, Any]]:
-    s = storage or LocalStorage()
+    s = storage or get_storage()
     out = sidecar.list_entries(NAMESPACE, OUTPUT_CACHE_TYPE, s)
     out.sort(key=lambda e: (e.get("extra") or {}).get("region", ""))
     return out

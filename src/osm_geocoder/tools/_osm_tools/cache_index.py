@@ -24,14 +24,14 @@ import os
 from typing import Any
 
 from _osm_tools import sidecar
-from _osm_tools.storage import LocalStorage, Storage, indexes_root
+from _osm_tools.storage import LocalStorage, Storage, get_storage, indexes_root
 
 INDEX_VERSION = 1
 INDEX_SUFFIX = ".index.json"
 
 
 def _storage(storage: Storage | None) -> Storage:
-    return storage if storage is not None else LocalStorage()
+    return storage if storage is not None else get_storage()
 
 
 def index_path(
