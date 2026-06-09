@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import http.client
 import threading
 import time
 import urllib.error
@@ -203,76 +204,169 @@ STREAM_CHUNK_SIZE = 64 * 1024
 # default raised to 600s so a slow-but-alive mirror isn't killed.
 READ_TIMEOUT_SECONDS = int(os.environ.get("AFL_OSM_READ_TIMEOUT_SECONDS") or 600)
 CONNECT_TIMEOUT_SECONDS = 30
+# Max times a single download will reconnect-and-resume (HTTP Range) after a
+# mid-stream drop before giving up. Geofabrik's mirrors drop connections on
+# big extracts (europe ~30GB, north-america ~19GB) — without resume each drop
+# restarts from zero and the file never lands. 50 resumes comfortably covers a
+# 30GB transfer that drops every couple GB. Tunable via AFL_OSM_RESUME_MAX_ATTEMPTS.
+RESUME_MAX_ATTEMPTS = int(os.environ.get("AFL_OSM_RESUME_MAX_ATTEMPTS") or 50)
+
+# Transient transport errors that warrant a Range-resume rather than a hard fail.
+_RESUMABLE_ERRORS: tuple[type[BaseException], ...] = (
+    http.client.IncompleteRead,
+    http.client.HTTPException,
+    urllib.error.URLError,
+    ConnectionError,
+    TimeoutError,
+    OSError,
+)
+if requests is not None:  # requests wraps the above in its own exception tree
+    _RESUMABLE_ERRORS = _RESUMABLE_ERRORS + (requests.exceptions.RequestException,)
 
 
-def _stream_download(
+def _expected_total(headers: Any, have: int) -> int:
+    """Full expected file size from a (possibly ranged) response, else 0.
+
+    For a 206 the ``Content-Range`` tail (``bytes start-end/TOTAL``) is the full
+    size; ``Content-Length`` is only the remaining bytes, so add ``have``. For a
+    fresh 200 ``have`` is 0 and Content-Length is the full size.
+    """
+    cr = headers.get("Content-Range")
+    if cr and "/" in cr:
+        tail = cr.rsplit("/", 1)[-1].strip()
+        if tail.isdigit():
+            return int(tail)
+    cl = headers.get("Content-Length")
+    if cl is not None and str(cl).isdigit():
+        return have + int(cl)
+    return 0
+
+
+def _download_resumable(
     url: str,
-    writer,
+    staged_path: str,
     label: str,
     on_progress: ProgressCallback | None,
 ) -> tuple[int, str, str]:
-    """Stream ``url`` into ``writer``; compute SHA-256 and MD5."""
-    if requests is None:
-        return _stream_download_urllib(url, writer, label, on_progress)
+    """Stream ``url`` to ``staged_path``, resuming via HTTP Range across
+    mid-stream connection drops; compute SHA-256 + MD5 over the whole file.
 
+    Geofabrik mirrors routinely drop multi-GB transfers part-way. Without resume
+    each drop restarts from zero, so a 30GB extract never lands. Here a single
+    open file + running hashes are carried across an internal reconnect loop: on
+    a transport error (or a clean short read) we re-request ``bytes=<have>-`` and
+    append. Handles a mirror that ignores Range (200 with bytes already on disk →
+    truncate + restart) and 416 (range past EOF → already complete).
+
+    Each call starts a fresh file (no partial carried across task retries) so we
+    never resume onto a different upstream revision; the loop below absorbs the
+    drops within one attempt.
+    """
+    use_requests = requests is not None
     sha = hashlib.sha256()
     md5 = hashlib.md5()
-    size = 0
-    start = time.monotonic()
-    last_report = start
-
-    with requests.get(
-        url,
-        stream=True,
-        headers={"User-Agent": USER_AGENT},
-        timeout=(CONNECT_TIMEOUT_SECONDS, READ_TIMEOUT_SECONDS),
-    ) as resp:
-        resp.raise_for_status()
-        total = int(resp.headers.get("Content-Length") or 0)
-        for chunk in resp.iter_content(chunk_size=STREAM_CHUNK_SIZE):
-            if not chunk:
-                continue
-            writer.write(chunk)
-            sha.update(chunk)
-            md5.update(chunk)
-            size += len(chunk)
-            now = time.monotonic()
-            if on_progress and now - last_report >= 2.0:
-                on_progress(label, size, total, False)
-                last_report = now
-    if on_progress:
-        on_progress(label, size, total or size, True)
-    return size, sha.hexdigest(), md5.hexdigest().lower()
-
-
-def _stream_download_urllib(
-    url: str,
-    writer,
-    label: str,
-    on_progress: ProgressCallback | None,
-) -> tuple[int, str, str]:
-    """Fallback streaming path using ``urllib.request``."""
-    sha = hashlib.sha256()
-    md5 = hashlib.md5()
-    size = 0
+    have = 0
+    total = 0
     last_report = time.monotonic()
-    with urllib.request.urlopen(_request(url), timeout=READ_TIMEOUT_SECONDS) as resp:
-        total = int(resp.headers.get("Content-Length") or 0)
+    attempt = 0
+    writer = open(staged_path, "wb")
+    try:
         while True:
-            chunk = resp.read1(STREAM_CHUNK_SIZE)
-            if not chunk:
-                break
-            writer.write(chunk)
-            sha.update(chunk)
-            md5.update(chunk)
-            size += len(chunk)
-            now = time.monotonic()
-            if on_progress and now - last_report >= 2.0:
-                on_progress(label, size, total, False)
-                last_report = now
-    if on_progress:
-        on_progress(label, size, total or size, True)
-    return size, sha.hexdigest(), md5.hexdigest().lower()
+            headers = {"User-Agent": USER_AGENT}
+            if have > 0:
+                headers["Range"] = f"bytes={have}-"
+            try:
+                if use_requests:
+                    with requests.get(
+                        url,
+                        stream=True,
+                        headers=headers,
+                        timeout=(CONNECT_TIMEOUT_SECONDS, READ_TIMEOUT_SECONDS),
+                    ) as resp:
+                        if resp.status_code == 416:
+                            break
+                        if have > 0 and resp.status_code == 200:
+                            # Mirror ignored Range — body is the whole file. Reset.
+                            writer.seek(0)
+                            writer.truncate()
+                            sha, md5, have = hashlib.sha256(), hashlib.md5(), 0
+                        resp.raise_for_status()
+                        total = _expected_total(resp.headers, have)
+                        for chunk in resp.iter_content(chunk_size=STREAM_CHUNK_SIZE):
+                            if not chunk:
+                                continue
+                            writer.write(chunk)
+                            sha.update(chunk)
+                            md5.update(chunk)
+                            have += len(chunk)
+                            now = time.monotonic()
+                            if on_progress and now - last_report >= 2.0:
+                                on_progress(label, have, total or have, False)
+                                last_report = now
+                else:
+                    with urllib.request.urlopen(
+                        urllib.request.Request(url, headers=headers),
+                        timeout=READ_TIMEOUT_SECONDS,
+                    ) as resp:
+                        if have > 0 and getattr(resp, "status", 200) == 200:
+                            writer.seek(0)
+                            writer.truncate()
+                            sha, md5, have = hashlib.sha256(), hashlib.md5(), 0
+                        total = _expected_total(resp.headers, have)
+                        while True:
+                            chunk = resp.read1(STREAM_CHUNK_SIZE)
+                            if not chunk:
+                                break
+                            writer.write(chunk)
+                            sha.update(chunk)
+                            md5.update(chunk)
+                            have += len(chunk)
+                            now = time.monotonic()
+                            if on_progress and now - last_report >= 2.0:
+                                on_progress(label, have, total or have, False)
+                                last_report = now
+            except urllib.error.HTTPError as exc:
+                if exc.code == 416:
+                    break
+                raise
+            except _RESUMABLE_ERRORS as exc:
+                attempt += 1
+                writer.flush()
+                try:
+                    os.fsync(writer.fileno())
+                except OSError:
+                    pass
+                if attempt > RESUME_MAX_ATTEMPTS:
+                    raise DownloadError(
+                        f"{label}: gave up after {attempt} resume attempts at "
+                        f"{have} bytes: {exc}"
+                    ) from exc
+                logger.warning(
+                    "Resuming %s from %d bytes after transport error "
+                    "(attempt %d/%d): %s",
+                    label, have, attempt, RESUME_MAX_ATTEMPTS, exc,
+                )
+                time.sleep(min(30, 2 ** min(attempt, 5)))
+                continue
+            # Stream ended without raising. If the server closed early (clean
+            # short read), resume the remainder; otherwise we're done.
+            if total and have < total:
+                attempt += 1
+                if attempt > RESUME_MAX_ATTEMPTS:
+                    raise DownloadError(
+                        f"{label}: short read {have}/{total} after {attempt} attempts"
+                    )
+                logger.warning(
+                    "Resuming %s from %d/%d bytes (clean short read, attempt %d/%d)",
+                    label, have, total, attempt, RESUME_MAX_ATTEMPTS,
+                )
+                continue
+            break
+        if on_progress:
+            on_progress(label, have, total or have, True)
+    finally:
+        writer.close()
+    return have, sha.hexdigest(), md5.hexdigest().lower()
 
 
 def list_cached_regions(*, storage: Storage | None = None) -> list[str]:
@@ -401,15 +495,17 @@ def download_region(
 
         # Stage onto local disk first so socket-read rate is decoupled from
         # destination write rate (matters when dst is a slow network volume).
+        # The download resumes via HTTP Range across mid-stream drops rather
+        # than restarting from zero — essential for multi-GB extracts on
+        # Geofabrik's flaky mirrors.
         staged = staging_path(region)
         if os.path.exists(staged):
             os.unlink(staged)
 
         try:
-            with open(staged, "wb") as writer:
-                size, sha256_hex, md5_hex = _stream_download(
-                    url, writer, region, on_progress
-                )
+            size, sha256_hex, md5_hex = _download_resumable(
+                url, staged, region, on_progress
+            )
         except BaseException:
             if os.path.exists(staged):
                 os.unlink(staged)
