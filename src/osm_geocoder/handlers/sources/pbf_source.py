@@ -605,6 +605,40 @@ def _extract_category(payload: dict) -> dict:
     return {"output_path": output_path, "feature_count": feature_count, "category": category}
 
 
+def _to_geojson(payload: dict) -> dict:
+    """``osm.Source.PBF.ToGeoJson`` — convert the FULL region PBF to GeoJSON.
+
+    Unlike the category extractors (subsets), this exports *every* feature via
+    ``osmium export`` and writes to the configured storage backend — MinIO when
+    ``AFL_STORAGE=s3`` — under the ``geojson`` cache type. The underlying
+    ``convert_region`` localizes the cached PBF from the object store before
+    osmium and finalizes the output back to it. Idempotent: skips osmium when
+    the region is already converted (source SHA matches).
+    """
+    from ..shared.pbf_convert import geojson
+
+    cache = _cache_from_payload(payload)
+    region = (cache.get("region") or {}).get("geofabrik_path") or ""
+    if not region:
+        raise ValueError("ToGeoJson: OSMCache is missing region.geofabrik_path")
+    fmt = payload.get("format") or "geojson"
+    step_log = payload.get("_step_log")
+    if step_log:
+        step_log(f"ToGeoJson: {region} → {fmt} (osmium export, full region)")
+    res = geojson.convert_region(region, fmt=fmt)
+    if step_log:
+        step_log(
+            f"ToGeoJson: {region} → {res.path} "
+            f"({res.size_bytes} bytes, cached={res.was_cached})",
+            level="success",
+        )
+    return {
+        "output_path": res.path,
+        "size_bytes": res.size_bytes,
+        "was_cached": res.was_cached,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Dispatch table
 # ---------------------------------------------------------------------------
@@ -619,6 +653,7 @@ PBF_DISPATCH: dict[str, callable] = {
     f"{NAMESPACE}.ExtractPopulation": _extract_population,
     f"{NAMESPACE}.ExtractPOIs": _extract_pois,
     f"{NAMESPACE}.ExtractCategory": _extract_category,
+    f"{NAMESPACE}.ToGeoJson": _to_geojson,
 }
 
 

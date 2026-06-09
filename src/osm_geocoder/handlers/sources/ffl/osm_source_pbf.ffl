@@ -41,4 +41,13 @@ namespace osm.Source.PBF {
      * full PBF — then filter the small per-category GeoJSON with the FilterGeoJSON*
      * facets. */
     event facet ExtractCategory(cache: OSMCache, category: String) => (output_path: String, feature_count: Long, category: String) with Timeout(minutes = 120) with Effect(kind = "external")
+
+    /** Converts an ENTIRE region PBF to GeoJSON via `osmium export` — every
+     *  feature, not a single category (unlike the Extract* facets above).
+     *  Reads the cached PBF (localizing from the object store first when on
+     *  S3/MinIO) and writes the GeoJSON to the configured storage backend
+     *  under the `geojson` cache type — i.e. into MinIO when AFL_STORAGE=s3.
+     *  Idempotent: a region already converted (matching source SHA) returns
+     *  the cached GeoJSON without re-running osmium. */
+    event facet ToGeoJson(cache: OSMCache, format: String = "geojson") => (output_path: String, size_bytes: Long, was_cached: Boolean) with Timeout(minutes = 180) with Effect(kind = "external")
 }
