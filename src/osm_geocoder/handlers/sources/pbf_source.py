@@ -623,6 +623,22 @@ def _to_geojson(payload: dict) -> dict:
         raise ValueError("ToGeoJson: OSMCache is missing region.geofabrik_path")
     fmt = payload.get("format") or "geojson"
     step_log = payload.get("_step_log")
+
+    # Size gate: skip regions whose cached PBF exceeds the limit, BEFORE
+    # localizing/converting (so an oversized continent isn't even downloaded).
+    # The FFL `max_pbf_mb` param wins; otherwise fall back to AFL_OSM_MAX_PBF_MB
+    # so an operator can cap a bulk run already in flight. 0/unset = no limit.
+    max_mb = int(payload.get("max_pbf_mb") or 0) or int(os.environ.get("AFL_OSM_MAX_PBF_MB") or 0)
+    pbf_bytes = int(cache.get("size") or 0)
+    if max_mb > 0 and pbf_bytes > max_mb * 1024 * 1024:
+        if step_log:
+            step_log(
+                f"ToGeoJson: SKIP {region} — PBF {pbf_bytes / 1024 / 1024:.0f}MB "
+                f"exceeds max_pbf_mb={max_mb}MB",
+                level="warning",
+            )
+        return {"output_path": "", "size_bytes": 0, "was_cached": False, "skipped": True}
+
     if step_log:
         step_log(f"ToGeoJson: {region} → {fmt} (osmium export, full region)")
     res = geojson.convert_region(region, fmt=fmt)
@@ -636,6 +652,7 @@ def _to_geojson(payload: dict) -> dict:
         "output_path": res.path,
         "size_bytes": res.size_bytes,
         "was_cached": res.was_cached,
+        "skipped": False,
     }
 
 
