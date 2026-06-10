@@ -10,6 +10,7 @@
 /** Heat maps over OSM features via extract -> script-filter -> render. */
 namespace osm.heatmap {
     use osm.types
+    use osm.Region
     use osm.cache
     use osm.Source.PBF
     use osm.Filters
@@ -28,13 +29,14 @@ namespace osm.heatmap {
      *  streaming low-memory osmium pass, so this works even for continent-scale
      *  regions that the full-region GeoJSON conversion cannot handle. */
     workflow AmenityHeatmap(
-        region: String = "north-america",
+        region: String = "North America",
         category: String = "amenities",
         filter_script: String = "props.get('amenity') == 'charging_station' and ('tesla' in str(props.get('operator','')).lower() or 'tesla' in str(props.get('brand','')).lower() or 'tesla' in str(props.get('network','')).lower() or any(k.startswith('socket:tesla') for k in props))",
         style: String = "kernel",
         title: String = "Tesla Superchargers — North America"
     ) => (map_html: String, match_count: Long) andThen {
-        cache = osm.cache.Download(region = $.region)
+        resolved = osm.Region.ResolveRegion(name = $.region)
+        cache = osm.cache.Download(region = resolved.region)
         pts   = osm.Source.PBF.ExtractCategory(cache = cache.cache, category = $.category)
         sub   = osm.Filters.ByScript(input_path = pts.output_path, script = $.filter_script)
         heat  = osm.viz.RenderHeatmap(points = sub.output_path, style = $.style, title = $.title)
