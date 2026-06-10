@@ -24,13 +24,14 @@ namespace osm.heatmap {
      *  default script keeps charging stations whose operator/brand mentions
      *  Tesla, or that carry a `socket:tesla*` tag) -> RenderHeatmap.
      *
-     *  Reusable: `category="amenities", filter_script="props.get('amenity')=='hospital'"`,
-     *  `style="grid"`, a different region — same facets. Point extraction is a
+     *  Reusable: `category="food", filter_script="props.get('cuisine')=='pizza'"`,
+     *  `style="grid"`, a different region — same facets (category must be a valid
+     *  CombinedScan category: food, fuel_charging, parks, water, …). Point extraction is a
      *  streaming low-memory osmium pass, so this works even for continent-scale
      *  regions that the full-region GeoJSON conversion cannot handle. */
     workflow AmenityHeatmap(
         region: String = "North America",
-        category: String = "amenities",
+        category: String = "fuel_charging",
         filter_script: String = "props.get('amenity') == 'charging_station' and ('tesla' in str(props.get('operator','')).lower() or 'tesla' in str(props.get('brand','')).lower() or 'tesla' in str(props.get('network','')).lower() or any(k.startswith('socket:tesla') for k in props))",
         style: String = "kernel",
         title: String = "Tesla Superchargers — North America"
