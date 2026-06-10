@@ -69,7 +69,9 @@ def _up_to_date_cheap(region: str, fmt: str) -> bool:
     return is_up_to_date(region, fmt, pbf_side, geojson_abs_path(region, fmt))
 
 
-def _run_one(region: str, *, fmt: str, force: bool, dry_run: bool, osmium_bin: str) -> str:
+def _run_one(
+    region: str, *, fmt: str, force: bool, dry_run: bool, osmium_bin: str, max_pbf_mb: int = 0
+) -> str:
     if dry_run:
         src = pbf_abs_path(region)
         dst = geojson_abs_path(region, fmt)
@@ -77,11 +79,18 @@ def _run_one(region: str, *, fmt: str, force: bool, dry_run: bool, osmium_bin: s
         return "dry-run"
     try:
         result: ConvertResult = convert_region(
-            region, fmt=fmt, force=force, osmium_bin=osmium_bin
+            region, fmt=fmt, force=force, osmium_bin=osmium_bin, max_pbf_mb=max_pbf_mb
         )
     except ConversionError as exc:
         print(f"[{region}] FAILED: {exc}", file=sys.stderr)
         raise
+    if result.skipped:
+        print(
+            f"[{region}] SKIPPED: PBF {result.size_bytes / (1024 * 1024):.0f}MiB "
+            f"exceeds size gate",
+            file=sys.stderr,
+        )
+        return "skipped"
     if result.was_cached:
         print(f"[{region}] up-to-date, skipping", file=sys.stderr)
         return "skipped"
@@ -163,6 +172,14 @@ def main() -> int:
         default="osmium",
         help="Path to the osmium binary (default: 'osmium' on PATH).",
     )
+    parser.add_argument(
+        "--max-pbf-mb",
+        type=int,
+        default=0,
+        help="Skip regions whose cached PBF exceeds this size in MB (0 = no limit). "
+        "Falls back to the AFL_OSM_MAX_PBF_MB env var. Useful on memory-constrained "
+        "hosts where the largest extracts OOM or seek-thrash the osmium node index.",
+    )
     args = parser.parse_args()
 
     if args.jobs < 1:
@@ -242,6 +259,7 @@ def main() -> int:
                 force=args.force,
                 dry_run=args.dry_run,
                 osmium_bin=osmium_bin,
+                max_pbf_mb=args.max_pbf_mb,
             )
             return outcome, None
         except Exception as exc:  # noqa: BLE001

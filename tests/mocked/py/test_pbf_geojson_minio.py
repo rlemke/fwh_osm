@@ -115,3 +115,31 @@ def test_staging_path_for_local_is_adjacent(tmp_path, monkeypatch):
 
     sp = str(pd._staging_path("x", "geojson", FakeLocal()))
     assert sp == str(tmp_path / "out.geojson.tmp")
+
+
+def test_convert_region_size_gate_skips_oversized(monkeypatch):
+    """The size gate lives in convert_region (shared by CLI + handler): an
+    oversized PBF is skipped BEFORE localizing — no download, no osmium."""
+    # sidecar reports a 2GB PBF
+    monkeypatch.setattr(pd.sidecar, "read_sidecar",
+                        lambda *a, **k: {"size_bytes": 2 * 1024**3, "source": {"url": "u"}})
+    # if localize/exists were reached the test PBF doesn't exist -> would raise;
+    # the gate must return before that.
+    called = {"localized": False}
+    class FakeS:
+        name = "s3"
+        def exists(self, p): called["localized"] = True; return True
+        def localize(self, p): called["localized"] = True; return "/nope"
+    res = pd.convert_region("asia/india", storage=FakeS(), max_pbf_mb=1024)
+    assert res.skipped is True and res.path == ""
+    assert res.size_bytes == 2 * 1024**3
+    assert called["localized"] is False  # never touched storage — skipped first
+
+
+def test_convert_region_size_gate_env_fallback(monkeypatch):
+    """max_pbf_mb=0 falls back to AFL_OSM_MAX_PBF_MB."""
+    monkeypatch.setattr(pd.sidecar, "read_sidecar",
+                        lambda *a, **k: {"size_bytes": 3 * 1024**3, "source": {}})
+    monkeypatch.setenv("AFL_OSM_MAX_PBF_MB", "1024")
+    res = pd.convert_region("north-america/us", storage=type("S", (), {"name": "s3"})())
+    assert res.skipped is True
