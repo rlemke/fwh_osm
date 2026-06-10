@@ -445,8 +445,13 @@ def _make_heatmap_handler(facet_name: str):
         weight_prop = payload.get("weight_prop") or None
         cell_km = float(payload.get("cell_km") or 25.0)
         step_log = payload.get("_step_log")
+        # Fail loudly rather than silently completing with no output: an empty
+        # points path means the upstream step's output_path did not propagate.
         if not points:
-            return {"html_path": "", "point_count": 0, "style": style}
+            raise ValueError(
+                f"{qualified}: points is empty — the upstream step's "
+                "output_path did not reach this facet"
+            )
         base = points.rsplit(".", 1)[0] if "." in points else points
         out_path = f"{base}_{style}_heatmap.html"
         if step_log:

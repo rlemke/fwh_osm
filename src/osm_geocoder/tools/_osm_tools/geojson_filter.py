@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -45,6 +46,76 @@ from typing import Any, Callable
 from _osm_tools.storage import Storage, get_storage, local_staging_subdir
 
 Predicate = Callable[[dict], bool]
+
+
+def iter_features(path: str) -> Iterator[dict]:
+    """Yield features from a GeoJSON FeatureCollection at ``path``.
+
+    The osm extractors write a single ``{"type":"FeatureCollection","features":[
+    ...]}`` document, but it can be large (tens of MB) and — if a producing step
+    was interrupted — truncated. This reader is therefore both **streaming**
+    (never builds the whole feature list in memory for the common path) and
+    **tolerant**: it brace-matches complete ``Feature`` objects inside the
+    ``features`` array and yields each one, so a truncated tail loses only the
+    final partial feature instead of failing the whole filter. Falls back to a
+    plain ``json.load`` for documents that aren't a top-level FeatureCollection.
+    """
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    # Locate the start of the features array.
+    m = re.search(r'"features"\s*:\s*\[', text)
+    if m is None:
+        # Not the expected shape — fall back to whole-document parse.
+        try:
+            doc = json.loads(text)
+        except json.JSONDecodeError:
+            return
+        if isinstance(doc, dict):
+            yield from doc.get("features") or []
+        elif isinstance(doc, list):
+            yield from doc
+        return
+    i = m.end()
+    n = len(text)
+    while i < n:
+        # Skip whitespace/commas between features and the array's end.
+        while i < n and text[i] in " \t\r\n,":
+            i += 1
+        if i >= n or text[i] == "]":
+            return
+        if text[i] != "{":
+            return  # malformed — stop salvaging
+        # Brace-match one object, respecting strings/escapes.
+        depth = 0
+        start = i
+        in_str = False
+        esc = False
+        while i < n:
+            c = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+            elif c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    i += 1
+                    break
+            i += 1
+        else:
+            return  # truncated mid-object — drop the partial tail
+        chunk = text[start:i]
+        try:
+            yield json.loads(chunk)
+        except json.JSONDecodeError:
+            return
 
 
 @dataclass
@@ -173,32 +244,38 @@ def filter_geojson(
     keep: Predicate = predicate if callable(predicate) else compile_filter(predicate)
 
     local_in = Path(s.localize(str(in_path)))
-    with open(local_in, encoding="utf-8") as fh:
-        fc = json.load(fh)
-    features = fc.get("features") or []
-
-    kept: list[dict] = []
-    errors = 0
-    for feat in features:
-        try:
-            if keep(feat):
-                kept.append(feat)
-        except Exception:  # noqa: BLE001 - a bad predicate drops the feature, not the run
-            errors += 1
-
-    out = {"type": "FeatureCollection", "features": kept}
     safe = re.sub(r"[^A-Za-z0-9._-]", "_", Path(str(out_path)).name)
     staging = Path(local_staging_subdir("facetwork-geojson-filter")) / f"{safe}.tmp"
     staging.parent.mkdir(parents=True, exist_ok=True)
-    with open(staging, "w", encoding="utf-8") as fh:
-        json.dump(out, fh)
+
+    # Stream features in and kept features out — never hold the whole collection
+    # in memory (the amenity extracts run to tens of MB / hundreds of thousands
+    # of features).
+    total = kept = errors = 0
+    with open(staging, "w", encoding="utf-8") as out_fh:
+        out_fh.write('{"type": "FeatureCollection", "features": [')
+        first = True
+        for feat in iter_features(str(local_in)):
+            total += 1
+            try:
+                match = keep(feat)
+            except Exception:  # noqa: BLE001 - a bad predicate drops the feature, not the run
+                errors += 1
+                continue
+            if match:
+                if not first:
+                    out_fh.write(",")
+                json.dump(feat, out_fh)
+                first = False
+                kept += 1
+        out_fh.write("]}")
     s.mkdir_p(Storage.dirname(str(out_path)))
     s.finalize_from_local(str(staging), str(out_path))
 
     return FilterResult(
         output_path=str(out_path),
         relative_path=Path(str(out_path)).name,
-        total=len(features),
-        kept=len(kept),
+        total=total,
+        kept=kept,
         errors=errors,
     )

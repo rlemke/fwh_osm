@@ -812,8 +812,14 @@ def _make_byscript_filter_handler(facet_name: str):
         input_path = payload.get("geojson") or payload.get("input_path") or ""
         script = payload.get("script") or payload.get("predicate") or ""
         step_log = payload.get("_step_log")
+        # Fail loudly rather than silently completing with no output: an empty
+        # input_path means the upstream step's output_path did not propagate, and
+        # a silent empty success hides that (and yields an empty heat map).
         if not input_path:
-            return {"output_path": "", "feature_count": 0, "total": 0}
+            raise ValueError(
+                f"{qualified}: input_path is empty — the upstream step's "
+                "output_path did not reach this facet"
+            )
         # Derive a deterministic output path: input with a _filtered_<hash> suffix
         # (the script hash so different filters on one input don't collide).
         h = hashlib.sha1((script or "").encode()).hexdigest()[:8]
