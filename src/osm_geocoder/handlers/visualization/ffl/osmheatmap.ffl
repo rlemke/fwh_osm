@@ -31,7 +31,7 @@ namespace osm.heatmap {
      *  regions that the full-region GeoJSON conversion cannot handle. */
     workflow AmenityHeatmap(
         region: String = "North America",
-        category: String = "fuel_charging",
+        category: String = "amenities",
         filter_script: String = "props.get('amenity') == 'charging_station' and ('tesla' in str(props.get('operator','')).lower() or 'tesla' in str(props.get('brand','')).lower() or 'tesla' in str(props.get('network','')).lower() or any(k.startswith('socket:tesla') for k in props))",
         style: String = "kernel",
         title: String = "Tesla Superchargers — North America"
