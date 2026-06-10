@@ -232,9 +232,24 @@ def convert_region(
         if staging.exists():
             staging.unlink()
 
+        # Disk-backed node-location index on local scratch (alongside staging),
+        # so osmium does NOT hold every node's coordinates in RAM. The default
+        # flex_mem index grows unbounded and OOM-kills osmium on large regions
+        # (continents need GBs just for the index) on memory-constrained hosts.
+        # sparse_file_array suits OSM extracts (sparse global node IDs); override
+        # with AFL_OSMIUM_INDEX_TYPE (e.g. flex_mem for small-region speed).
+        index_type = os.environ.get("AFL_OSMIUM_INDEX_TYPE", "sparse_file_array")
+        idx_path = staging.with_name(staging.name + ".nodeidx")
+        idx_path.unlink(missing_ok=True)
+        index_arg = (
+            f"{index_type},{idx_path}" if index_type.endswith("_file_array") else index_type
+        )
+
         cmd = [
             osmium_bin,
             "export",
+            "-i",
+            index_arg,
             "-f",
             fmt,
             "-o",
@@ -248,12 +263,15 @@ def convert_region(
         except subprocess.CalledProcessError as exc:
             if staging.exists():
                 staging.unlink()
+            idx_path.unlink(missing_ok=True)
             stderr = (exc.stderr or "").strip()
             raise ConversionError(f"osmium export failed: {stderr or exc}") from exc
         except BaseException:
             if staging.exists():
                 staging.unlink()
+            idx_path.unlink(missing_ok=True)
             raise
+        idx_path.unlink(missing_ok=True)  # success: drop the (large) on-disk index
         elapsed = time.monotonic() - start
 
         size, sha256_hex = _sha256_file(staging)

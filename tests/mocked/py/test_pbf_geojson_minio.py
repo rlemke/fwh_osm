@@ -61,6 +61,7 @@ def test_convert_region_localizes_s3_source_before_osmium(tmp_path, monkeypatch)
     def fake_osmium(cmd, **kw):
         # osmium export -f geojson -o <staging> --overwrite <input>
         calls["osmium_input"] = cmd[-1]
+        calls["cmd"] = cmd
         out = cmd[cmd.index("-o") + 1]
         pd.Path(out).write_text('{"type":"FeatureCollection","features":[]}')
 
@@ -78,6 +79,10 @@ def test_convert_region_localizes_s3_source_before_osmium(tmp_path, monkeypatch)
     # 2) osmium ran on the LOCALIZED local file, never the s3:// URI
     assert calls["osmium_input"] == str(local_pbf)
     assert not calls["osmium_input"].startswith("s3://")
+    # disk-backed node index (bounded RAM, no OOM on big regions)
+    ci = calls["cmd"]
+    assert "-i" in ci
+    assert any("sparse_file_array," in str(a) for a in ci)
     # 3) output finalized back to the (object-store) destination
     assert calls["finalized"] == out_uri
     assert calls["finalized"].startswith("s3://afl-cache/cache/osm/geojson/")
