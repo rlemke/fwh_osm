@@ -14,6 +14,7 @@ namespace osm.heatmap {
     use osm.cache
     use osm.Source.PBF
     use osm.Filters
+    use osm.Transform
     use osm.viz
 
     /** Heat map of a feature class in a region, selected by an arbitrary Python
@@ -42,5 +43,44 @@ namespace osm.heatmap {
         sub   = osm.Filters.ByScript(input_path = pts.output_path, script = $.filter_script)
         heat  = osm.viz.RenderHeatmap(points = sub.output_path, style = $.style, title = $.title)
         yield AmenityHeatmap(map_html = heat.html_path, match_count = sub.feature_count)
+    }
+
+    /** Inner fan-out: expand `region_names` to their finest-grained Geofabrik
+     *  leaves (e.g. "North America" → US states + Canadian provinces + Mexico +
+     *  Greenland) and, IN PARALLEL across the runner fleet, extract + script-filter
+     *  each leaf. Each leaf PBF is small enough to extract on a modest host, so a
+     *  continent that the whole-continent path can't handle becomes N independent,
+     *  parallel sub-jobs. The list-typed `filtered_paths` yield aggregates every
+     *  leaf's filtered GeoJSON into one list at completion. */
+    workflow SubregionChargers(
+        region_names: [String] = ["North America"],
+        category: String = "amenities",
+        filter_script: String = "props.get('amenity') == 'charging_station' and ('tesla' in str(props.get('operator','')).lower() or 'tesla' in str(props.get('brand','')).lower() or 'tesla' in str(props.get('network','')).lower() or any(k.startswith('socket:tesla') for k in props))"
+    ) => (filtered_paths: [String]) andThen {
+        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = "subregions")
+    } andThen foreach r in resolved.regions {
+        dl   = osm.cache.Download(region = $.r)
+        pts  = osm.Source.PBF.ExtractCategory(cache = dl.cache, category = $.category)
+        filt = osm.Filters.ByScript(input_path = pts.output_path, script = $.filter_script)
+        yield SubregionChargers(filtered_paths = [filt.output_path])
+    }
+
+    /** Continent-scale heat map without a bigger host: fan out per state/province
+     *  (SubregionChargers), merge the small per-leaf filtered point sets into one
+     *  GeoJSON (MergeLayers), and render a single heat map. Run several osm runners
+     *  to process the leaves concurrently. Default = Tesla superchargers across all
+     *  of North America. */
+    workflow ContinentHeatmap(
+        region_names: [String] = ["North America"],
+        category: String = "amenities",
+        filter_script: String = "props.get('amenity') == 'charging_station' and ('tesla' in str(props.get('operator','')).lower() or 'tesla' in str(props.get('brand','')).lower() or 'tesla' in str(props.get('network','')).lower() or any(k.startswith('socket:tesla') for k in props))",
+        style: String = "kernel",
+        title: String = "Tesla Superchargers — North America"
+    ) => (map_html: String, match_count: Long) andThen {
+        ext    = osm.heatmap.SubregionChargers(
+                   region_names = $.region_names, category = $.category, filter_script = $.filter_script)
+        merged = osm.Transform.MergeLayers(inputs = ext.filtered_paths)
+        heat   = osm.viz.RenderHeatmap(points = merged.result.output_path, style = $.style, title = $.title)
+        yield ContinentHeatmap(map_html = heat.html_path, match_count = heat.point_count)
     }
 }
