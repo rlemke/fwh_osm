@@ -190,11 +190,13 @@ def render_heatmap(
     numeric feature property to weight each point by (default 1). Storage-aware:
     input/output may be local or object-store URIs.
     """
+    from _osm_tools.geojson_filter import iter_features
+
     s = storage or get_storage()
     local_in = Path(s.localize(str(points_path)))
-    with open(local_in, encoding="utf-8") as fh:
-        fc = json.load(fh)
-    features = fc.get("features") or []
+    # Tolerant streaming read (handles the extractors' large / possibly-truncated
+    # FeatureCollection output the same way the filter does).
+    features = list(iter_features(str(local_in)))
     pts = _points(features)
     if not pts:
         raise HeatmapError(f"no point features in {points_path}")

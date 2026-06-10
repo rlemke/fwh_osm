@@ -81,3 +81,54 @@ def test_heatmap_empty_raises(tmp_path):
     p.write_text(json.dumps({"type": "FeatureCollection", "features": []}))
     with pytest.raises(hm.HeatmapError):
         hm.render_heatmap(str(p), str(tmp_path / "x.html"))
+
+
+# --- #2: streaming, truncation-tolerant reader -----------------------------
+
+def _fc(n):
+    return {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-122 + i*0.01, 37 + i*0.01]},
+         "properties": {"amenity": "charging_station", "operator": "Tesla" if i % 2 else "Other", "id": i}}
+        for i in range(n)]}
+
+
+def test_iter_features_complete_and_pretty(tmp_path):
+    import json
+    p = tmp_path / "full.geojson"; p.write_text(json.dumps(_fc(50)))
+    assert sum(1 for _ in gf.iter_features(str(p))) == 50
+    pp = tmp_path / "pretty.geojson"; pp.write_text(json.dumps(_fc(50), indent=2))
+    assert sum(1 for _ in gf.iter_features(str(pp))) == 50
+
+
+def test_iter_features_tolerates_truncation(tmp_path):
+    import json
+    full = json.dumps(_fc(50))
+    p = tmp_path / "trunc.geojson"; p.write_text(full[:-40])  # cut mid last feature
+    n = sum(1 for _ in gf.iter_features(str(p)))
+    assert 48 <= n < 50  # all complete features salvaged, only the partial tail dropped
+
+
+def test_filter_and_heatmap_on_truncated(tmp_path):
+    import json
+    full = json.dumps(_fc(60))
+    src = tmp_path / "t.geojson"; src.write_text(full[:-40])
+    r = gf.filter_geojson(str(src), "'tesla' in str(props.get('operator','')).lower()", str(tmp_path / "o.geojson"))
+    assert r.kept > 0
+    h = hm.render_heatmap(str(tmp_path / "o.geojson"), str(tmp_path / "h.html"))
+    assert h.point_count > 0
+
+
+# --- #1: facets fail loudly on empty input (no silent empty success) -------
+
+def test_byscript_handler_raises_on_empty_input():
+    from osm_geocoder.handlers.filters.filter_handlers import _make_byscript_filter_handler
+    h = _make_byscript_filter_handler("ByScript")
+    with pytest.raises(ValueError, match="input_path is empty"):
+        h({"input_path": "", "script": "True"})
+
+
+def test_renderheatmap_handler_raises_on_empty_points():
+    from osm_geocoder.handlers.visualization.visualization_handlers import _make_heatmap_handler
+    h = _make_heatmap_handler("RenderHeatmap")
+    with pytest.raises(ValueError, match="points is empty"):
+        h({"points": "", "style": "kernel"})
