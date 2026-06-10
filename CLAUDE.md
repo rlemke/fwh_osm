@@ -85,6 +85,36 @@ Composed workflows in `osm.workflows.sourced` demonstrate the pattern:
 `BicycleRoutesPBF` / `BicycleRoutesPostGIS` / `BicycleRoutesGeoJSON` — same
 pipeline, different sources.
 
+### Subregion fan-out — the PRIMARY path for continents and large countries
+
+**Default to fanning out over subregions; do not download/extract a whole
+continent or large-country PBF.** A continent extract (`north-america` ≈ 14 GB,
+`europe` ≈ 28 GB) needs a big host — osmium OOMs / seek-thrashes its index on a
+modest box — and runs serially. Instead, expand the region to its Geofabrik
+**leaves** (states/provinces) and process them in parallel: each leaf PBF is
+small enough to extract anywhere, and *N leaves become N independent sub-jobs
+across the runner fleet*, then merge into one output.
+
+The building blocks (all already exist, all object-store-native):
+
+- **`osm.Region.ResolveRegions(names, expand="subregions")`** — expands each name
+  to its finest Geofabrik leaves (`["North America"]` → 64: US states + Canadian
+  provinces + Mexico + Greenland; an already-leaf region passes through). This is
+  what keeps fan-out off the un-tractable mega-PBFs (`expand_to_subregions`).
+- **`andThen foreach r in resolved.regions { … yield W(paths = [x.output_path]) }`**
+  — one parallel sub-block per leaf; the list-typed yield aggregates every leaf's
+  output into one list at completion (see `osmcrossregion.ffl` for the yield-merge
+  semantics).
+- **`osm.Transform.MergeLayers(inputs)`** — concatenate the small per-leaf outputs
+  into one GeoJSON.
+
+Canonical examples: **`osm.heatmap.ContinentHeatmap`** (Download → ExtractCategory
+→ ByScript per leaf → MergeLayers → RenderHeatmap; `osmheatmap.ffl`) and
+**`osm.Cities.workflows.CitiesByZoomTiledMapFanout`** (`osmcities_fanout.ffl`).
+Use the single-region variant (e.g. `AmenityHeatmap`) **only** for one
+leaf/small region. Add runners (`--scale runner-osm-geocoder=N`) to go faster —
+amenity/population scans are node-only and light, so several run per host.
+
 ### Cheap category extraction — the warm-cache path
 
 `osm.Source.PBF.ExtractCategory(cache, category) => (output_path, feature_count, category)`
