@@ -20,10 +20,10 @@ namespace osm.convert {
      *  the whole PBF to GeoJSON in the configured storage (MinIO on s3). Handy
      *  for one-offs and for smoke-testing the conversion path on a small
      *  region before the bulk run. */
-    workflow ConvertRegionToGeoJson(region: String) => (output_path: String, size_bytes: Long, was_cached: Boolean) andThen {
+    workflow ConvertRegionToGeoJson(region: String, max_pbf_mb: Long = 0) => (output_path: String, size_bytes: Long, was_cached: Boolean) andThen {
         resolved = osm.Region.ResolveRegion(name = $.region)
         dl = osm.cache.Download(region = resolved.region)
-        gj = osm.Source.PBF.ToGeoJson(cache = dl.cache)
+        gj = osm.Source.PBF.ToGeoJson(cache = dl.cache, max_pbf_mb = $.max_pbf_mb)
         yield ConvertRegionToGeoJson(output_path = gj.output_path, size_bytes = gj.size_bytes, was_cached = gj.was_cached)
     }
 
@@ -37,12 +37,17 @@ namespace osm.convert {
      *  whole PBF to GeoJSON into the configured storage (MinIO on AFL_STORAGE=s3).
      *
      *  Fans out one conversion per region across the runner fleet via foreach;
-     *  the list-typed yield aggregates every output path into `outputs`. */
-    workflow ConvertAllRegionsToGeoJson() => (outputs: [String]) andThen {
+     *  the list-typed yield aggregates every output path into `outputs`.
+     *
+     *  `max_pbf_mb` (0 = no limit) skips regions whose cached PBF exceeds the
+     *  limit — useful on a memory-constrained host where the largest extracts
+     *  (continents, big countries) OOM or seek-thrash the osmium node index.
+     *  Skipped regions yield an empty path. */
+    workflow ConvertAllRegionsToGeoJson(max_pbf_mb: Long = 0) => (outputs: [String]) andThen {
         cached = osm.cache.ListCachedRegions()
     } andThen foreach r in cached.regions {
         dl = osm.cache.Download(region = $.r)
-        gj = osm.Source.PBF.ToGeoJson(cache = dl.cache)
+        gj = osm.Source.PBF.ToGeoJson(cache = dl.cache, max_pbf_mb = $.max_pbf_mb)
         yield ConvertAllRegionsToGeoJson(outputs = [gj.output_path])
     }
 }
