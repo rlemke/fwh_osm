@@ -1,0 +1,43 @@
+// Heat-map composition: extract points -> script-filter -> render heat map.
+//
+// Demonstrates the composable-facet pattern: a heat map of ANY tagged feature in
+// ANY region is the same four facets, only the params change. The example
+// default is "Tesla superchargers in North America".
+//
+// Prerequisites: compile with osmtypes.ffl, osmcache_download.ffl,
+//   osm_source_pbf.ffl, osmfilters.ffl, osmvisualization.ffl.
+
+/** Heat maps over OSM features via extract -> script-filter -> render. */
+namespace osm.heatmap {
+    use osm.types
+    use osm.cache
+    use osm.Source.PBF
+    use osm.Filters
+    use osm.viz
+
+    /** Heat map of a feature class in a region, selected by an arbitrary Python
+     *  filter script. Default = Tesla superchargers across North America.
+     *
+     *  Pipeline: Download the region PBF (cache hit if present) -> extract the
+     *  point category -> ByScript-filter to the features of interest (the
+     *  default script keeps charging stations whose operator/brand mentions
+     *  Tesla, or that carry a `socket:tesla*` tag) -> RenderHeatmap.
+     *
+     *  Reusable: `category="amenities", filter_script="props.get('amenity')=='hospital'"`,
+     *  `style="grid"`, a different region — same facets. Point extraction is a
+     *  streaming low-memory osmium pass, so this works even for continent-scale
+     *  regions that the full-region GeoJSON conversion cannot handle. */
+    workflow AmenityHeatmap(
+        region: String = "north-america",
+        category: String = "amenities",
+        filter_script: String = "props.get('amenity') == 'charging_station' and ('tesla' in str(props.get('operator','')).lower() or 'tesla' in str(props.get('brand','')).lower() or 'tesla' in str(props.get('network','')).lower() or any(k.startswith('socket:tesla') for k in props))",
+        style: String = "kernel",
+        title: String = "Tesla Superchargers — North America"
+    ) => (map_html: String, match_count: Long) andThen {
+        cache = osm.cache.Download(region = $.region)
+        pts   = osm.Source.PBF.ExtractCategory(cache = cache.cache, category = $.category)
+        sub   = osm.Filters.ByScript(input_path = pts.output_path, script = $.filter_script)
+        heat  = osm.viz.RenderHeatmap(points = sub.output_path, style = $.style, title = $.title)
+        yield AmenityHeatmap(map_html = heat.html_path, match_count = sub.feature_count)
+    }
+}

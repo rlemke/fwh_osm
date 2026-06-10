@@ -71,4 +71,13 @@ namespace osm.viz {
     /** Formats GeoJSON features as text or other output formats. */
     event facet FormatGeoJSON(input_path: String, title: String = "Features",
         format: String = "text") => (result: FormatResult) with Effect(kind = "io") with Cost(tier = "cheap")
+
+    /** Render a point GeoJSON as an interactive **heat map** HTML page.
+     *  `style = "kernel"` (default) embeds a MapLibre GL heatmap layer (smooth
+     *  Gaussian density — ideal for sparse points like EV chargers); `weight_prop`
+     *  optionally weights each point. `style = "grid"` aggregates points into
+     *  `cell_km` square bins and renders a graduated-colour density (count per
+     *  cell). Implemented in the shared `_osm_tools.heatmap` library (the
+     *  `make-heatmap` CLI shares it); no GIS engine or API key required. */
+    event facet RenderHeatmap(points: String, title: String = "Heat map", style: String = "kernel", weight_prop: String = "", cell_km: Double = 25.0) => (html_path: String, point_count: Long, style: String) with Effect(kind = "io") with Cost(tier = "cheap")
 }

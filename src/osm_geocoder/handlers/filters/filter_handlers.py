@@ -794,6 +794,52 @@ def _osm_result_to_dict(result: OSMFilteredFeatures) -> dict:
     }
 
 
+def _make_byscript_filter_handler(facet_name: str):
+    """Create a handler for the ByScript event facet — filter a GeoJSON by an
+    arbitrary **Python script** (a boolean expression over ``props``/``feature``,
+    or a ``def keep(feature)``), far more expressive than ``key=value``. The
+    logic is the shared, sandboxed ``_osm_tools.geojson_filter`` library, so the
+    ``filter-geojson`` CLI shares the exact implementation."""
+    qualified = f"{NAMESPACE}.{facet_name}"
+
+    def handler(payload: dict) -> dict:
+        import hashlib
+
+        from _osm_tools.storage import get_storage
+
+        from ..shared.pbf_convert import geojson_filter
+
+        input_path = payload.get("geojson") or payload.get("input_path") or ""
+        script = payload.get("script") or payload.get("predicate") or ""
+        step_log = payload.get("_step_log")
+        if not input_path:
+            return {"output_path": "", "feature_count": 0, "total": 0}
+        # Derive a deterministic output path: input with a _filtered_<hash> suffix
+        # (the script hash so different filters on one input don't collide).
+        h = hashlib.sha1((script or "").encode()).hexdigest()[:8]
+        base, _, ext = input_path.rpartition(".")
+        base = base or input_path
+        out_path = f"{base}_filtered_{h}.{ext or 'geojson'}"
+        if step_log:
+            step_log(f"{qualified}: filtering {input_path} by script")
+        res = geojson_filter.filter_geojson(
+            input_path, script, out_path, storage=get_storage()
+        )
+        if step_log:
+            step_log(
+                f"{qualified}: kept {res.kept}/{res.total} features"
+                + (f" ({res.errors} errored)" if res.errors else ""),
+                level="success",
+            )
+        return {
+            "output_path": res.output_path,
+            "feature_count": res.kept,
+            "total": res.total,
+        }
+
+    return handler
+
+
 # Event facet definitions for handler registration
 FILTER_FACETS = [
     # Radius-based filters
@@ -808,6 +854,8 @@ FILTER_FACETS = [
     ("FilterGeoJSONByTagPrefix", _make_geojson_tag_prefix_filter_handler),
     ("FilterGeoJSONByTagContains", _make_geojson_tag_contains_filter_handler),
     ("FilterGeoJSONByTagRegex", _make_geojson_tag_regex_filter_handler),
+    # Arbitrary Python-script predicate
+    ("ByScript", _make_byscript_filter_handler),
 ]
 
 
