@@ -1,11 +1,20 @@
 // Heat-map composition: extract points -> script-filter -> render heat map.
 //
 // Demonstrates the composable-facet pattern: a heat map of ANY tagged feature in
-// ANY region is the same four facets, only the params change. The example
-// default is "Tesla superchargers in North America".
+// ANY region is the same facets, only the params change.
 //
-// Prerequisites: compile with osmtypes.ffl, osmcache_download.ffl,
-//   osm_source_pbf.ffl, osmfilters.ffl, osmvisualization.ffl.
+// PREFER THE FAN-OUT. For anything bigger than a single state/province — a
+// continent ("North America", "Europe") or a large country ("United States",
+// "Germany") — use ContinentHeatmap, NOT AmenityHeatmap. Downloading and
+// extracting a whole-continent / large-country PBF needs a big host (the
+// continent PBF is ~14GB and OOMs osmium on a modest box) and is serial.
+// ContinentHeatmap instead fans a `foreach` over the region's Geofabrik leaves
+// (states/provinces) — each leaf PBF is small, extracts on a modest host, and
+// the N leaves run in parallel across the runner fleet, then merge into one map.
+// AmenityHeatmap is the single-leaf / single-small-region path only.
+//
+// Prerequisites: compile with osmtypes.ffl, osmregion.ffl, osmcache_download.ffl,
+//   osm_source_pbf.ffl, osmfilters.ffl, osmtransform.ffl, osmvisualization.ffl.
 
 /** Heat maps over OSM features via extract -> script-filter -> render. */
 namespace osm.heatmap {
@@ -17,8 +26,10 @@ namespace osm.heatmap {
     use osm.Transform
     use osm.viz
 
-    /** Heat map of a feature class in a region, selected by an arbitrary Python
-     *  filter script. Default = Tesla superchargers across North America.
+    /** Single-region heat map (one Geofabrik leaf / one small region). For a
+     *  CONTINENT or LARGE COUNTRY use ContinentHeatmap instead — it fans out over
+     *  the subregions and avoids the big-host whole-PBF download/extract this path
+     *  would otherwise need. Default = Tesla superchargers in California.
      *
      *  Pipeline: Download the region PBF (cache hit if present) -> extract the
      *  point category -> ByScript-filter to the features of interest (the
@@ -26,16 +37,15 @@ namespace osm.heatmap {
      *  Tesla, or that carry a `socket:tesla*` tag) -> RenderHeatmap.
      *
      *  Reusable: `category="food", filter_script="props.get('cuisine')=='pizza'"`,
-     *  `style="grid"`, a different region — same facets (category must be a valid
-     *  CombinedScan category: food, fuel_charging, parks, water, …). Point extraction is a
-     *  streaming low-memory osmium pass, so this works even for continent-scale
-     *  regions that the full-region GeoJSON conversion cannot handle. */
+     *  `style="grid"`, a different (small) region — same facets (category must be
+     *  a valid CombinedScan category: amenities, food, fuel_charging, parks,
+     *  water, …). */
     workflow AmenityHeatmap(
-        region: String = "North America",
+        region: String = "California",
         category: String = "amenities",
         filter_script: String = "props.get('amenity') == 'charging_station' and ('tesla' in str(props.get('operator','')).lower() or 'tesla' in str(props.get('brand','')).lower() or 'tesla' in str(props.get('network','')).lower() or any(k.startswith('socket:tesla') for k in props))",
         style: String = "kernel",
-        title: String = "Tesla Superchargers — North America"
+        title: String = "Tesla Superchargers — California"
     ) => (map_html: String, match_count: Long) andThen {
         resolved = osm.Region.ResolveRegion(name = $.region)
         cache = osm.cache.Download(region = resolved.region)
@@ -65,11 +75,15 @@ namespace osm.heatmap {
         yield SubregionChargers(filtered_paths = [filt.output_path])
     }
 
-    /** Continent-scale heat map without a bigger host: fan out per state/province
-     *  (SubregionChargers), merge the small per-leaf filtered point sets into one
-     *  GeoJSON (MergeLayers), and render a single heat map. Run several osm runners
-     *  to process the leaves concurrently. Default = Tesla superchargers across all
-     *  of North America. */
+    /** PREFERRED entry point for any continent or large country. Continent-scale
+     *  heat map without a bigger host: fan out per state/province (SubregionChargers),
+     *  merge the small per-leaf filtered point sets into one GeoJSON (MergeLayers),
+     *  and render a single heat map. Each leaf PBF extracts on a modest host and the
+     *  N leaves run in parallel across the runner fleet (the whole-continent PBF
+     *  would need a big box and run serially) — add runners to go faster. Default =
+     *  Tesla superchargers across all of North America (64 leaves). Reusable for any
+     *  "heatmap of X across <continent/country>": region_names=["Europe"], a
+     *  different category/filter_script, style="grid". */
     workflow ContinentHeatmap(
         region_names: [String] = ["North America"],
         category: String = "amenities",
