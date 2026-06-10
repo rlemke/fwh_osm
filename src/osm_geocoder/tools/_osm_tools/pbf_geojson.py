@@ -65,6 +65,7 @@ class ConvertResult:
     was_cached: bool
     source_url: str
     source_pbf_path: str
+    skipped: bool = False
     sidecar: dict[str, Any] = field(default_factory=dict)
 
 
@@ -175,6 +176,7 @@ def convert_region(
     force: bool = False,
     osmium_bin: str = "osmium",
     storage: Any = None,
+    max_pbf_mb: int = 0,
 ) -> ConvertResult:
     """Convert a region's PBF to GeoJSON. Thread-safe per (region, fmt).
 
@@ -182,6 +184,14 @@ def convert_region(
     HDFS to a local cache, a no-op for local storage) before osmium reads it,
     and the GeoJSON output is finalized back to the same backend — so on
     ``AFL_STORAGE=s3`` both the read and the write go through MinIO.
+
+    ``max_pbf_mb`` (0 = no limit) skips regions whose cached PBF exceeds the
+    limit, returning ``ConvertResult(skipped=True)`` WITHOUT localizing or
+    converting (so an oversized PBF isn't even downloaded). Falls back to the
+    ``AFL_OSM_MAX_PBF_MB`` env var when the argument is 0. This lives here in the
+    shared library — not in any one handler — so every caller (the
+    ``convert-pbf-geojson`` CLI, the FFL ``osm.Source.PBF.ToGeoJson`` handler,
+    and any other consumer) gets the same size-gate behaviour.
     """
     if fmt not in FORMAT_EXT:
         raise ConversionError(f"unknown format: {fmt!r} (valid: {', '.join(FORMAT_EXT)})")
@@ -193,6 +203,26 @@ def convert_region(
         raise ConversionError(
             f"no pbf sidecar for {region!r}; run download-pbf first"
         )
+
+    # Size gate (shared by CLI + handler): skip oversized PBFs BEFORE localizing.
+    effective_max = int(max_pbf_mb or 0) or int(os.environ.get("AFL_OSM_MAX_PBF_MB") or 0)
+    pbf_bytes = int(pbf_side.get("size_bytes") or 0)
+    if effective_max > 0 and pbf_bytes > effective_max * 1024 * 1024:
+        return ConvertResult(
+            region=region,
+            path="",
+            relative_path="",
+            format=fmt,
+            size_bytes=pbf_bytes,
+            sha256="",
+            generated_at="",
+            duration_seconds=0.0,
+            was_cached=False,
+            source_url=pbf_side.get("source", {}).get("url", ""),
+            source_pbf_path="",
+            skipped=True,
+        )
+
     # Use the raw cache *string* (not pbf_abs_path's Path, which collapses the
     # "s3://" double slash to "s3:/") so the storage ops get a valid URI.
     src_uri = sidecar.cache_path(NAMESPACE, SOURCE_CACHE_TYPE, pbf_rel, s)
