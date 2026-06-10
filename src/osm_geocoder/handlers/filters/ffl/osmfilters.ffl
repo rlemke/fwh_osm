@@ -81,4 +81,14 @@ namespace osm.Filters {
         regular expression `pattern` (re.search — matches anywhere). For complex
         selections like tag_key="cuisine", pattern="pizza|italian". */
     event facet FilterGeoJSONByTagRegex(input_path: String, tag_key: String, pattern: String) => (result: OSMFilteredFeatures) with Effect(kind = "pure") with Cost(tier = "cheap")
+
+    /** Filter a GeoJSON FeatureCollection by an arbitrary **Python script** —
+     *  far more expressive than a single tag match. `script` is either a boolean
+     *  expression over `feature` / `props` (its properties) / `geom`, e.g.
+     *  `props.get("amenity")=="charging_station" and "tesla" in str(props.get("operator","")).lower()`,
+     *  or a `def keep(feature): ...` returning truthy to keep. Runs sandboxed
+     *  (safe builtins + re/math; no imports/IO). Writes the kept features to a
+     *  derived `_filtered_<hash>` path. Implemented in the shared
+     *  `_osm_tools.geojson_filter` library (the `filter-geojson` CLI shares it). */
+    event facet ByScript(input_path: String, script: String) => (output_path: String, feature_count: Long, total: Long) with Effect(kind = "pure") with Cost(tier = "cheap")
 }

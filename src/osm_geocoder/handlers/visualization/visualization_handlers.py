@@ -427,6 +427,53 @@ def _empty_result(title: str, format: str) -> dict:
     }
 
 
+def _make_heatmap_handler(facet_name: str):
+    """Create a handler for the RenderHeatmap event facet — render a point
+    GeoJSON as an interactive heat-map HTML page (``kernel`` MapLibre density or
+    ``grid`` square-bin density). The logic is the shared ``_osm_tools.heatmap``
+    library, so the ``make-heatmap`` CLI shares the exact implementation."""
+    qualified = f"{NAMESPACE}.{facet_name}"
+
+    def handler(payload: dict) -> dict:
+        from _osm_tools.storage import get_storage
+
+        from ..shared.pbf_convert import heatmap
+
+        points = payload.get("points") or payload.get("input_path") or ""
+        title = payload.get("title") or "Heat map"
+        style = payload.get("style") or "kernel"
+        weight_prop = payload.get("weight_prop") or None
+        cell_km = float(payload.get("cell_km") or 25.0)
+        step_log = payload.get("_step_log")
+        if not points:
+            return {"html_path": "", "point_count": 0, "style": style}
+        base = points.rsplit(".", 1)[0] if "." in points else points
+        out_path = f"{base}_{style}_heatmap.html"
+        if step_log:
+            step_log(f"{qualified}: rendering {style} heat map of {points}")
+        res = heatmap.render_heatmap(
+            points,
+            out_path,
+            title=title,
+            style=style,
+            weight_prop=weight_prop,
+            cell_km=cell_km,
+            storage=get_storage(),
+        )
+        if step_log:
+            step_log(
+                f"{qualified}: {res.point_count} {res.style} → {res.html_path}",
+                level="success",
+            )
+        return {
+            "html_path": res.html_path,
+            "point_count": res.point_count,
+            "style": res.style,
+        }
+
+    return handler
+
+
 # Event facet definitions for handler registration
 VISUALIZATION_FACETS = [
     ("RenderMap", _make_render_map_handler),
@@ -435,6 +482,7 @@ VISUALIZATION_FACETS = [
     ("RenderTiledMap", _make_render_tiled_map_handler),
     ("RenderStyledMap", _make_render_styled_map_handler),
     ("PreviewMap", _make_preview_map_handler),
+    ("RenderHeatmap", _make_heatmap_handler),
 ]
 
 

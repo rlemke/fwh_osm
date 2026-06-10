@@ -27,6 +27,8 @@ if str(_TOOLS_ROOT) not in sys.path:
 # ``to_osm_cache`` / ``ConversionError`` symbols.
 from _osm_tools import (
     geocode,  # noqa: E402,F401
+    geojson_filter,  # noqa: E402,F401
+    heatmap,  # noqa: E402,F401
     html_render,  # noqa: E402,F401
     vocab,  # noqa: E402,F401
 )
