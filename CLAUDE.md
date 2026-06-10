@@ -60,6 +60,19 @@ move; heartbeat every N features). For the common "find a place/business" case,
 prefer the cheap cached `ExtractCategory` facade below over a per-category full
 pass or a full-PBF tag filter.
 
+**Whole-region conversion.** `osm.Source.PBF.ToGeoJson(cache, format="geojson",
+max_pbf_mb=0)` exports an *entire* region PBF to GeoJSON via `osmium export`
+(every feature, not a category), object-store-native: it localizes the cached
+PBF, runs osmium with a disk-backed node index (`-i sparse_file_array`,
+overridable via `AFL_OSMIUM_INDEX_TYPE`), and finalizes to the `geojson` cache
+type (MinIO on `AFL_STORAGE=s3`). Idempotent on the source SHA. `max_pbf_mb`
+(0 = no limit; env fallback `AFL_OSM_MAX_PBF_MB`) skips regions whose cached PBF
+exceeds the limit (returns `skipped=true` without downloading), so a bulk run on
+a memory-constrained host skips the continents/big countries that OOM or
+seek-thrash osmium's index instead of stalling. Driven by the `osm.convert`
+workflows `ConvertAllRegionsToGeoJson(max_pbf_mb)` (ListCachedRegions → foreach →
+Download → ToGeoJson) and `ConvertRegionToGeoJson(region, max_pbf_mb)`.
+
 ```
 Source Layer                        Algorithm Layer (unchanged)
 ─────────────                       ──────────────────────────
