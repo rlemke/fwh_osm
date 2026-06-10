@@ -1,0 +1,48 @@
+// Convert every cached region to full GeoJSON.
+//
+// Enumerates the PBF cache with ListCachedRegions (no network, no hardcoded
+// list), then fans out one full-region osmium export per region. The GeoJSON
+// is written to the configured storage backend — MinIO when AFL_STORAGE=s3 —
+// by osm.Source.PBF.ToGeoJson, which localizes the cached PBF first.
+//
+// Prerequisites: compile with osmtypes.afl, osmcache_download.afl,
+//   osm_source_pbf.afl.
+
+/** Bulk region → GeoJSON conversion over the existing PBF cache. */
+namespace osm.convert {
+    use osm.types
+    use osm.Region
+    use osm.cache
+    use osm.Source.PBF
+
+    /** Convert ONE named region to GeoJSON: resolve the name, ensure it's
+     *  cached (Download is a no-op cache hit when present), then osmium-export
+     *  the whole PBF to GeoJSON in the configured storage (MinIO on s3). Handy
+     *  for one-offs and for smoke-testing the conversion path on a small
+     *  region before the bulk run. */
+    workflow ConvertRegionToGeoJson(region: String) => (output_path: String, size_bytes: Long, was_cached: Boolean) andThen {
+        resolved = osm.Region.ResolveRegion(name = $.region)
+        dl = osm.cache.Download(region = resolved.region)
+        gj = osm.Source.PBF.ToGeoJson(cache = dl.cache)
+        yield ConvertRegionToGeoJson(output_path = gj.output_path, size_bytes = gj.size_bytes, was_cached = gj.was_cached)
+    }
+
+    /** Convert every CACHED region's PBF to full GeoJSON (osmium export) and
+     *  return the output paths.
+     *
+     *  ListCachedRegions enumerates only the regions actually present in the
+     *  cache — so this needs no region list, never touches the network for
+     *  enumeration, and naturally skips uncached extracts (e.g. planet). Each
+     *  region's Download is therefore a cache hit; ToGeoJson then exports the
+     *  whole PBF to GeoJSON into the configured storage (MinIO on AFL_STORAGE=s3).
+     *
+     *  Fans out one conversion per region across the runner fleet via foreach;
+     *  the list-typed yield aggregates every output path into `outputs`. */
+    workflow ConvertAllRegionsToGeoJson() => (outputs: [String]) andThen {
+        cached = osm.cache.ListCachedRegions()
+    } andThen foreach r in cached.regions {
+        dl = osm.cache.Download(region = $.r)
+        gj = osm.Source.PBF.ToGeoJson(cache = dl.cache)
+        yield ConvertAllRegionsToGeoJson(outputs = [gj.output_path])
+    }
+}

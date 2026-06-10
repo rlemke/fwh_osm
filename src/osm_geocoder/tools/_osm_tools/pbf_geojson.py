@@ -22,7 +22,12 @@ from pathlib import Path
 from typing import Any
 
 from _osm_tools import sidecar
-from _osm_tools.storage import LocalStorage, Storage, get_storage
+from _osm_tools.storage import (
+    LocalStorage,
+    Storage,
+    get_storage,
+    local_staging_subdir,
+)
 
 NAMESPACE = "osm"
 SOURCE_CACHE_TYPE = "pbf"
@@ -114,12 +119,24 @@ def _sha256_file(path: Path) -> tuple[int, str]:
 
 
 def _staging_path(region: str, fmt: str, storage: Any = None) -> Path:
-    """Stage adjacent to destination unless ``AFL_CONVERT_STAGING=tmp``."""
-    if (os.environ.get("AFL_CONVERT_STAGING") or "").lower() == "tmp":
-        base = tempfile.gettempdir()
-        safe = region.replace("/", "_")
-        return Path(base) / "facetwork-geojson-staging" / f"{safe}-latest.{FORMAT_EXT[fmt]}.tmp"
-    out = geojson_abs_path(region, fmt, storage)
+    """Local path for osmium's output before it's finalized to ``storage``.
+
+    On object-store backends (S3/MinIO, HDFS) the destination is an ``s3://`` /
+    ``hdfs://`` URI — NOT a local path — so staging MUST live on local scratch;
+    only ``finalize_from_local`` uploads it. Staging "adjacent to destination"
+    there would resolve, via ``geojson_abs_path``'s ``Path()``, to a mangled
+    ``s3:/…`` path written on the container's internal disk (which previously
+    ENOSPC-crashed mongo). ``local_staging_subdir`` roots staging at
+    ``AFL_LOCAL_SCRATCH`` (the external scratch disk). For local storage, stage
+    adjacent to the destination (same FS → atomic rename).
+    """
+    s = storage or get_storage()
+    safe = region.replace("/", "_")
+    fname = f"{safe}-latest.{FORMAT_EXT[fmt]}.tmp"
+    force_local_scratch = (os.environ.get("AFL_CONVERT_STAGING") or "").lower() == "tmp"
+    if force_local_scratch or getattr(s, "name", "local") != "local":
+        return Path(local_staging_subdir("facetwork-geojson-staging")) / fname
+    out = geojson_abs_path(region, fmt, s)
     return out.with_name(out.name + ".tmp")
 
 
@@ -127,11 +144,16 @@ def is_up_to_date(
     region: str,
     fmt: str,
     pbf_side: dict,
-    out_abs: Path,
+    out_path: Any,
     storage: Any = None,
 ) -> bool:
-    """True if the cached GeoJSON still matches the source PBF's SHA-256."""
+    """True if the cached GeoJSON still matches the source PBF's SHA-256.
+
+    ``out_path`` may be a local path or an ``s3://``/``hdfs://`` URI; existence
+    and size are checked via the storage backend so this works on any backend.
+    """
     s = storage or get_storage()
+    out_path = str(out_path)
     out_rel = geojson_rel_path(region, fmt)
     existing = sidecar.read_sidecar(NAMESPACE, OUTPUT_CACHE_TYPE, out_rel, s)
     if not existing:
@@ -141,9 +163,9 @@ def is_up_to_date(
         return False
     if existing.get("source", {}).get("sha256") != pbf_side.get("sha256"):
         return False
-    if not out_abs.exists():
+    if not s.exists(out_path):
         return False
-    return out_abs.stat().st_size == existing.get("size_bytes")
+    return s.size(out_path) == existing.get("size_bytes")
 
 
 def convert_region(
@@ -154,7 +176,13 @@ def convert_region(
     osmium_bin: str = "osmium",
     storage: Any = None,
 ) -> ConvertResult:
-    """Convert a region's PBF to GeoJSON. Thread-safe per (region, fmt)."""
+    """Convert a region's PBF to GeoJSON. Thread-safe per (region, fmt).
+
+    Storage-agnostic: the cached PBF is localized (downloaded from S3/MinIO or
+    HDFS to a local cache, a no-op for local storage) before osmium reads it,
+    and the GeoJSON output is finalized back to the same backend — so on
+    ``AFL_STORAGE=s3`` both the read and the write go through MinIO.
+    """
     if fmt not in FORMAT_EXT:
         raise ConversionError(f"unknown format: {fmt!r} (valid: {', '.join(FORMAT_EXT)})")
     s = storage or get_storage()
@@ -165,23 +193,30 @@ def convert_region(
         raise ConversionError(
             f"no pbf sidecar for {region!r}; run download-pbf first"
         )
-    src_pbf = pbf_abs_path(region, s)
-    if not src_pbf.exists():
-        raise ConversionError(f"pbf file missing on disk: {src_pbf}")
+    # Use the raw cache *string* (not pbf_abs_path's Path, which collapses the
+    # "s3://" double slash to "s3:/") so the storage ops get a valid URI.
+    src_uri = sidecar.cache_path(NAMESPACE, SOURCE_CACHE_TYPE, pbf_rel, s)
+    if not s.exists(src_uri):
+        raise ConversionError(f"pbf file missing in storage: {src_uri}")
+    # osmium can only read a local file — localize the cached PBF (downloads
+    # from MinIO/HDFS; no-op on local storage).
+    src_pbf = Path(s.localize(src_uri))
     source_url = pbf_side.get("source", {}).get("url", "")
 
     with _region_lock(region, fmt):
-        out_abs = geojson_abs_path(region, fmt, s)
         out_rel = geojson_rel_path(region, fmt)
+        # Destination as a raw storage *string* (not geojson_abs_path's Path,
+        # which collapses "s3://" → "s3:/" and yields an empty bucket on write).
+        out_uri = sidecar.cache_path(NAMESPACE, OUTPUT_CACHE_TYPE, out_rel, s)
 
-        if not force and is_up_to_date(region, fmt, pbf_side, out_abs, s):
+        if not force and is_up_to_date(region, fmt, pbf_side, out_uri, s):
             existing = sidecar.read_sidecar(NAMESPACE, OUTPUT_CACHE_TYPE, out_rel, s) or {}
             return ConvertResult(
                 region=region,
-                path=str(out_abs),
+                path=out_uri,
                 relative_path=out_rel,
                 format=fmt,
-                size_bytes=existing.get("size_bytes", out_abs.stat().st_size),
+                size_bytes=existing.get("size_bytes", s.size(out_uri)),
                 sha256=existing.get("sha256", ""),
                 generated_at=existing.get("generated_at", ""),
                 duration_seconds=0.0,
@@ -191,7 +226,7 @@ def convert_region(
                 sidecar=existing,
             )
 
-        out_abs.parent.mkdir(parents=True, exist_ok=True)
+        s.mkdir_p(Storage.dirname(out_uri))  # local: mkdir; object stores: no-op
         staging = _staging_path(region, fmt, s)
         staging.parent.mkdir(parents=True, exist_ok=True)
         if staging.exists():
@@ -223,7 +258,7 @@ def convert_region(
 
         size, sha256_hex = _sha256_file(staging)
 
-        s.finalize_from_local(str(staging), str(out_abs))
+        s.finalize_from_local(str(staging), out_uri)
 
         generated_at = sidecar.utcnow_iso()
         side = sidecar.write_sidecar(
@@ -258,7 +293,7 @@ def convert_region(
 
         return ConvertResult(
             region=region,
-            path=str(out_abs),
+            path=out_uri,
             relative_path=out_rel,
             format=fmt,
             size_bytes=size,

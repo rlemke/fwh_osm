@@ -127,6 +127,17 @@ class Storage(abc.ABC):
     @abc.abstractmethod
     def supports_locking(self) -> bool: ...
 
+    def localize(self, path: str) -> str:
+        """Return a LOCAL filesystem path for ``path``, fetching it first if needed.
+
+        Tools that shell out to native binaries (osmium, tippecanoe, …) can only
+        read local files. On ``local`` storage ``path`` is already local and is
+        returned unchanged; object-store backends (S3/MinIO, HDFS) override this
+        to download the object into a local cache and return that path. This is
+        the read-side counterpart to ``finalize_from_local`` (the write side).
+        """
+        return path
+
     # Path arithmetic helpers — both backends use POSIX-style paths, so
     # string-level operations work uniformly.
 
@@ -385,6 +396,11 @@ class HdfsStorage(Storage):
             raise
         os.unlink(local_path)
 
+    def localize(self, path: str) -> str:
+        """Download an ``hdfs://`` file to a local cache and return that path."""
+        from facetwork.runtime.storage import localize as _localize
+        return _localize(path)
+
 
 class S3Storage(Storage):
     """S3-compatible object store (AWS S3 or MinIO), delegating to the
@@ -463,6 +479,13 @@ class S3Storage(Storage):
     def finalize_from_local(self, local_path: str, dst_path: str) -> None:
         self._upload_file(local_path, dst_path)
         os.unlink(local_path)
+
+    def localize(self, path: str) -> str:
+        """Download an ``s3://`` object to a local cache and return that path
+        (size-checked cache hit on repeat). Local paths pass through. Reuses the
+        runtime's ``localize`` — the same one the handler extractors use."""
+        from facetwork.runtime.storage import localize as _localize
+        return _localize(path)
 
     def finalize_dir_from_local(self, local_dir: str, dst_dir: str) -> None:
         if self._backend.isdir(dst_dir):
