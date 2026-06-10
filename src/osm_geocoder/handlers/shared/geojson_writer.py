@@ -198,20 +198,25 @@ class GeoJSONStreamWriter:
     """
 
     def __init__(self, path: str, *, atomic: bool = False) -> None:
-        ensure_dir(path)
         self._count = 0
         self._closed = False
         self.path = path
-        self._atomic = atomic
+        # Object stores (s3://, hdfs://) don't do partial writes and aren't local
+        # files: always stage to a local temp and finalize through the storage
+        # backend on close. (Previously open_output()/shutil.move() ran directly
+        # on the s3:// URI and failed with "No such file or directory".)
+        self._remote = str(path).startswith(("s3://", "hdfs://"))
+        self._atomic = atomic or self._remote
         self._tmp_path: str | None = None
 
-        if atomic:
+        if self._atomic:
             import tempfile
 
             fd, self._tmp_path = tempfile.mkstemp(suffix=".geojson", dir=get_temp_dir())
             os.close(fd)
             self._f: IO = open(self._tmp_path, "w")
         else:
+            ensure_dir(path)
             self._f: IO = open_output(path)
         self._f.write('{"type": "FeatureCollection", "features": [')
 
@@ -239,10 +244,18 @@ class GeoJSONStreamWriter:
         self._f.write("]}")
         self._f.close()
         if self._atomic and self._tmp_path:
-            import shutil
+            if self._remote:
+                # Finalize the local staging file to the object store.
+                from _osm_tools.storage import Storage, get_storage
 
-            ensure_dir(self.path)
-            shutil.move(self._tmp_path, self.path)
+                s = get_storage()
+                s.mkdir_p(Storage.dirname(self.path))
+                s.finalize_from_local(self._tmp_path, self.path)
+            else:
+                import shutil
+
+                ensure_dir(self.path)
+                shutil.move(self._tmp_path, self.path)
             self._tmp_path = None
 
     def __enter__(self) -> GeoJSONStreamWriter:
