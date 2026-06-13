@@ -65,7 +65,7 @@ namespace osm.Routing.GraphHopper.Cities {
         resolved = osm.Region.ResolveRegion(name = $.state)
         dl = osm.cache.Download(region = resolved.region, cache_policy = $.cache_policy)
         graph = osm.ops.GraphHopper.BuildGraph(cache = dl.cache, profile = $.profile)
-        cities = osm.Population.Cities(cache = dl.cache, min_population = $.min_population)
+        cities = osm.Population.AllPopulatedPlaces(cache = dl.cache, min_population = $.min_population)
         plan = osm.Routing.PlanCityPairs(cities_path = cities.result.output_path, strategy = $.strategy)
         routed = osm.Routing.GraphHopper.RouteBatch(graph = graph.graph, pairs = plan.pairs, profile = $.profile)
         map = osm.viz.RenderMap(
@@ -74,6 +74,33 @@ namespace osm.Routing.GraphHopper.Cities {
             color = "#1e90ff"
         )
         yield CityRouteMap(
+            map = map.result,
+            route_count = routed.result.route_count,
+            total_distance_km = routed.result.total_distance_km
+        )
+    }
+
+    /** The routing half of CityRouteMap, for a cities-centroid GeoJSON that
+     *  already exists (e.g. produced by a prior populated-places extraction):
+     *  pair the cities, route every pair through embedded GraphHopper, render. */
+    workflow RouteCitiesFromPath(
+        cities_path: String,
+        state: String = "California",
+        strategy: String = "nearest",
+        profile: String = "car",
+        cache_policy: String = "prefer_cache"
+    ) => (map: MapResult, route_count: Long, total_distance_km: Double) andThen {
+        resolved = osm.Region.ResolveRegion(name = $.state)
+        dl = osm.cache.Download(region = resolved.region, cache_policy = $.cache_policy)
+        graph = osm.ops.GraphHopper.BuildGraph(cache = dl.cache, profile = $.profile)
+        plan = osm.Routing.PlanCityPairs(cities_path = $.cities_path, strategy = $.strategy)
+        routed = osm.Routing.GraphHopper.RouteBatch(graph = graph.graph, pairs = plan.pairs, profile = $.profile)
+        map = osm.viz.RenderMap(
+            geojson_path = routed.result.output_path,
+            title = $.state ++ " — city routes (pop > 100k, GraphHopper)",
+            color = "#1e90ff"
+        )
+        yield RouteCitiesFromPath(
             map = map.result,
             route_count = routed.result.route_count,
             total_distance_km = routed.result.total_distance_km

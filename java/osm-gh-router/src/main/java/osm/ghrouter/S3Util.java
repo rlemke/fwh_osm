@@ -92,6 +92,20 @@ public final class S3Util implements AutoCloseable {
         return count;
     }
 
+    /** Downloads a single ``s3://`` object to a local file (size-checked cache
+     *  hit: skips the download if the local file already matches the object). */
+    public void downloadFile(String s3uri, Path dst) throws Exception {
+        String[] bk = split(s3uri);
+        Files.createDirectories(dst.getParent());
+        if (Files.exists(dst)) {
+            long remote = s3.headObject(b -> b.bucket(bk[0]).key(bk[1])).contentLength();
+            if (Files.size(dst) == remote) {
+                return; // already localized
+            }
+        }
+        s3.getObject(GetObjectRequest.builder().bucket(bk[0]).key(bk[1]).build(), dst);
+    }
+
     /** Uploads a local file to an ``s3://`` URI. */
     public void uploadFile(Path localFile, String s3uri) {
         String[] bk = split(s3uri);

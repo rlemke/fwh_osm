@@ -5,6 +5,7 @@ import com.graphhopper.GHResponse;
 import com.graphhopper.GraphHopper;
 import com.graphhopper.ResponsePath;
 import com.graphhopper.config.Profile;
+import com.graphhopper.util.CustomModel;
 import com.graphhopper.util.PointList;
 
 import java.nio.file.Files;
@@ -70,24 +71,44 @@ public final class GraphHopperPool implements AutoCloseable {
             if (existing != null) {
                 return existing;
             }
-            Path local = graphsRoot.resolve(slug(graphDirS3));
-            // (Re)download if the graph dir isn't already staged locally.
-            if (!Files.isDirectory(local) || !Files.exists(local.resolve("nodes"))) {
-                int n = s3.downloadPrefix(graphDirS3, local);
-                System.out.println("[gh-router] localized " + n + " graph files for " + graphDirS3 + " -> " + local);
-            }
+            // The prebuilt graph was created by graphhopper-web, whose encoded-value/
+            // profile config hash a hand-built graphhopper-core Profile can't reproduce
+            // (load fails "Profiles do not match"). Instead, import the region's PBF
+            // here with OUR profile: build + route then run identical graphhopper-core
+            // code, so the load always matches. Imported once per region, cached
+            // in-JVM (and on local disk, so a restart re-loads rather than re-imports).
+            String pbfUri = pbfUriForGraph(graphDirS3);
+            Path pbf = graphsRoot.resolve("pbf").resolve(slug(pbfUri) + ".osm.pbf");
+            System.out.println("[gh-router] localizing pbf " + pbfUri);
+            s3.downloadFile(pbfUri, pbf);
+            Path importDir = graphsRoot.resolve("imported_" + slug(graphDirS3));
+
             GraphHopper hopper = new GraphHopper();
-            hopper.setGraphHopperLocation(local.toString());
-            // Profile MUST match what the graph was built with (config: name=<profile>,
-            // vehicle=<profile>). No OSM file is set, so importOrLoad() loads the
-            // existing graph rather than re-importing.
+            hopper.setOSMFile(pbf.toString());
+            hopper.setGraphHopperLocation(importDir.toString());
             hopper.setProfiles(new Profile(profile).setVehicle(profile));
-            hopper.setAllowWrites(false);
-            hopper.importOrLoad();
+            System.out.println("[gh-router] import-or-load " + profile + " from " + pbf.getFileName() + " -> " + importDir);
+            try {
+                // imports if importDir is empty, else loads it (same code -> matches)
+                hopper.importOrLoad();
+            } catch (Throwable t) {
+                System.out.println("[gh-router] IMPORT/LOAD FAILED for " + graphDirS3 + ": " + t);
+                t.printStackTrace();
+                throw new RuntimeException("GraphHopper import/load failed for " + graphDirS3
+                        + " (profile=" + profile + "): " + t, t);
+            }
             loaded.put(graphDirS3, hopper);
-            System.out.println("[gh-router] loaded graph " + graphDirS3 + " (profile=" + profile + ")");
+            System.out.println("[gh-router] ready: " + graphDirS3 + " (profile=" + profile + ")");
             return hopper;
         }
+    }
+
+    /** s3://…/graphhopper/<region>-latest/<profile> -> s3://…/pbf/<region>-latest.osm.pbf */
+    private static String pbfUriForGraph(String graphDirS3) {
+        String s = graphDirS3.replaceAll("/+$", "");
+        int lastSlash = s.lastIndexOf('/');               // drop trailing "/<profile>"
+        String withoutProfile = lastSlash > 0 ? s.substring(0, lastSlash) : s;
+        return withoutProfile.replace("/graphhopper/", "/pbf/") + ".osm.pbf";
     }
 
     private static String slug(String s3uri) {
