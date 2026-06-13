@@ -113,8 +113,13 @@ def graph_abs_path(region: str, profile: str, storage: Any = None) -> Path:
 
 
 def _staging_dir(region: str, profile: str, storage: Any = None) -> Path:
-    if (os.environ.get("AFL_CONVERT_STAGING") or "").lower() == "tmp":
-        base = tempfile.gettempdir()
+    s = storage or get_storage()
+    # Java writes the graph into a real local directory, so staging must be
+    # local. On a remote backend (S3/MinIO, HDFS) graph_abs_path is an
+    # ``s3://``/``hdfs://`` URI — unusable as a build target — so always stage
+    # under local scratch there (also honoured via AFL_CONVERT_STAGING=tmp).
+    if s.name != "local" or (os.environ.get("AFL_CONVERT_STAGING") or "").lower() == "tmp":
+        base = os.environ.get("AFL_LOCAL_SCRATCH") or tempfile.gettempdir()
         safe = region.replace("/", "_")
         return Path(base) / "facetwork-graphhopper-staging" / safe / profile
     out = graph_abs_path(region, profile, storage)
@@ -187,7 +192,11 @@ def is_up_to_date(
     extra = existing.get("extra") or {}
     if extra.get("graphhopper_version") != GRAPHHOPPER_VERSION:
         return False
-    if not _graph_exists(graph_dir):
+    # On a remote backend graph_dir is an s3:///hdfs:// URI; the sidecar above
+    # is written only after a complete finalize, so its presence (already
+    # checked) is the cache-validity marker. Only the local backend can stat
+    # the tree.
+    if s.name == "local" and not _graph_exists(graph_dir):
         return False
     return True
 
@@ -299,28 +308,48 @@ def build_graph(
         raise BuildError(
             f"no pbf sidecar for {region!r}; run download-pbf first"
         )
-    src_pbf = pbf_abs_path(region, s)
+    # Storage ops take the raw URI string — pbf_abs_path()/graph_abs_path()
+    # wrap it in Path, which is right for local fs but collapses ``s3://`` to
+    # ``s3:/``. Use the string form for the backend, Path only for local reads.
+    pbf_uri = sidecar.cache_path(NAMESPACE, SOURCE_CACHE_TYPE, pbf_rel, s)
+    if not s.exists(pbf_uri):
+        raise BuildError(
+            f"pbf missing in cache for {region!r}: {pbf_uri}; run download first"
+        )
+    # Java reads a local file — pull the PBF down from S3/MinIO (no-op on local).
+    src_pbf = Path(s.localize(pbf_uri))
     if not src_pbf.exists():
-        raise BuildError(f"pbf file missing on disk: {src_pbf}")
+        raise BuildError(f"pbf file missing after localize: {src_pbf}")
     source_url = pbf_side.get("source", {}).get("url", "")
 
     jar = jar_path or default_jar_path()
 
     with _build_lock(region, profile):
-        graph_dir = graph_abs_path(region, profile, s)
         rel = graph_rel_path(region, profile)
+        graph_uri = sidecar.cache_path(NAMESPACE, OUTPUT_CACHE_TYPE, rel, s)
+        graph_dir = graph_abs_path(region, profile, s)  # Path — local fs reads only
 
         if not force and is_up_to_date(region, profile, pbf_side, graph_dir, s):
-            stats = read_graph_stats(graph_dir)
             existing = sidecar.read_sidecar(NAMESPACE, OUTPUT_CACHE_TYPE, rel, s) or {}
+            if s.name == "local":
+                stats = read_graph_stats(graph_dir)
+                node_count, edge_count = stats.node_count, stats.edge_count
+                size_bytes = existing.get("size_bytes", _dir_size(graph_dir))
+            else:
+                # Remote: trust the sidecar's recorded stats rather than walking
+                # an s3:///hdfs:// tree with local filesystem ops.
+                extra = existing.get("extra") or {}
+                node_count = int(extra.get("node_count") or 0)
+                edge_count = int(extra.get("edge_count") or 0)
+                size_bytes = existing.get("size_bytes", 0)
             return BuildResult(
                 region=region,
                 profile=profile,
-                graph_dir=str(graph_dir),
+                graph_dir=graph_uri,
                 relative_path=rel + "/",
-                total_size_bytes=existing.get("size_bytes", _dir_size(graph_dir)),
-                node_count=stats.node_count,
-                edge_count=stats.edge_count,
+                total_size_bytes=size_bytes,
+                node_count=node_count,
+                edge_count=edge_count,
                 graphhopper_version=GRAPHHOPPER_VERSION,
                 generated_at=existing.get("generated_at", ""),
                 duration_seconds=0.0,
@@ -357,12 +386,15 @@ def build_graph(
                 f"GraphHopper produced no valid graph for {region}/{profile}"
             )
 
-        s.finalize_dir_from_local(str(staging), str(graph_dir))
-        total_size = _dir_size(graph_dir)
+        # Capture size + payload hash from the LOCAL staging tree *before*
+        # finalize: finalize uploads then deletes staging, and on a remote
+        # backend graph_dir is an s3:///hdfs:// URI local fs ops can't read.
+        total_size = _dir_size(staging)
+        primary_sha = _sha256_file(staging / "nodes") if (staging / "nodes").exists() else ""
+
+        s.finalize_dir_from_local(str(staging), graph_uri)
 
         generated_at = sidecar.utcnow_iso()
-        # Primary payload sha256: use the sha of the nodes file (stable across builds).
-        primary_sha = _sha256_file(graph_dir / "nodes") if (graph_dir / "nodes").exists() else ""
 
         side = sidecar.write_sidecar(
             NAMESPACE,
@@ -401,7 +433,7 @@ def build_graph(
         return BuildResult(
             region=region,
             profile=profile,
-            graph_dir=str(graph_dir),
+            graph_dir=graph_uri,
             relative_path=rel + "/",
             total_size_bytes=total_size,
             node_count=stats.node_count,

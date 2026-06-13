@@ -1,0 +1,38 @@
+// Build GraphHopper routing graphs for EVERY US state — fleet fan-out.
+//
+// Unlike the coast samplers (BuildWestCoastGraphs / BuildEastCoastGraphs) which
+// hardcode a handful of states, this enumerates the states via FFL
+// (ResolveRegions expand="subregions" turns "us" into all 51 Geofabrik leaf
+// extracts) and fans a `foreach` over them. Each leaf is an independent task
+// claimed by any osm runner in the fleet, so the 51 builds run in parallel
+// across all servers. Each state's PBF is downloaded (cache hit if present) and
+// fed to GraphHopper; the graph cache + PBF finalize to durable storage (MinIO
+// when AFL_STORAGE=s3). The list-typed `graphs` yield aggregates one
+// GraphHopperCache per state at completion.
+//
+// Prerequisites: compile with osmtypes.ffl, osmregion.ffl, osmcache_download.ffl,
+//   osmgraphhopper.ffl.
+
+namespace osm.GraphHopper.UnitedStates {
+    use osm.types
+    use osm.Region
+    use osm.cache
+    use osm.ops.GraphHopper
+
+    /** Build a GraphHopper routing graph for every US state, in parallel across
+     *  the runner fleet. `region_names` defaults to ["us"], which ResolveRegions
+     *  expands to all 51 states (50 + DC) — no state list is hardcoded here.
+     *  `profile` selects the GraphHopper vehicle profile (car / bike / foot);
+     *  `recreate` forces a rebuild even if a cached graph exists. */
+    workflow BuildAllStateGraphs(
+        region_names: [String] = ["us"],
+        profile: String = "car",
+        recreate: Boolean = false
+    ) => (graphs: [GraphHopperCache]) andThen {
+        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = "subregions")
+    } andThen foreach r in resolved.regions {
+        dl = osm.cache.Download(region = $.r)
+        gh = osm.ops.GraphHopper.BuildGraph(cache = dl.cache, profile = $.profile, recreate = $.recreate)
+        yield BuildAllStateGraphs(graphs = [gh.graph])
+    }
+}
