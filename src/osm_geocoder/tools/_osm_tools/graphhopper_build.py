@@ -16,6 +16,7 @@ Jar resolution: ``--jar`` → ``$GRAPHHOPPER_JAR`` → ``~/.graphhopper/graphhop
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -229,7 +230,7 @@ def _run_import(
     jar_path: str,
     jvm_memory: str,
     timeout_seconds: int,
-) -> None:
+) -> str:
     if not Path(jar_path).is_file():
         raise BuildError(
             f"GraphHopper jar not found: {jar_path!r}. "
@@ -283,6 +284,35 @@ def _run_import(
                 os.unlink(config_path)
             except OSError:
                 pass
+    return result.stdout or ""
+
+
+# The authoritative summary line, e.g.
+#   com.graphhopper.GraphHopper: nodes: 134,737, edges: 163,794
+_GRAPH_SUMMARY_RE = re.compile(r"GraphHopper: nodes:\s+([\d,]+),\s+edges:\s+([\d,]+)")
+# Fallback: any human-formatted "nodes: N, edges: M" (a SPACE after the colon
+# and comma grouping). This deliberately excludes the binary-flush metadata
+# "nodes:9,edges:21" (no space after the colon) that would otherwise win.
+_GRAPH_COUNTS_RE = re.compile(r"nodes:\s+([\d,]+),\s+edges:\s+([\d,]+)")
+
+
+def _counts_from_log(import_log: str) -> tuple[int, int]:
+    """Extract routing-graph node/edge counts from GraphHopper's import stdout.
+    GraphHopper 8.x stores these only in a binary ``properties`` file, so the
+    log is the reliable source. Prefer the ``GraphHopper: nodes: …`` summary
+    line; otherwise take the largest space-delimited ``nodes: …, edges: …``
+    pair. Returns (0, 0) if none is present."""
+    text = import_log or ""
+    m = _GRAPH_SUMMARY_RE.search(text)
+    if m:
+        return (int(m.group(1).replace(",", "")), int(m.group(2).replace(",", "")))
+    best = (0, 0)
+    for mm in _GRAPH_COUNTS_RE.finditer(text):
+        n = int(mm.group(1).replace(",", ""))
+        e = int(mm.group(2).replace(",", ""))
+        if n > best[0]:
+            best = (n, e)
+    return best
 
 
 def build_graph(
@@ -331,17 +361,15 @@ def build_graph(
 
         if not force and is_up_to_date(region, profile, pbf_side, graph_dir, s):
             existing = sidecar.read_sidecar(NAMESPACE, OUTPUT_CACHE_TYPE, rel, s) or {}
-            if s.name == "local":
-                stats = read_graph_stats(graph_dir)
-                node_count, edge_count = stats.node_count, stats.edge_count
-                size_bytes = existing.get("size_bytes", _dir_size(graph_dir))
-            else:
-                # Remote: trust the sidecar's recorded stats rather than walking
-                # an s3:///hdfs:// tree with local filesystem ops.
-                extra = existing.get("extra") or {}
-                node_count = int(extra.get("node_count") or 0)
-                edge_count = int(extra.get("edge_count") or 0)
-                size_bytes = existing.get("size_bytes", 0)
+            # Counts come from the sidecar (recorded at build time from the
+            # import log) on both backends — GraphHopper's on-disk ``properties``
+            # is binary and can't be re-parsed for counts.
+            extra = existing.get("extra") or {}
+            node_count = int(extra.get("node_count") or 0)
+            edge_count = int(extra.get("edge_count") or 0)
+            size_bytes = existing.get(
+                "size_bytes", _dir_size(graph_dir) if s.name == "local" else 0
+            )
             return BuildResult(
                 region=region,
                 profile=profile,
@@ -366,7 +394,7 @@ def build_graph(
 
         start = time.monotonic()
         try:
-            _run_import(
+            import_log = _run_import(
                 src_pbf,
                 staging,
                 profile,
@@ -379,11 +407,17 @@ def build_graph(
             raise
         elapsed = time.monotonic() - start
 
-        stats = read_graph_stats(staging)
-        if not stats.valid:
+        # GraphHopper 8.x writes a BINARY ``properties`` file, so node/edge
+        # counts cannot be grepped from it — the old read_graph_stats path
+        # returns 0 and falsely rejects a perfectly good graph. Read counts from
+        # the import log and validate by the presence of a non-empty ``nodes``
+        # payload instead.
+        node_count, edge_count = _counts_from_log(import_log)
+        nodes_file = staging / "nodes"
+        if not nodes_file.exists() or nodes_file.stat().st_size == 0:
             shutil.rmtree(staging, ignore_errors=True)
             raise BuildError(
-                f"GraphHopper produced no valid graph for {region}/{profile}"
+                f"GraphHopper produced no graph for {region}/{profile}"
             )
 
         # Capture size + payload hash from the LOCAL staging tree *before*
@@ -422,8 +456,8 @@ def build_graph(
                 "region": region,
                 "profile": profile,
                 "graphhopper_version": GRAPHHOPPER_VERSION,
-                "node_count": stats.node_count,
-                "edge_count": stats.edge_count,
+                "node_count": node_count,
+                "edge_count": edge_count,
                 "duration_seconds": round(elapsed, 2),
             },
             generated_at=generated_at,
@@ -436,8 +470,8 @@ def build_graph(
             graph_dir=graph_uri,
             relative_path=rel + "/",
             total_size_bytes=total_size,
-            node_count=stats.node_count,
-            edge_count=stats.edge_count,
+            node_count=node_count,
+            edge_count=edge_count,
             graphhopper_version=GRAPHHOPPER_VERSION,
             generated_at=generated_at,
             duration_seconds=elapsed,

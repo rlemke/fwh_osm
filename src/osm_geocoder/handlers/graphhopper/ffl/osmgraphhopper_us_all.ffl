@@ -23,15 +23,21 @@ namespace osm.GraphHopper.UnitedStates {
      *  the runner fleet. `region_names` defaults to ["us"], which ResolveRegions
      *  expands to all 51 states (50 + DC) — no state list is hardcoded here.
      *  `profile` selects the GraphHopper vehicle profile (car / bike / foot);
-     *  `recreate` forces a rebuild even if a cached graph exists. */
+     *  `recreate` forces a rebuild even if a cached graph exists.
+     *  `cache_policy` controls the PBF download: the default "prefer_cache" uses
+     *  an already-cached extract AS-IS without re-downloading (skips Geofabrik
+     *  revalidation — fast and resilient when upstream is slow/flaky, at the cost
+     *  of a potentially out-of-date extract); "auto" defers to the runner's
+     *  AFL_OSM_USE_CACHE_IF_PRESENT env; "refresh" forces a fresh download. */
     workflow BuildAllStateGraphs(
         region_names: [String] = ["us"],
         profile: String = "car",
-        recreate: Boolean = false
+        recreate: Boolean = false,
+        cache_policy: String = "prefer_cache"
     ) => (graphs: [GraphHopperCache]) andThen {
         resolved = osm.Region.ResolveRegions(names = $.region_names, expand = "subregions")
     } andThen foreach r in resolved.regions {
-        dl = osm.cache.Download(region = $.r)
+        dl = osm.cache.Download(region = $.r, cache_policy = $.cache_policy)
         gh = osm.ops.GraphHopper.BuildGraph(cache = dl.cache, profile = $.profile, recreate = $.recreate)
         yield BuildAllStateGraphs(graphs = [gh.graph])
     }
