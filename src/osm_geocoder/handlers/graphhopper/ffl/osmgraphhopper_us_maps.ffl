@@ -1,0 +1,40 @@
+// Render interactive maps of US state routing graphs — fleet fan-out.
+//
+// A GraphHopper graph has millions of edges (Texas ~7.8M), far too many to draw
+// in a browser. The legible, browser-friendly depiction of the routable network
+// is its MOTORWAY backbone, so this resolves each state, reuses its already-cached
+// PBF (cache_policy="prefer_cache" — no re-download), extracts the motorways as
+// GeoJSON, and renders an interactive Leaflet HTML map per state. One independent
+// chain per state, fanned out across the runner fleet; the list-typed `maps` yield
+// aggregates one MapResult per state.
+//
+// Prerequisites: compile with osmtypes.ffl, osmregion.ffl, osmcache_download.ffl,
+//   osmroads.ffl, osmvisualization.ffl.
+
+namespace osm.GraphHopper.UnitedStates {
+    use osm.types
+    use osm.Region
+    use osm.cache
+    use osm.Source.PBF
+    use osm.viz
+
+    /** Render an interactive motorway-network map for each named US state, in
+     *  parallel across the fleet. `state_names` are resolved via ResolveRegions
+     *  (explicit names, no expansion). `cache_policy` defaults to "prefer_cache":
+     *  reuse the already-built state PBF as-is without re-downloading. */
+    workflow RenderStateRoadMaps(
+        state_names: [String] = ["California", "Texas"],
+        cache_policy: String = "prefer_cache"
+    ) => (maps: [MapResult]) andThen {
+        resolved = osm.Region.ResolveRegions(names = $.state_names)
+    } andThen foreach r in resolved.regions {
+        dl = osm.cache.Download(region = $.r, cache_policy = $.cache_policy)
+        roads = osm.Source.PBF.ExtractRoads(cache = dl.cache, road_class = "motorway")
+        map = osm.viz.RenderMap(
+            geojson_path = roads.result.output_path,
+            title = $.r.name ++ " — motorway network",
+            color = "#d6336c"
+        )
+        yield RenderStateRoadMaps(maps = [map.result])
+    }
+}

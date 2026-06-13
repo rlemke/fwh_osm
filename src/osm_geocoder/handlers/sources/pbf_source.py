@@ -19,6 +19,23 @@ log = logging.getLogger(__name__)
 
 HAS_OSMIUM = importlib.util.find_spec("osmium") is not None
 
+
+def _require_osmium(facet: str) -> None:
+    """Fail loudly if pyosmium is unavailable on this runner.
+
+    Returning an empty result (the old behaviour) silently produced zero-feature
+    extractions on a runner missing the dependency: the caller can't tell a
+    genuinely empty region from a broken runner, and the empty result can even
+    get cached and poison later runs. Raising instead fails the task so the
+    runtime retries it on a runner that CAN serve it (every osm-geocoder image
+    ships osmium>=4.0). See CLAUDE.md: never silently return empty defaults.
+    """
+    if not HAS_OSMIUM:
+        raise RuntimeError(
+            f"{facet}: pyosmium is not importable on this runner — cannot extract "
+            "from PBF. Failing the task so it retries on an osmium-capable runner."
+        )
+
 NAMESPACE = "osm.Source.PBF"
 
 _LOCAL_OUTPUT = os.environ.get("AFL_LOCAL_OUTPUT_DIR", "/tmp")
@@ -52,8 +69,7 @@ def _now() -> str:
 
 def _extract_routes(payload: dict) -> dict:
     """PBF route extraction via osmium."""
-    if not HAS_OSMIUM:
-        return {"result": _empty_route_result(payload)}
+    _require_osmium("ExtractRoutes")
 
     from ..routes.route_extractor import extract_routes
 
@@ -119,8 +135,7 @@ def _empty_route_result(payload: dict) -> dict:
 
 def _extract_amenities(payload: dict) -> dict:
     """PBF amenity extraction via osmium."""
-    if not HAS_OSMIUM:
-        return {"result": _empty_amenity_result(payload)}
+    _require_osmium("ExtractAmenities")
 
     from ..amenities.amenity_extractor import extract_amenities
 
@@ -182,8 +197,7 @@ def _empty_amenity_result(payload: dict) -> dict:
 
 def _extract_roads(payload: dict) -> dict:
     """PBF road extraction via osmium."""
-    if not HAS_OSMIUM:
-        return {"result": _empty_road_result(payload)}
+    _require_osmium("ExtractRoads")
 
     from ..roads.road_extractor import extract_roads
 
@@ -249,8 +263,7 @@ def _empty_road_result(payload: dict) -> dict:
 
 def _extract_parks(payload: dict) -> dict:
     """PBF park extraction via osmium."""
-    if not HAS_OSMIUM:
-        return {"result": _empty_park_result(payload)}
+    _require_osmium("ExtractParks")
 
     from ..parks.park_extractor import extract_parks
 
@@ -314,8 +327,7 @@ def _empty_park_result(payload: dict) -> dict:
 
 def _extract_buildings(payload: dict) -> dict:
     """PBF building extraction via osmium."""
-    if not HAS_OSMIUM:
-        return {"result": _empty_building_result(payload)}
+    _require_osmium("ExtractBuildings")
 
     from ..buildings.building_extractor import extract_buildings
 
@@ -379,8 +391,7 @@ def _empty_building_result(payload: dict) -> dict:
 
 def _extract_boundaries(payload: dict) -> dict:
     """PBF boundary extraction via osmium."""
-    if not HAS_OSMIUM:
-        return {"result": _empty_boundary_result(payload)}
+    _require_osmium("ExtractBoundaries")
 
     from ..boundaries.boundary_extractor import extract_boundaries
 
@@ -446,8 +457,7 @@ def _empty_boundary_result(payload: dict) -> dict:
 
 def _extract_population(payload: dict) -> dict:
     """PBF population extraction via osmium."""
-    if not HAS_OSMIUM:
-        return {"result": _empty_population_result(payload)}
+    _require_osmium("ExtractPopulation")
 
     from ..population.population_filter import extract_places_with_population
 
@@ -519,8 +529,7 @@ def _empty_population_result(payload: dict) -> dict:
 
 def _extract_pois(payload: dict) -> dict:
     """PBF POI extraction via osmium."""
-    if not HAS_OSMIUM:
-        return {"pois": _empty_cache()}
+    _require_osmium("ExtractPOIs")
 
     from ..poi.poi_handlers import extract_pois
 
