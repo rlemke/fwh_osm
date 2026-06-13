@@ -115,28 +115,34 @@ def import_graph_handler(payload: dict) -> dict:
 
 
 def validate_graph_handler(payload: dict) -> dict:
-    """ValidateGraph: read node/edge counts from the built graph dir."""
+    """ValidateGraph: confirm the graph exists in storage and report its counts.
+
+    Backend-agnostic: node/edge counts are carried on the GraphHopperCache
+    (recorded at build time from the import log), and existence is checked via
+    the storage layer — GraphHopper 8.x's on-disk ``properties`` is binary, and
+    an ``s3://`` graph dir can't be stat'd with local filesystem calls.
+    """
     graph = payload.get("graph", {}) or {}
     graph_dir = graph.get("graphDir", "")
+    node_count = int(graph.get("nodeCount") or 0)
+    edge_count = int(graph.get("edgeCount") or 0)
     step_log = payload.get("_step_log")
     if step_log:
         step_log(f"ValidateGraph: {graph_dir}")
-    if not graph_dir:
-        return {"valid": False, "nodeCount": 0, "edgeCount": 0}
-    from pathlib import Path as _Path
+    valid = False
+    if graph_dir:
+        from _osm_tools.storage import Storage as _Storage, get_storage as _get_storage
 
-    stats = graphhopper.read_graph_stats(_Path(graph_dir))
+        try:
+            valid = _get_storage().exists(_Storage.join(graph_dir, "nodes"))
+        except Exception:
+            valid = False
     if step_log:
         step_log(
-            f"ValidateGraph: valid={stats.valid} "
-            f"({stats.node_count} nodes, {stats.edge_count} edges)",
+            f"ValidateGraph: valid={valid} ({node_count} nodes, {edge_count} edges)",
             level="success",
         )
-    return {
-        "valid": stats.valid,
-        "nodeCount": stats.node_count,
-        "edgeCount": stats.edge_count,
-    }
+    return {"valid": valid, "nodeCount": node_count, "edgeCount": edge_count}
 
 
 def clean_graph_handler(payload: dict) -> dict:

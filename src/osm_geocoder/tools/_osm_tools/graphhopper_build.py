@@ -170,7 +170,10 @@ def read_graph_stats(graph_dir: Path) -> GraphStats:
                 edge_count = int(value)
     except (OSError, ValueError):
         return GraphStats(valid=True, node_count=0, edge_count=0)
-    return GraphStats(valid=node_count > 0, node_count=node_count, edge_count=edge_count)
+    # Validity is decided by _graph_exists above (a non-empty nodes/edges
+    # payload). Do NOT gate on node_count > 0: GraphHopper 8.x writes a binary
+    # ``properties`` file, so the text parse yields 0 for a perfectly good graph.
+    return GraphStats(valid=True, node_count=node_count, edge_count=edge_count)
 
 
 def is_up_to_date(

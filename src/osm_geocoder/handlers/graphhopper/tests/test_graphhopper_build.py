@@ -79,3 +79,23 @@ def test_build_graph_local_roundtrip(monkeypatch, tmp_path):
     r2 = gb.build_graph(region, profile, force=False)
     assert r2.was_cached
     assert (r2.node_count, r2.edge_count) == (134737, 163794)
+
+
+def test_validate_graph_handler_uses_carried_counts_and_storage(monkeypatch, tmp_path):
+    # ValidateGraph must not depend on parsing the binary GH8 properties file:
+    # it trusts the counts carried on the cache and confirms existence via storage.
+    monkeypatch.setenv("AFL_STORAGE", "local")
+    monkeypatch.setenv("AFL_DATA_ROOT", str(tmp_path))
+    from osm_geocoder.handlers.graphhopper.graphhopper_handlers import (
+        validate_graph_handler,
+    )
+
+    gdir = tmp_path / "graph" / "car"
+    gdir.mkdir(parents=True)
+    (gdir / "nodes").write_bytes(b"N" * 32)
+    cache = {"graphDir": str(gdir), "nodeCount": 134737, "edgeCount": 163794}
+    out = validate_graph_handler({"graph": cache})
+    assert out == {"valid": True, "nodeCount": 134737, "edgeCount": 163794}
+
+    missing = {"graphDir": str(tmp_path / "nope" / "car"), "nodeCount": 0, "edgeCount": 0}
+    assert validate_graph_handler({"graph": missing})["valid"] is False
