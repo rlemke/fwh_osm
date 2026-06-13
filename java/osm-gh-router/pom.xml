@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>osm</groupId>
+    <artifactId>osm-gh-router</artifactId>
+    <version>0.1.0</version>
+    <packaging>jar</packaging>
+
+    <!--
+      Embedded-GraphHopper routing agent. Runs as a JVM process alongside the
+      Python osm-geocoder runners: it registers ONLY osm.Routing.GraphHopper.RouteBatch
+      with the fw-agent AgentPoller, so the name-filtered Mongo claim_task routes
+      those tasks here and nowhere else. Loads a state's GraphHopper graph (the
+      artifact built by BuildAllStateGraphs, pulled from MinIO) once and keeps it
+      warm, then routes each origin/destination pair in-process — no HTTP daemon.
+    -->
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <graphhopper.version>8.0</graphhopper.version>
+        <awssdk.version>2.25.60</awssdk.version>
+        <jackson.version>2.15.2</jackson.version>
+    </properties>
+
+    <dependencies>
+        <!-- The Facetwork Java agent SDK (AgentPoller / Handler / Mongo wiring). -->
+        <dependency>
+            <groupId>afl</groupId>
+            <artifactId>fw-agent</artifactId>
+            <version>0.1.0</version>
+        </dependency>
+
+        <!-- GraphHopper as an embedded library — MUST match the version the
+             graphs were built with (graphhopper-web 8.0 import). -->
+        <dependency>
+            <groupId>com.graphhopper</groupId>
+            <artifactId>graphhopper-core</artifactId>
+            <version>${graphhopper.version}</version>
+        </dependency>
+
+        <!-- S3 client to pull the graph dir + push the routes GeoJSON to MinIO. -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>${awssdk.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- GraphHopper logs via slf4j; show them on the console. -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>2.0.13</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>osm-gh-router</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+            </plugin>
+            <!-- Fat jar with the agent Main-Class for the runner container. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>osm.ghrouter.RouteAgent</mainClass>
+                                </transformer>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

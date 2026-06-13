@@ -1,0 +1,5 @@
+osm/ghrouter/RouteBatchHandler.class
+osm/ghrouter/GraphHopperPool$Route.class
+osm/ghrouter/GraphHopperPool.class
+osm/ghrouter/RouteAgent.class
+osm/ghrouter/S3Util.class

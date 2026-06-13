@@ -355,9 +355,91 @@ def _empty_result(profile: str) -> dict:
     }
 
 
+def _pair(a: dict, b: dict) -> dict:
+    return {
+        "from": {"lat": a["lat"], "lon": a["lon"], "name": a["name"]},
+        "to": {"lat": b["lat"], "lon": b["lon"], "name": b["name"]},
+    }
+
+
+def _haversine_km(a: dict, b: dict) -> float:
+    import math
+
+    r = 6371.0
+    lat1, lon1, lat2, lon2 = map(math.radians, [a["lat"], a["lon"], b["lat"], b["lon"]])
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(h))
+
+
+def _build_pairs(cities: list[dict], strategy: str) -> list[dict]:
+    """Pair cities for routing. ``nearest`` (default): each city to its nearest
+    neighbour, deduped to undirected edges (a sparse connectivity graph).
+    ``hub``: every city to the most-populous one. ``all``: every unordered pair.
+    """
+    if len(cities) < 2:
+        return []
+    if strategy == "hub":
+        hub = cities[0]  # caller sorts by population desc
+        return [_pair(hub, c) for c in cities[1:]]
+    if strategy == "all":
+        return [_pair(a, b) for a, b in combinations(cities, 2)]
+    # nearest-neighbour chain (default)
+    pairs: list[dict] = []
+    seen: set = set()
+    for i, a in enumerate(cities):
+        best, best_d = None, float("inf")
+        for j, b in enumerate(cities):
+            if i == j:
+                continue
+            d = _haversine_km(a, b)
+            if d < best_d:
+                best_d, best = d, b
+        if best is None:
+            continue
+        key = tuple(sorted([a["name"], best["name"]]))
+        if key in seen:
+            continue
+        seen.add(key)
+        pairs.append(_pair(a, best))
+    return pairs
+
+
+def plan_city_pairs(payload: dict) -> dict:
+    """PlanCityPairs: turn a cities GeoJSON into origin/destination pairs.
+
+    Reads the >100k-pop city centroids (osm.Population.Cities output), optionally
+    caps to the ``cap`` most-populous, pairs them per ``strategy``, and returns
+    the pairs as an inline JSON string the Java RouteBatch handler consumes.
+    """
+    cities_path = payload.get("cities_path", "")
+    strategy = (payload.get("strategy") or "nearest").strip().lower()
+    cap = int(payload.get("cap") or 0)
+    step_log = payload.get("_step_log")
+    if not cities_path:
+        return {"pairs": "[]", "pair_count": 0}
+
+    cities = [
+        c for c in _load_cities_geojson(cities_path)
+        if c.get("lat") is not None and c.get("lon") is not None
+    ]
+    cities.sort(key=lambda c: c.get("population", 0) or 0, reverse=True)
+    if cap and cap > 0:
+        cities = cities[:cap]
+
+    pairs = _build_pairs(cities, strategy)
+    if step_log:
+        step_log(
+            f"PlanCityPairs: {len(pairs)} {strategy} pairs from {len(cities)} cities",
+            level="success",
+        )
+    return {"pairs": json.dumps(pairs), "pair_count": len(pairs)}
+
+
 # RegistryRunner dispatch adapter
 _DISPATCH = {
     f"{NAMESPACE}.ComputePairwiseRoutes": compute_pairwise_routes,
+    f"{NAMESPACE}.PlanCityPairs": plan_city_pairs,
 }
 
 
@@ -386,4 +468,8 @@ def register_routing_handlers(poller) -> None:
         f"{NAMESPACE}.ComputePairwiseRoutes",
         compute_pairwise_routes,
     )
-    log.debug("Registered routing handler: %s.ComputePairwiseRoutes", NAMESPACE)
+    poller.register(
+        f"{NAMESPACE}.PlanCityPairs",
+        plan_city_pairs,
+    )
+    log.debug("Registered routing handlers: %s.ComputePairwiseRoutes, PlanCityPairs", NAMESPACE)

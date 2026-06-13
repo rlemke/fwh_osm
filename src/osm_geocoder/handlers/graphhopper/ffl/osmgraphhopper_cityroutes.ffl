@@ -1,0 +1,82 @@
+// City-to-city routing over a built GraphHopper graph.
+//
+// Showcases a polyglot pipeline: PlanCityPairs (Python) turns >100k-pop city
+// centroids into origin/destination pairs; RouteBatch (Java) loads the state's
+// GraphHopper graph — the artifact built by BuildAllStateGraphs — into an
+// embedded GraphHopper instance and routes each pair in-process (no daemon);
+// RenderMap draws the routes. The Java handler runs as its own JVM agent
+// alongside the Python runners; claim_task is name-filtered, so only it takes
+// RouteBatch tasks.
+//
+// Prerequisites: compile with osmtypes.ffl, osmregion.ffl, osmcache_download.ffl,
+//   osmgraphhopper.ffl, osmfilters_population.ffl, osmvisualization.ffl.
+
+namespace osm.Routing {
+    /** Build origin/destination pairs from a cities GeoJSON of centroids.
+     *  `strategy`: "nearest" (each city to its nearest, deduped to undirected
+     *  edges), "hub" (every city to the most-populous), "all" (every pair).
+     *  `cap` keeps only the N most-populous cities (0 = all). Returns the pairs
+     *  as an inline JSON string consumed by RouteBatch. */
+    event facet PlanCityPairs(cities_path: String, strategy: String = "nearest", cap: Long = 0) => (pairs: String, pair_count: Long) with Effect(kind = "pure") with Cost(tier = "cheap")
+}
+
+namespace osm.Routing.GraphHopper {
+    use osm.types
+
+    /** Summary of a batch of routes computed over a GraphHopper graph. */
+    schema BatchRouteResult {
+        output_path: String,
+        route_count: Long,
+        failed_count: Long,
+        total_distance_km: Double,
+        total_duration_min: Double,
+        profile: String,
+        format: String
+    }
+
+    /** Route every origin/destination pair over a built GraphHopper graph using
+     *  embedded GraphHopper (Java handler) — no routing server. `graph` is the
+     *  GraphHopperCache from BuildGraph; `pairs` is the JSON from PlanCityPairs.
+     *  Emits the routes as GeoJSON LineStrings finalized to durable storage. */
+    event facet RouteBatch(graph: GraphHopperCache, pairs: String, profile: String = "car") => (result: BatchRouteResult) with Effect(kind = "external") with Cost(tier = "moderate")
+}
+
+/** City-to-city driving routes for a US state, rendered as an interactive map. */
+namespace osm.Routing.GraphHopper.Cities {
+    use osm.types
+    use osm.Region
+    use osm.cache
+    use osm.ops.GraphHopper
+    use osm.Population
+    use osm.Routing
+    use osm.Routing.GraphHopper
+    use osm.viz
+
+    /** Resolve a state, (cache-hit) build its car graph, take its >100k-pop city
+     *  centroids, pair them (`strategy`), route every pair through embedded
+     *  GraphHopper, and render an interactive map of the routes. */
+    workflow CityRouteMap(
+        state: String = "California",
+        min_population: Long = 100000,
+        strategy: String = "nearest",
+        profile: String = "car",
+        cache_policy: String = "prefer_cache"
+    ) => (map: MapResult, route_count: Long, total_distance_km: Double) andThen {
+        resolved = osm.Region.ResolveRegion(name = $.state)
+        dl = osm.cache.Download(region = resolved.region, cache_policy = $.cache_policy)
+        graph = osm.ops.GraphHopper.BuildGraph(cache = dl.cache, profile = $.profile)
+        cities = osm.Population.Cities(cache = dl.cache, min_population = $.min_population)
+        plan = osm.Routing.PlanCityPairs(cities_path = cities.result.output_path, strategy = $.strategy)
+        routed = osm.Routing.GraphHopper.RouteBatch(graph = graph.graph, pairs = plan.pairs, profile = $.profile)
+        map = osm.viz.RenderMap(
+            geojson_path = routed.result.output_path,
+            title = $.state ++ " — city routes (pop > 100k, GraphHopper)",
+            color = "#1e90ff"
+        )
+        yield CityRouteMap(
+            map = map.result,
+            route_count = routed.result.route_count,
+            total_distance_km = routed.result.total_distance_km
+        )
+    }
+}
