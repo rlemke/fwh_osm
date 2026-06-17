@@ -4,10 +4,52 @@ import json
 import logging
 import os
 
+from ..shared._output import resolve_output_dir
 from ..shared.output_cache import cached_result, save_result_meta
 from .combined_handler import HAS_OSMIUM, combined_scan
 
 log = logging.getLogger(__name__)
+
+_REMOTE_SCHEMES = ("s3://", "hdfs://")
+
+
+def _scan_outputs_usable(rv: dict, step_log=None) -> bool:
+    """Guard a cached scan manifest against a storage-backend change.
+
+    A manifest records per-category ``output_path``s nested in its ``results``
+    JSON (which ``cached_result``'s top-level existence check never sees). If
+    those were written under a different backend than the one in effect now —
+    e.g. local paths cached before ``AFL_STORAGE=s3`` — handing them downstream
+    fails: a local path is unreadable as an S3 key, and a deleted artifact is a
+    dead path. Returns False (→ re-scan) when any cached output is on a different
+    backend than where a fresh scan would write, or no longer exists there."""
+    from facetwork.runtime.storage import get_storage_backend
+
+    cur_remote = resolve_output_dir("osm-combined").startswith(_REMOTE_SCHEMES)
+    try:
+        results = json.loads(rv.get("results", "{}"))
+    except (TypeError, ValueError):
+        return False
+    for cat in results.values():
+        op = (cat or {}).get("output_path") if isinstance(cat, dict) else None
+        if not op:
+            continue
+        if op.startswith(_REMOTE_SCHEMES) != cur_remote:
+            if step_log:
+                step_log(
+                    f"CombinedScan: cached output on a different storage backend "
+                    f"({op}) — re-scanning", level="warning")
+            return False
+        try:
+            if not get_storage_backend(op).exists(op):
+                if step_log:
+                    step_log(f"CombinedScan: cached output missing ({op}) — re-scanning",
+                             level="warning")
+                return False
+        except Exception:
+            return False  # path not resolvable in the current backend → re-scan
+    return True
+
 
 NAMESPACE = "osm.Combined"
 
@@ -32,7 +74,7 @@ def ensure_scan(cache: dict, categories: list[str], step_log=None, heartbeat=Non
     pbf_path = cache.get("path", "")
     cache_params = {"categories": sorted(categories)}
     hit = cached_result(SCAN_QUALIFIED, cache, cache_params, step_log)
-    if hit is not None:
+    if hit is not None and _scan_outputs_usable(hit, step_log):
         return hit
 
     if step_log:

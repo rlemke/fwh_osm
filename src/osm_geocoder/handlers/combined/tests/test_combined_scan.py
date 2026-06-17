@@ -625,3 +625,36 @@ class TestGeoJSONStreamWriter:
             w = GeoJSONStreamWriter(path)
             w.close()
             w.close()  # should not raise
+
+
+class TestScanCacheGuard:
+    """`_scan_outputs_usable` invalidates a cached scan manifest whose nested
+    per-category outputs are on a different storage backend than the current one,
+    or no longer exist — so ExtractCategory never hands downstream a dead path."""
+
+    def test_backend_switch_invalidates(self, tmp_path, monkeypatch):
+        from .. import combined_handlers as ch
+
+        # Current output backend is S3, but the cached output is a local path
+        # (e.g. cached before AFL_STORAGE=s3) → re-scan.
+        monkeypatch.setattr(ch, "resolve_output_dir", lambda c: "s3://bucket/osm-combined")
+        rv = {"results": json.dumps(
+            {"amenities": {"output_path": str(tmp_path / "x.geojson")}})}
+        assert ch._scan_outputs_usable(rv) is False
+
+    def test_same_backend_existing_is_usable(self, tmp_path, monkeypatch):
+        from .. import combined_handlers as ch
+
+        monkeypatch.setattr(ch, "resolve_output_dir", lambda c: str(tmp_path / "osm-combined"))
+        f = tmp_path / "a.geojson"
+        f.write_text("{}")
+        rv = {"results": json.dumps({"amenities": {"output_path": str(f)}})}
+        assert ch._scan_outputs_usable(rv) is True
+
+    def test_missing_output_invalidates(self, tmp_path, monkeypatch):
+        from .. import combined_handlers as ch
+
+        monkeypatch.setattr(ch, "resolve_output_dir", lambda c: str(tmp_path / "osm-combined"))
+        rv = {"results": json.dumps(
+            {"amenities": {"output_path": str(tmp_path / "gone.geojson")}})}
+        assert ch._scan_outputs_usable(rv) is False
