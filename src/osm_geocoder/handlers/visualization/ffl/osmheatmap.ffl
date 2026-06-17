@@ -45,10 +45,11 @@ namespace osm.heatmap {
         category: String = "amenities",
         filter_script: String = "props.get('amenity') == 'charging_station' and ('tesla' in str(props.get('operator','')).lower() or 'tesla' in str(props.get('brand','')).lower() or 'tesla' in str(props.get('network','')).lower() or any(k.startswith('socket:tesla') for k in props))",
         style: String = "kernel",
-        title: String = "Tesla Superchargers — California"
+        title: String = "Tesla Superchargers — California",
+        cache_policy: String = "prefer_cache"
     ) => (map_html: String, match_count: Long) andThen {
         resolved = osm.Region.ResolveRegion(name = $.region)
-        cache = osm.cache.Download(region = resolved.region)
+        cache = osm.cache.Download(region = resolved.region, cache_policy = $.cache_policy)
         pts   = osm.Source.PBF.ExtractCategory(cache = cache.cache, category = $.category)
         sub   = osm.Filters.ByScript(input_path = pts.output_path, script = $.filter_script)
         heat  = osm.viz.RenderHeatmap(points = sub.output_path, style = $.style, title = $.title)
@@ -65,11 +66,12 @@ namespace osm.heatmap {
     workflow SubregionChargers(
         region_names: [String] = ["North America"],
         category: String = "amenities",
-        filter_script: String = "props.get('amenity') == 'charging_station' and ('tesla' in str(props.get('operator','')).lower() or 'tesla' in str(props.get('brand','')).lower() or 'tesla' in str(props.get('network','')).lower() or any(k.startswith('socket:tesla') for k in props))"
+        filter_script: String = "props.get('amenity') == 'charging_station' and ('tesla' in str(props.get('operator','')).lower() or 'tesla' in str(props.get('brand','')).lower() or 'tesla' in str(props.get('network','')).lower() or any(k.startswith('socket:tesla') for k in props))",
+        cache_policy: String = "prefer_cache"
     ) => (filtered_paths: [String]) andThen {
         resolved = osm.Region.ResolveRegions(names = $.region_names, expand = "subregions")
     } andThen foreach r in resolved.regions {
-        dl   = osm.cache.Download(region = $.r)
+        dl   = osm.cache.Download(region = $.r, cache_policy = $.cache_policy)
         pts  = osm.Source.PBF.ExtractCategory(cache = dl.cache, category = $.category)
         filt = osm.Filters.ByScript(input_path = pts.output_path, script = $.filter_script)
         yield SubregionChargers(filtered_paths = [filt.output_path])
@@ -89,10 +91,12 @@ namespace osm.heatmap {
         category: String = "amenities",
         filter_script: String = "props.get('amenity') == 'charging_station' and ('tesla' in str(props.get('operator','')).lower() or 'tesla' in str(props.get('brand','')).lower() or 'tesla' in str(props.get('network','')).lower() or any(k.startswith('socket:tesla') for k in props))",
         style: String = "kernel",
-        title: String = "Tesla Superchargers — North America"
+        title: String = "Tesla Superchargers — North America",
+        cache_policy: String = "prefer_cache"
     ) => (map_html: String, match_count: Long) andThen {
         ext    = osm.heatmap.SubregionChargers(
-                   region_names = $.region_names, category = $.category, filter_script = $.filter_script)
+                   region_names = $.region_names, category = $.category,
+                   filter_script = $.filter_script, cache_policy = $.cache_policy)
         merged = osm.Transform.MergeLayers(inputs = ext.filtered_paths)
         heat   = osm.viz.RenderHeatmap(points = merged.result.output_path, style = $.style, title = $.title)
         yield ContinentHeatmap(map_html = heat.html_path, match_count = heat.point_count)

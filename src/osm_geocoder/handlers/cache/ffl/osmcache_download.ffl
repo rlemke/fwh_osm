@@ -28,15 +28,16 @@ namespace osm.cache {
      *  `region.geofabrik_path` to fetch the extract.
      *
      *  `cache_policy` controls staleness handling:
-     *   - "auto" (default): follow the AFL_OSM_USE_CACHE_IF_PRESENT env.
-     *   - "prefer_cache": use a cached PBF AS-IS if present (no Geofabrik
-     *     call) — fast, ideal when up-to-date data isn't required. Geofabrik
-     *     rebuilds PBFs daily, so the default revalidation otherwise re-pulls
-     *     gigabytes for data that's effectively unchanged.
+     *   - "prefer_cache" (default): use a cached PBF AS-IS if present (no
+     *     Geofabrik call) — so a present-but-out-of-date extract is used as is,
+     *     never re-pulling gigabytes (Geofabrik rebuilds PBFs daily). This is the
+     *     default so cache-backed runs (e.g. the MinIO object store) don't depend
+     *     on internet egress or the AFL_OSM_USE_CACHE_IF_PRESENT env.
+     *   - "auto": follow the AFL_OSM_USE_CACHE_IF_PRESENT env.
      *   - "refresh": always re-download fresh (used by the cache-update
      *     workflows in osmcache_refresh.ffl).
      *   - "revalidate": always check Geofabrik, re-download only if changed. */
-    event facet Download(region: Region, cache_policy: String = "auto") => (cache: OSMCache) with Effect(kind = "external") with Cost(tier = "expensive")
+    event facet Download(region: Region, cache_policy: String = "prefer_cache") => (cache: OSMCache) with Effect(kind = "external") with Cost(tier = "expensive")
 
     /** List the regions currently present in the local PBF cache (no network).
      *  The input side of a deliberate cache refresh — pair with `Download`
