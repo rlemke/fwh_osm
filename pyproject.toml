@@ -39,8 +39,8 @@ s3 = [
 [project.urls]
 Repository = "https://github.com/rlemke/osm"
 
-[project.entry-points."facetwork.examples"]
-osm-geocoder = "osm_geocoder:example"
+[project.entry-points."facetwork.domains"]
+osm-geocoder = "osm_geocoder:domain"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -2,11 +2,11 @@
 OpenStreetMap data extraction, PostGIS imports, routing graphs (GraphHopper,
 Valhalla, OSRM, pgRouting), and Folium HTML map rendering.
 
-Discovered by the Facetwork runner via the ``facetwork.examples`` entry
+Discovered by the Facetwork runner via the ``facetwork.domains`` entry
 point declared in ``pyproject.toml``::
 
-    [project.entry-points."facetwork.examples"]
-    osm-geocoder = "osm_geocoder:example"
+    [project.entry-points."facetwork.domains"]
+    osm-geocoder = "osm_geocoder:domain"
 
 Once ``pip install -e .`` has been run from this repository, Facetwork's
 ``scripts/start-runner --example osm-geocoder`` and
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from facetwork.examples import ExamplePackage
+from facetwork.domains import DomainPackage
 
 from .handlers import register_all_registry_handlers
 
@@ -37,7 +37,7 @@ _RUNNER_ENV = {
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _EXTRA_FFL = [_REPO_ROOT / "tests" / "real" / "ffl"]
 
-example = ExamplePackage(
+domain = DomainPackage(
     name="osm-geocoder",
     ffl_dir=Path(__file__).parent / "ffl",
     register_handlers=register_all_registry_handlers,
