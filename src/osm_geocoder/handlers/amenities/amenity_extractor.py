@@ -145,6 +145,7 @@ class AmenityFeatures:
     amenity_types: str
     format: str = "GeoJSON"
     extraction_date: str = ""
+    features_dropped: int = 0  # ways skipped due to incomplete/invalid geometry
 
 
 @dataclass
@@ -221,6 +222,7 @@ def extract_amenities(
             super().__init__()
             self.writer = writer
             self.kept = 0
+            self.dropped = 0  # ways skipped: incomplete/invalid geometry
             self.types: set[str] = set()
 
         def _emit(self, tags: dict[str, str], geom: dict, osm_id: int) -> None:
@@ -257,6 +259,7 @@ def extract_amenities(
             try:
                 centroid = shapely_wkb.loads(wkbfab.create_linestring(w), hex=True).centroid
             except Exception:
+                self.dropped += 1
                 return  # incomplete geometry (missing nodes) — skip
             self._emit(tags, {"type": "Point", "coordinates": [centroid.x, centroid.y]}, w.id)
 
@@ -273,12 +276,19 @@ def extract_amenities(
             os.unlink(tmp_path)
         raise
 
+    label = f"osm.amenities.ExtractAmenities[{uri_stem(pbf_path)}:{cat.value}]"
+    if handler.dropped > 0:
+        log.warning(
+            "%s: dropped %d feature(s) with invalid geometry", label, handler.dropped
+        )
+
     return AmenityFeatures(
         output_path=output_path_str,
         feature_count=handler.kept,
         amenity_category=cat.value,
         amenity_types=",".join(sorted(handler.types)[:25]),
         extraction_date=datetime.now(UTC).isoformat(),
+        features_dropped=handler.dropped,
     )
 
 

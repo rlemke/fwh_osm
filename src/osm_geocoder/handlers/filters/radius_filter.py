@@ -285,6 +285,7 @@ class FilteredFeatures:
     filter_applied: str
     format: str = "GeoJSON"
     extraction_date: str = ""
+    features_dropped: int = 0  # features skipped due to missing/invalid geometry
 
 
 def filter_geojson(
@@ -332,6 +333,7 @@ def filter_geojson(
     local_path = localize(input_path)
 
     original_count = 0
+    dropped = 0
     from facetwork.config import get_temp_dir
 
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".geojson", dir=get_temp_dir())
@@ -352,6 +354,7 @@ def filter_geojson(
                 # Compute equivalent radius and check criteria
                 geometry = feature.get("geometry")
                 if geometry is None:
+                    dropped += 1
                     continue
 
                 try:
@@ -365,8 +368,8 @@ def filter_geojson(
                         feature["properties"]["equivalent_radius_km"] = radius_meters / 1000
 
                         writer.write_feature(feature)
-                except Exception as e:
-                    log.warning("Failed to process feature: %s", e)
+                except Exception:
+                    dropped += 1
                     continue
 
         ensure_dir(output_path)
@@ -375,6 +378,10 @@ def filter_geojson(
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
         raise
+
+    label = f"osm.filter.RadiusFilter[{uri_stem(input_path)}]"
+    if dropped > 0:
+        log.warning("%s: dropped %d feature(s) with invalid geometry", label, dropped)
 
     # Build filter description
     filter_desc = _describe_filter(criteria, boundary_type)
@@ -388,6 +395,7 @@ def filter_geojson(
         boundary_type=boundary_type or "all",
         filter_applied=filter_desc,
         extraction_date=datetime.now(UTC).isoformat(),
+        features_dropped=dropped,
     )
 
 

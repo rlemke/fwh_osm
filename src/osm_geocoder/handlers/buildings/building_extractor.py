@@ -8,7 +8,7 @@ Extracts building footprints with classification:
 import json
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
@@ -124,6 +124,8 @@ class BuildingFeatures:
     with_height_data: int
     format: str = "GeoJSON"
     extraction_date: str = ""
+    # features skipped (incomplete geometry) / kept features whose area calc failed
+    features_dropped: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -192,6 +194,8 @@ def extract_buildings(
             self.kept = 0
             self.area_m2 = 0.0
             self.with_height = 0
+            self.dropped_geometry = 0  # skipped: incomplete/invalid geometry
+            self.area_errors = 0  # kept but area could not be computed
 
         def area(self, a) -> None:
             tags = {t.k: t.v for t in a.tags}
@@ -205,6 +209,7 @@ def extract_buildings(
                     shapely_wkb.loads(wkbfab.create_multipolygon(a), hex=True)
                 )
             except Exception:
+                self.dropped_geometry += 1
                 return  # incomplete geometry — skip
             props = dict(tags)
             props["osm_id"] = a.orig_id()
@@ -213,7 +218,10 @@ def extract_buildings(
                 {"type": "Feature", "properties": props, "geometry": geom}
             )
             self.kept += 1
-            self.area_m2 += calculate_building_area(geom)
+            area = calculate_building_area(geom)
+            if area <= 0.0:
+                self.area_errors += 1
+            self.area_m2 += area
             if "height" in tags or "building:levels" in tags:
                 self.with_height += 1
             if heartbeat and self.kept % 5000 == 0:
@@ -232,6 +240,18 @@ def extract_buildings(
             os.unlink(tmp_path)
         raise
 
+    label = f"osm.buildings.ExtractBuildings[{uri_stem(pbf_path)}:{building_type}]"
+    total_dropped = handler.dropped_geometry + handler.area_errors
+    if total_dropped > 0:
+        log.warning(
+            "%s: dropped %d feature(s) with invalid geometry "
+            "(%d skipped on incomplete geometry, %d kept with no computable area)",
+            label,
+            total_dropped,
+            handler.dropped_geometry,
+            handler.area_errors,
+        )
+
     return BuildingFeatures(
         output_path=output_path_str,
         feature_count=handler.kept,
@@ -239,6 +259,10 @@ def extract_buildings(
         total_area_km2=round(handler.area_m2 / 1_000_000, 4),
         with_height_data=handler.with_height,
         extraction_date=datetime.now(UTC).isoformat(),
+        features_dropped={
+            "invalid_geometry": handler.dropped_geometry,
+            "area_uncomputable": handler.area_errors,
+        },
     )
 
 

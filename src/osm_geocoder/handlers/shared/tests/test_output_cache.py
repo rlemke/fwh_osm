@@ -49,6 +49,25 @@ class TestVersionKey:
         k2 = _version_key("handler.A", "/data/b.pbf", 1000, {})
         assert k1 != k2
 
+    def test_differs_on_mtime_same_size(self):
+        # Same-size daily rebuild: identical byte count, different mtime ->
+        # the key MUST change so we don't hit a stale cache entry.
+        k1 = _version_key("handler.A", "/data/file.pbf", 1000, {}, 111)
+        k2 = _version_key("handler.A", "/data/file.pbf", 1000, {}, 222)
+        assert k1 != k2
+
+    def test_stable_on_identical_mtime(self):
+        # Idempotent: identical inputs (incl. mtime) -> identical key.
+        k1 = _version_key("handler.A", "/data/file.pbf", 1000, {}, 111)
+        k2 = _version_key("handler.A", "/data/file.pbf", 1000, {}, 111)
+        assert k1 == k2
+
+    def test_mtime_default_backcompat(self):
+        # Omitting mtime defaults to 0 (stable, no crash).
+        assert _version_key("handler.A", "/data/file.pbf", 1000, {}) == _version_key(
+            "handler.A", "/data/file.pbf", 1000, {}, 0
+        )
+
 
 class TestCachedResult:
     def test_miss_no_meta(self, cache_dir):
@@ -102,6 +121,44 @@ class TestCachedResult:
         # Delete output file
         os.remove(output)
         assert cached_result("handler.A", cache, {}) is None
+
+    def test_miss_same_size_different_mtime(self, cache_dir, tmp_path):
+        # Real on-disk source: a same-size rebuild (identical byte count,
+        # newer mtime) must invalidate the cache via the folded mtime.
+        pbf = tmp_path / "region.pbf"
+        pbf.write_bytes(b"AAAA")  # 4 bytes
+        cache = {"path": str(pbf), "size": 4}
+        result = {"result": {"output_path": "", "feature_count": 5}}
+
+        save_result_meta("handler.A", cache, {}, result)
+        assert cached_result("handler.A", cache, {}) is not None
+
+        # Overwrite with same-size but different content + bump mtime.
+        pbf.write_bytes(b"BBBB")  # still 4 bytes
+        future = pbf.stat().st_mtime_ns + 1_000_000_000
+        os.utime(str(pbf), ns=(future, future))
+
+        assert cached_result("handler.A", cache, {}) is None
+
+    def test_hit_identical_file(self, cache_dir, tmp_path):
+        # Idempotent: unchanged on-disk source -> stable hit.
+        pbf = tmp_path / "region.pbf"
+        pbf.write_bytes(b"AAAA")
+        cache = {"path": str(pbf), "size": 4}
+        result = {"result": {"output_path": "", "feature_count": 5}}
+
+        save_result_meta("handler.A", cache, {}, result)
+        assert cached_result("handler.A", cache, {}) == result
+        # Re-checking without touching the file still hits.
+        assert cached_result("handler.A", cache, {}) == result
+
+    def test_missing_source_file_does_not_crash(self, cache_dir):
+        # Absent source path -> graceful fallback (no crash); behaves like
+        # the original size-only key.
+        cache = {"path": "/data/does-not-exist.pbf", "size": 1000}
+        result = {"result": {"output_path": "", "feature_count": 5}}
+        save_result_meta("handler.A", cache, {}, result)
+        assert cached_result("handler.A", cache, {}) == result
 
     def test_step_log_on_hit(self, cache_dir):
         cache = {"path": "/data/file.pbf", "size": 1000}

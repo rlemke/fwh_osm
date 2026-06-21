@@ -20,37 +20,43 @@ that an LLM can discover (`fw_capabilities`) and compose from a natural-language
 - **Routing graph builders** — GraphHopper / Valhalla / OSRM graph + tile construction
 - **Voting / Census TIGER** — district boundaries and demographic overlays
 
-Discovered by the Facetwork runner via the `facetwork.examples` entry point
+Discovered by the Facetwork runner via the `facetwork.domains` entry point
 declared in `pyproject.toml`. After `pip install -e .`, Facetwork's
-`scripts/start-runner --example osm-geocoder` and `scripts/seed-examples`
+`fw runner start --domain osm-geocoder` and `fw ffl seed`
 pick this package up automatically.
 
 ## Install
 
 ```bash
-git clone https://github.com/rlemke/osm.git
-cd osm
+git clone https://github.com/rlemke/fwh_osm.git
+cd fwh_osm
 pip install -e .
 ```
 
-This registers the package under the `facetwork.examples` entry-point group,
+Or let Facetwork's registry-driven installer clone + install it for you:
+
+```bash
+fw install domain osm-geocoder
+```
+
+This registers the package under the `facetwork.domains` entry-point group,
 making it discoverable by any Facetwork installation in the same environment.
 
 ## Run from a Facetwork checkout
 
 All commands below assume your shell is in the Facetwork checkout and the
 osm package is installed in the same Python environment that runs
-Facetwork (`pip install -e ~/ffl_handlers/osm`).
+Facetwork (`pip install -e ~/fw_handlers/fwh_osm`).
 
 The package's `runner_env` (4-hour task / stuck timeouts for long PostGIS
-imports) is baked into `osm_geocoder:example` and applied automatically to
-any runner started with `--example osm-geocoder`.
+imports) is baked into `osm_geocoder:domain` and applied automatically to
+any runner started with `--domain osm-geocoder`.
 
 ### Cold start: dashboard + runner together
 
 ```bash
-scripts/seed-examples --include osm-geocoder           # one-time, seeds FFL
-scripts/start-runner --example osm-geocoder -- --log-format text
+fw ffl seed --include osm-geocoder           # one-time, seeds FFL
+fw runner start --domain osm-geocoder -- --log-format text
 ```
 
 This brings up the dashboard on `:8080` and a runner that polls for
@@ -62,10 +68,10 @@ If the Facetwork dashboard is already up and you just want another runner
 attached to it (after pulling new osm code, or to scale out):
 
 ```bash
-scripts/start-runner --example osm-geocoder --no-dashboard -- --log-format text
+fw runner start --domain osm-geocoder --no-dashboard -- --log-format text
 ```
 
-Internally this runs `python -m facetwork.examples osm-geocoder` against
+Internally this runs `python -m facetwork.domains osm-geocoder` against
 the same MongoDB the dashboard uses — registering the osm handlers in the
 `handlers` collection — and then starts a `RegistryRunner` process. The
 new runner appears in the dashboard's `/servers` page within a few
@@ -76,13 +82,13 @@ independently.
 
 - **Multiple instances on this host:** `--instances N` spawns N runner
   processes sharing one handler registration.
-- **Remote host:** `scripts/start-runner --host h2.example --example osm-geocoder --no-dashboard`
+- **Remote host:** `fw runner start --host h2.example --domain osm-geocoder --no-dashboard`
   (the osm package must be installed on the remote venv too; needs SSH
   reachability and `AFL_RUNNER_HOSTS` or repeated `--host` flags).
 - **Register handlers without starting a runner:**
-  `python -m facetwork.examples osm-geocoder` — handy if a runner is
+  `python -m facetwork.domains osm-geocoder` — handy if a runner is
   already running but its handler set is stale.
-- **Drain a runner cleanly:** `scripts/drain-runners` resets in-flight
+- **Drain a runner cleanly:** `fw runner drain` resets in-flight
   tasks to pending so another runner can pick them up.
 
 ## Run standalone
@@ -94,8 +100,8 @@ PYTHONPATH=src python agent.py
 ## Layout
 
 ```
-osm/
-├── pyproject.toml                  # facetwork.examples entry point
+fwh_osm/
+├── pyproject.toml                  # facetwork.domains entry point
 ├── README.md
 ├── CLAUDE.md                       # guidance for Claude Code in this repo
 ├── USER_GUIDE.md                   # human-facing walkthrough
@@ -103,20 +109,21 @@ osm/
 ├── .claude/                        # MCP server config for Claude Code
 ├── agent-spec/                     # tools-pattern, cache-layout specs
 ├── agent.py                        # standalone AgentPoller variant
-├── tools/                          # repo-level CLI scripts (PBF → tiles → HTML)
-│   ├── _osm_tools/                       # shared library for tools
-│   ├── all-extract.sh
-│   ├── all-render-html-maps.sh
-│   └── ...
+├── scripts/                        # repo-level helper scripts (serve-tiled-map)
 ├── tests/                          # repo-level integration tests
 └── src/osm_geocoder/
-    ├── __init__.py                 # exports `example: ExamplePackage`
-    ├── handlers/                   # 23 handler subpackages
+    ├── __init__.py                 # exports `domain: DomainPackage`
+    ├── tools/                      # CLI scripts (PBF → tiles → HTML)
+    │   ├── _osm_tools/             #   shared library for tools
+    │   ├── all-extract.sh
+    │   ├── all-render-html-maps.sh
+    │   └── ...
+    ├── handlers/                   # handler subpackages (one per domain)
     │   ├── amenities/
     │   ├── boundaries/
     │   ├── ...
     │   └── voting/
-    └── ffl/                        # top-level FFL workflows
+    └── ffl/                        # top-level FFL workflows (geocoder.ffl)
 ```
 
 Per-domain FFL files live alongside their handlers under

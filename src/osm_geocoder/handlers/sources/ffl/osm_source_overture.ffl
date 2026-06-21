@@ -1,0 +1,49 @@
+// Source Adapter: Overture Maps extraction via GeoParquet
+//
+// Extracts features from Overture Maps' open data (remote GeoParquet on S3/Azure)
+// into the SAME unified osm.* feature schemas as the PBF / PostGIS / GeoJSON
+// adapters, so Overture can be used interchangeably as a data source for any
+// downstream analysis facet.
+//
+// Real reads hit remote cloud-hosted GeoParquet (heavy: pyarrow/duckdb), so the
+// extract facets are annotated external + expensive.
+
+/** Overture Maps source adapter — extracts features from remote GeoParquet. */
+namespace osm.Source.Overture {
+    use osm.types
+
+    /** Overture Maps source parameters: theme/type, release, and a bbox window. */
+    schema OvertureSource {
+        theme: String,
+        release: String,
+        min_lon: Double,
+        min_lat: Double,
+        max_lon: Double,
+        max_lat: Double,
+        region: String
+    }
+
+    /** Extracts routes by transport type from Overture. */
+    event facet ExtractRoutes(source: OvertureSource, route_type: String = "all", network: String = "*", include_infrastructure: Boolean = true) => (result: osm.Routes.RouteFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
+
+    /** Extracts amenities/places by category from Overture. */
+    event facet ExtractAmenities(source: OvertureSource, category: String = "all") => (result: osm.Amenities.AmenityFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
+
+    /** Extracts roads by classification from Overture transportation segments. */
+    event facet ExtractRoads(source: OvertureSource, road_class: String = "all") => (result: osm.Roads.RoadFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
+
+    /** Extracts parks and protected areas from Overture. */
+    event facet ExtractParks(source: OvertureSource, park_type: String = "all", protect_classes: String = "*") => (result: osm.Parks.ParkFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
+
+    /** Extracts building footprints from Overture buildings theme. */
+    event facet ExtractBuildings(source: OvertureSource, building_type: String = "all") => (result: osm.Buildings.BuildingFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
+
+    /** Extracts administrative and natural boundaries from Overture divisions. */
+    event facet ExtractBoundaries(source: OvertureSource, boundary_type: String = "admin", admin_level: Long = 2) => (result: osm.Boundaries.BoundaryFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
+
+    /** Extracts populated places from Overture. */
+    event facet ExtractPopulation(source: OvertureSource, place_type: String = "all", min_population: Long = 0) => (result: osm.Population.PopulationFilteredFeatures) with Effect(kind = "external") with Cost(tier = "expensive")
+
+    /** Extracts points of interest from Overture places theme. */
+    event facet ExtractPOIs(source: OvertureSource) => (pois: OSMCache) with Effect(kind = "external") with Cost(tier = "expensive")
+}

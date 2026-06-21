@@ -21,6 +21,7 @@ dependencies = [
     "pyproj>=3.0",
     "networkx>=3.0",
     "folium>=0.14",
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +35,10 @@ postgis = [
 ]
 s3 = [
     "boto3>=1.28",
+]
+overture = [
+    "pyarrow>=14.0",
+    "shapely>=2.0",
 ]
 
 [project.urls]
@@ -49,6 +54,7 @@ where = ["src"]
 osm_geocoder = [
     "ffl/*.ffl",
     "handlers/**/ffl/*.ffl",
+    "catalog.yaml",
 ]
 
 [tool.ruff]

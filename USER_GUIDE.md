@@ -1,6 +1,6 @@
 # OSM Geocoder — User Guide
 
-> See also: [Examples Guide](../doc/GUIDE.md) | [README](README.md)
+> See also: [README](README.md) | [CLAUDE.md](CLAUDE.md)
 
 ## When to Use This Example
 
@@ -30,22 +30,23 @@ This is the largest example in the repository:
 
 ## Project Structure
 
-The `handlers/` package is organized into functional subdirectories. Each category contains its own handler modules, FFL source files, tests, and documentation:
+The `src/osm_geocoder/handlers/` package is organized into functional subdirectories. Each category contains its own handler modules, FFL source files, tests, and documentation:
 
 ```
-handlers/
+src/osm_geocoder/handlers/
 ├── __init__.py              # backward-compatible facade + register_all_handlers()
-├── shared/                  # _output.py, downloader.py, region_resolver.py
+├── shared/                  # _output.py, region_resolver.py, pbf_cache.py, geojson_writer.py
 ├── amenities/               # amenity_handlers, amenity_extractor, airquality_handlers
-│   ├── afl/                 #   osmamenities.ffl, osmairquality.ffl
+│   ├── ffl/                 #   osmamenities.ffl, osmairquality.ffl
 │   ├── tests/               #   test_paris_amenities, test_school_airquality
 │   └── README.md            #   (was AMENITIES.md)
 ├── boundaries/              # boundary_handlers, boundary_extractor
 ├── buildings/               # building_handlers, building_extractor
 ├── cache/                   # cache_handlers (~250 facets), region_handlers
-│   └── afl/                 #   osmcache, osmtypes, osmregion, 11 regional files
+│   └── ffl/                 #   osmcache, osmtypes, osmregion, osmops, 11 regional files
 ├── composed_workflows/      # workflow composition examples
-├── downloads/               # operations_handlers, postgis_handlers, postgis_importer
+├── db/                      # import_handlers, osm_store (PostGIS bulk imports)
+├── sources/                 # source adapters: pbf_source, postgis_source, geojson_source
 ├── filters/                 # filter_handlers, radius_filter, osm_type_filter, osmose_*, validation_*
 ├── graphhopper/             # graphhopper_handlers (~200 facets)
 ├── parks/                   # park_handlers, park_extractor
@@ -53,12 +54,12 @@ handlers/
 ├── population/              # population_handlers, population_filter
 ├── roads/                   # road_handlers, road_extractor, zoom_* (6 modules)
 ├── routes/                  # route_handlers, elevation_handlers, routing_handlers, gtfs_*
-├── shapefiles/              # shapefile download workflows (reuses downloads)
+├── shapefiles/              # shapefile download workflows
 ├── visualization/           # visualization_handlers, map_renderer
 └── voting/                  # tiger_handlers, tiger_downloader
 ```
 
-The core geocoding FFL file remains at `afl/geocoder.ffl`.
+The core geocoding FFL file lives at `src/osm_geocoder/ffl/geocoder.ffl`.
 
 ### Backward Compatibility
 
@@ -117,43 +118,26 @@ for namespace, regions in REGION_REGISTRY.items():
 
 ```bash
 source .venv/bin/activate
-pip install -r examples/osm-geocoder/requirements.txt
+pip install -e .
 
 # No network required — uses mock handler
-PYTHONPATH=. python examples/osm-geocoder/test_geocoder.py
+PYTHONPATH=src python -m pytest tests/mocked/py/test_geocoder.py
 ```
 
 ### 4. Running the Live Agent
 
 ```bash
 # Starts polling for all OSM event facets
-PYTHONPATH=. python examples/osm-geocoder/agent.py
+PYTHONPATH=src python agent.py
 ```
 
 ### 5. Compile Checking All FFL
 
 ```bash
 # Recursively finds FFL files in handler subdirectories
-find examples/osm-geocoder -name '*.ffl' -not -path '*/tests/*' \
-    -exec python -m afl.cli {} --check \; -exec echo "OK: {}" \;
+find src/osm_geocoder -name '*.ffl' -not -path '*/tests/*' \
+    -exec fw ffl compile {} --check \; -exec echo "OK: {}" \;
 ```
-
-### 6. Geofabrik Mirror for Offline Workflows
-
-In CI or air-gapped environments, use the local mirror to avoid network requests:
-
-```bash
-# Prefetch all regions (or a subset) into a mirror directory
-scripts/osm-prefetch --mirror-dir /data/osm-mirror --include "europe/"
-
-# Activate the mirror — the downloader reads from it before hitting the network
-export AFL_GEOFABRIK_MIRROR=/data/osm-mirror
-
-# Run the agent as usual — downloads are served from the mirror
-PYTHONPATH=. python examples/osm-geocoder/agent.py
-```
-
-See [downloads README](handlers/downloads/README.md) for all prefetch options and the full check order (cache → mirror → download).
 
 ## Key Concepts
 
@@ -292,12 +276,12 @@ namespace osm.africa {
 
 ### Add a new handler category
 
-1. Create `handlers/newcategory/` directory with `__init__.py`
-2. Add `handlers/newcategory/ffl/osm_newcategory.ffl` with event facets
-3. Add `handlers/newcategory/newcategory_handlers.py` with dispatch adapter
-4. Add `handlers/newcategory/tests/test_newcategory.py`
-5. Add `handlers/newcategory/README.md` documenting the category
-6. Wire into `handlers/__init__.py` (add to `_MODULE_MAP` and registration functions)
+1. Create `src/osm_geocoder/handlers/newcategory/` directory with `__init__.py`
+2. Add `src/osm_geocoder/handlers/newcategory/ffl/osm_newcategory.ffl` with event facets
+3. Add `src/osm_geocoder/handlers/newcategory/newcategory_handlers.py` with dispatch adapter
+4. Add `src/osm_geocoder/handlers/newcategory/tests/test_newcategory.py`
+5. Add `src/osm_geocoder/handlers/newcategory/README.md` documenting the category
+6. Wire into `src/osm_geocoder/handlers/__init__.py` (add to `_MODULE_MAP` and registration functions)
 
 ### Build a focused agent from a subset
 
@@ -305,7 +289,7 @@ You don't need to register all 580+ handlers. Use topic filtering:
 
 ```bash
 AFL_USE_REGISTRY=1 AFL_RUNNER_TOPICS=osm.geocode,osm.cache.Europe \
-    PYTHONPATH=. python examples/osm-geocoder/agent.py
+    PYTHONPATH=src python agent.py
 ```
 
 ### Use as a base for your own geographic agent
@@ -318,25 +302,25 @@ Each handler category has a README in its directory:
 
 | Category | README | Content |
 |----------|--------|---------|
-| cache | [handlers/cache/](handlers/cache/README.md) | Cache system, namespaces, region registry |
-| downloads | [handlers/downloads/](handlers/downloads/README.md) | Download operations, PBF/shapefile formats |
-| poi | [handlers/poi/](handlers/poi/README.md) | Point-of-interest extraction |
-| boundaries | [handlers/boundaries/](handlers/boundaries/README.md) | Administrative/natural boundaries |
-| filters | [handlers/filters/](handlers/filters/README.md) | Radius, OSM type, and validation filtering |
-| routes | [handlers/routes/](handlers/routes/README.md) | Bicycle, hiking, train, bus, city routing |
-| population | [handlers/population/](handlers/population/README.md) | Population-based filtering |
-| parks | [handlers/parks/](handlers/parks/README.md) | National parks, protected areas |
-| buildings | [handlers/buildings/](handlers/buildings/README.md) | Building footprint extraction |
-| amenities | [handlers/amenities/](handlers/amenities/README.md) | Amenity extraction, air quality |
-| roads | [handlers/roads/](handlers/roads/README.md) | Road network extraction, zoom builder |
-| visualization | [handlers/visualization/](handlers/visualization/README.md) | Map rendering with Leaflet |
-| graphhopper | [handlers/graphhopper/](handlers/graphhopper/README.md) | Routing graph operations |
-| voting | [handlers/voting/](handlers/voting/README.md) | US Census TIGER data |
-| shapefiles | [handlers/shapefiles/](handlers/shapefiles/README.md) | Shapefile downloads |
-| composed_workflows | [handlers/composed_workflows/](handlers/composed_workflows/README.md) | Workflow composition examples |
+| cache | [src/osm_geocoder/handlers/cache/](src/osm_geocoder/handlers/cache/README.md) | Cache system, namespaces, region registry |
+| cities | [src/osm_geocoder/handlers/cities/](src/osm_geocoder/handlers/cities/README.md) | City extraction and lookup |
+| poi | [src/osm_geocoder/handlers/poi/](src/osm_geocoder/handlers/poi/README.md) | Point-of-interest extraction |
+| boundaries | [src/osm_geocoder/handlers/boundaries/](src/osm_geocoder/handlers/boundaries/README.md) | Administrative/natural boundaries |
+| filters | [src/osm_geocoder/handlers/filters/](src/osm_geocoder/handlers/filters/README.md) | Radius, OSM type, and validation filtering |
+| routes | [src/osm_geocoder/handlers/routes/](src/osm_geocoder/handlers/routes/README.md) | Bicycle, hiking, train, bus, city routing |
+| population | [src/osm_geocoder/handlers/population/](src/osm_geocoder/handlers/population/README.md) | Population-based filtering |
+| parks | [src/osm_geocoder/handlers/parks/](src/osm_geocoder/handlers/parks/README.md) | National parks, protected areas |
+| buildings | [src/osm_geocoder/handlers/buildings/](src/osm_geocoder/handlers/buildings/README.md) | Building footprint extraction |
+| amenities | [src/osm_geocoder/handlers/amenities/](src/osm_geocoder/handlers/amenities/README.md) | Amenity extraction, air quality |
+| roads | [src/osm_geocoder/handlers/roads/](src/osm_geocoder/handlers/roads/README.md) | Road network extraction, zoom builder |
+| visualization | [src/osm_geocoder/handlers/visualization/](src/osm_geocoder/handlers/visualization/README.md) | Map rendering with Leaflet |
+| graphhopper | [src/osm_geocoder/handlers/graphhopper/](src/osm_geocoder/handlers/graphhopper/README.md) | Routing graph operations |
+| voting | [src/osm_geocoder/handlers/voting/](src/osm_geocoder/handlers/voting/README.md) | US Census TIGER data |
+| shapefiles | [src/osm_geocoder/handlers/shapefiles/](src/osm_geocoder/handlers/shapefiles/README.md) | Shapefile downloads |
+| composed_workflows | [src/osm_geocoder/handlers/composed_workflows/](src/osm_geocoder/handlers/composed_workflows/README.md) | Workflow composition examples |
 
 ## Next Steps
 
-- **[continental-lz](../continental-lz/USER_GUIDE.md)** — run OSM pipelines at continental scale with Docker
-- **[jenkins](../jenkins/USER_GUIDE.md)** — mixin composition patterns
-- **[genomics](../genomics/USER_GUIDE.md)** — foreach fan-out for batch processing
+- **[osm-lz](https://github.com/rlemke/fwh_osm_lz)** — run OSM pipelines at continental scale (pure-FFL catalog over this package)
+- **[jenkins](https://github.com/rlemke/fwh_jenkins)** — mixin composition patterns
+- **[genomics](https://github.com/rlemke/fwh_genomics)** — foreach fan-out for batch processing

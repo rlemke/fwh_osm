@@ -83,12 +83,17 @@ def _make_render_map_handler(facet_name: str):
             return {"result": _empty_result(title, format)}
 
         if format == "html" and not HAS_FOLIUM:
-            log.error("folium not installed, cannot render HTML map")
-            return {"result": _empty_result(title, format)}
+            raise RuntimeError(
+                f"{qualified}: required rendering dependency 'folium' not installed "
+                "— pip install folium (or the package's [viz]/[geo] extra)"
+            )
 
         if format == "png" and not HAS_STATIC:
-            log.error("geopandas/contextily not installed, cannot render PNG")
-            return {"result": _empty_result(title, format)}
+            raise RuntimeError(
+                f"{qualified}: required rendering dependency 'geopandas'/'contextily' "
+                "not installed — pip install geopandas contextily "
+                "(or the package's [viz]/[geo] extra)"
+            )
 
         try:
             style = LayerStyle(color=color, fill_opacity=fill_opacity)
@@ -148,8 +153,10 @@ def _make_render_map_at_handler(facet_name: str):
             return {"result": _empty_result(title, "html")}
 
         if not HAS_FOLIUM:
-            log.error("folium not installed")
-            return {"result": _empty_result(title, "html")}
+            raise RuntimeError(
+                f"{qualified}: required rendering dependency 'folium' not installed "
+                "— pip install folium (or the package's [viz]/[geo] extra)"
+            )
 
         try:
             result = render_map(
@@ -207,8 +214,10 @@ def _make_render_layers_handler(facet_name: str):
             return {"result": _empty_result(title, format)}
 
         if not HAS_FOLIUM:
-            log.error("folium not installed")
-            return {"result": _empty_result(title, format)}
+            raise RuntimeError(
+                f"{qualified}: required rendering dependency 'folium' not installed "
+                "— pip install folium (or the package's [viz]/[geo] extra)"
+            )
 
         try:
             result = render_layers(
@@ -326,8 +335,10 @@ def _make_render_styled_map_handler(facet_name: str):
             return {"result": _empty_result(title, "html")}
 
         if not HAS_FOLIUM:
-            log.error("folium not installed")
-            return {"result": _empty_result(title, "html")}
+            raise RuntimeError(
+                f"{qualified}: required rendering dependency 'folium' not installed "
+                "— pip install folium (or the package's [viz]/[geo] extra)"
+            )
 
         try:
             style = LayerStyle(
@@ -382,8 +393,10 @@ def _make_preview_map_handler(facet_name: str):
             return {"result": _empty_result("Preview", "html")}
 
         if not HAS_FOLIUM:
-            log.error("folium not installed")
-            return {"result": _empty_result("Preview", "html")}
+            raise RuntimeError(
+                f"{qualified}: required rendering dependency 'folium' not installed "
+                "— pip install folium (or the package's [viz]/[geo] extra)"
+            )
 
         try:
             result = preview_map(geojson_path)

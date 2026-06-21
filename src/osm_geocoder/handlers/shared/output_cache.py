@@ -43,19 +43,44 @@ log = logging.getLogger(__name__)
 _APP_VERSION = "5"
 
 
+def _stat_source(pbf_path: str) -> tuple[int, int]:
+    """Read ``(st_size, st_mtime_ns)`` for the source PBF.
+
+    Modification time is folded into the cache key alongside size so a
+    same-size daily rebuild of a Geofabrik PBF (identical byte count but
+    different contents) doesn't incorrectly hit a stale cache entry.
+
+    The file may be absent (e.g. remote/object-store inputs, or the path
+    not yet materialized locally) — in that case fall back to ``(0, 0)``
+    rather than crashing key construction.  A miss is acceptable.
+    """
+    if not pbf_path:
+        return (0, 0)
+    try:
+        st = os.stat(pbf_path)
+        return (st.st_size, st.st_mtime_ns)
+    except OSError:
+        return (0, 0)
+
+
 def _version_key(
     handler_name: str,
     pbf_path: str,
     pbf_size: int,
     cache_params: dict[str, Any],
+    pbf_mtime_ns: int = 0,
 ) -> str:
     """Build a deterministic hash key from inputs.
 
     The key captures everything that could change the output:
-    - PBF file identity (path + size as a proxy for content)
+    - PBF file identity (path + size + mtime as a proxy for content)
     - Handler identity (qualified facet name)
     - Handler parameters (admin levels, park type, etc.)
     - Application version (global invalidation knob)
+
+    ``pbf_mtime_ns`` (the source's ``st_mtime_ns``) makes the key robust
+    to same-size content changes: a daily PBF rebuild bumps mtime even
+    when the byte count is unchanged, so the key differs and we re-extract.
     """
     raw = json.dumps(
         {
@@ -63,6 +88,7 @@ def _version_key(
             "handler": handler_name,
             "pbf_path": pbf_path,
             "pbf_size": pbf_size,
+            "pbf_mtime_ns": pbf_mtime_ns,
             "params": cache_params,
         },
         sort_keys=True,
@@ -100,7 +126,14 @@ def cached_result(
     if not pbf_path:
         return None
 
-    key = _version_key(handler_name, pbf_path, pbf_size, cache_params)
+    # Fold the source artifact's mtime into the key (robust to same-size
+    # rebuilds).  If the file is absent, st falls back to (0, 0) — a miss
+    # is fine, and the cache.get("size") proxy still applies.
+    stat_size, pbf_mtime_ns = _stat_source(pbf_path)
+    if stat_size:
+        pbf_size = stat_size
+
+    key = _version_key(handler_name, pbf_path, pbf_size, cache_params, pbf_mtime_ns)
 
     # Read existing metadata (if any)
     # We don't know the output_path yet — scan cache_params isn't enough.
@@ -172,7 +205,12 @@ def save_result_meta(
     if not pbf_path:
         return
 
-    key = _version_key(handler_name, pbf_path, pbf_size, cache_params)
+    # Mirror cached_result: fold source mtime (and on-disk size) into the key.
+    stat_size, pbf_mtime_ns = _stat_source(pbf_path)
+    if stat_size:
+        pbf_size = stat_size
+
+    key = _version_key(handler_name, pbf_path, pbf_size, cache_params, pbf_mtime_ns)
 
     # Extract output_path(s) from result for existence checks on future lookups.
     # Handles both single-output handlers (output_path in result/stats) and
@@ -206,6 +244,7 @@ def save_result_meta(
         "handler": handler_name,
         "pbf_path": pbf_path,
         "pbf_size": pbf_size,
+        "pbf_mtime_ns": pbf_mtime_ns,
         "params": cache_params,
         "output_path": output_path,
         "output_paths": output_paths,

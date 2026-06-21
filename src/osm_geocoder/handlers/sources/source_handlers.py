@@ -1,7 +1,8 @@
 """Source adapter handler registration.
 
-Registers all osm.Source.PBF, osm.Source.PostGIS, and osm.Source.GeoJSON
-event facet handlers with both AgentPoller and RegistryRunner.
+Registers all osm.Source.PBF, osm.Source.PostGIS, osm.Source.GeoJSON, and
+osm.Source.Overture event facet handlers with both AgentPoller and
+RegistryRunner.
 """
 
 import logging
@@ -13,6 +14,7 @@ log = logging.getLogger(__name__)
 def register_source_handlers(poller) -> None:
     """Register all source adapter handlers with the poller."""
     from .geojson_source import GEOJSON_DISPATCH
+    from .overture_source import OVERTURE_DISPATCH
     from .pbf_source import PBF_DISPATCH
     from .postgis_source import POSTGIS_DISPATCH
 
@@ -28,10 +30,15 @@ def register_source_handlers(poller) -> None:
         poller.register(facet_name, handler)
         log.debug("Registered GeoJSON source handler: %s", facet_name)
 
+    for facet_name, handler in OVERTURE_DISPATCH.items():
+        poller.register(facet_name, handler)
+        log.debug("Registered Overture source handler: %s", facet_name)
+
 
 def register_handlers(runner) -> None:
     """Register all source adapter handlers with a RegistryRunner."""
     from .geojson_source import GEOJSON_DISPATCH
+    from .overture_source import OVERTURE_DISPATCH
     from .pbf_source import PBF_DISPATCH
     from .postgis_source import POSTGIS_DISPATCH
 
@@ -41,6 +48,9 @@ def register_handlers(runner) -> None:
     )
     geojson_uri = (
         f"file://{os.path.abspath(os.path.join(os.path.dirname(__file__), 'geojson_source.py'))}"
+    )
+    overture_uri = (
+        f"file://{os.path.abspath(os.path.join(os.path.dirname(__file__), 'overture_source.py'))}"
     )
 
     # PBF source facets are full-region osmium scans (Extract*) that read a
@@ -59,3 +69,12 @@ def register_handlers(runner) -> None:
 
     for facet_name in GEOJSON_DISPATCH:
         runner.register_handler(facet_name=facet_name, module_uri=geojson_uri, entrypoint="handle")
+
+    # Overture facets stream remote GeoParquet (cloud-hosted, potentially large
+    # bbox windows) in a blocking pyarrow/duckdb loop with sparse heartbeats, so
+    # register them with timeout_ms=0 to fall back to the global execution timeout
+    # rather than the short per-handler timeout — same rationale as PBF.
+    for facet_name in OVERTURE_DISPATCH:
+        runner.register_handler(
+            facet_name=facet_name, module_uri=overture_uri, entrypoint="handle", timeout_ms=0
+        )

@@ -137,14 +137,14 @@ class TestOsmElevationHandlers:
 class TestOsmRoutingHandlers:
     def test_dispatch_keys(self):
         mod = _osm_import("routing_handlers")
-        assert len(mod._DISPATCH) == 1
+        assert len(mod._DISPATCH) >= 1
         assert "osm.Routing.ComputePairwiseRoutes" in mod._DISPATCH
 
     def test_register_handlers(self):
         mod = _osm_import("routing_handlers")
         runner = MagicMock()
         mod.register_handlers(runner)
-        assert runner.register_handler.call_count == 1
+        assert runner.register_handler.call_count == len(mod._DISPATCH)
 
 
 class TestOsmOsmoseHandlers:

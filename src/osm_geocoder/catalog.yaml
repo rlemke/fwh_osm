@@ -1,0 +1,655 @@
+# Composability manifest for the osm-geocoder package.
+#
+# Machine-readable index so an LLM can DISCOVER + REUSE these capabilities by
+# intent, the same way the platform's `fw_catalog_match` (workflow-level,
+# reuse-first) and `fw_capabilities` (facet-level capability index) tools work.
+#
+#   * `workflows` — entry-point facets, each with a natural-language `summary`
+#     (the kind of request it answers), `tags`, and a `param_schema` of the key
+#     parameters. Use these for reuse-first catalog matching: match an NL request
+#     against the summaries/tags before authoring anything new.
+#   * `facets` — a capability index of the core composable primitives by
+#     namespace, with `purpose`, `signature`, and the `effect`/`cost` taken
+#     verbatim from the `with Effect(...) / with Cost(...)` mixins in the FFL
+#     (cost inferred as "expensive" from `with Timeout(...)` where no Cost mixin
+#     is present). Compose pipelines from these; prefer pure/cheap primitives.
+#
+# This is a curated subset (the most reusable ~24 workflows + the core facet
+# namespaces), NOT every facet in the package. Accurate qualified names + signatures
+# are sourced from the .ffl; see `osm_geocoder.catalog.load_manifest()`.
+
+version: 1
+package: osm-geocoder
+
+workflows:
+  # --- Heat maps (the canonical composable-facet demo) -----------------------
+  - qualified_name: osm.heatmap.ContinentHeatmap
+    summary: >-
+      Render an interactive heat map of any tagged OSM feature across a whole
+      continent or large country by fanning out per state/province in parallel,
+      then merging. The preferred entry point for "a heatmap of X across
+      <continent/country>" (e.g. EV/Tesla chargers across North America).
+    tags: [heatmap, visualization, fanout, continent, amenities, ev-chargers, parallel]
+    entry_point: true
+    param_schema:
+      region_names: "[String]"
+      category: String
+      filter_script: String
+      style: String
+      title: String
+      cache_policy: String
+
+  - qualified_name: osm.heatmap.AmenityHeatmap
+    summary: >-
+      Render a heat map of any tagged OSM feature for a single small region (one
+      Geofabrik leaf / one state or province) via extract -> script-filter ->
+      render. Use for a single small region; use ContinentHeatmap for anything
+      continent- or large-country-scale.
+    tags: [heatmap, visualization, single-region, amenities, script-filter]
+    entry_point: true
+    param_schema:
+      region: String
+      category: String
+      filter_script: String
+      style: String
+      title: String
+      cache_policy: String
+
+  - qualified_name: osm.heatmap.SubregionChargers
+    summary: >-
+      Inner fan-out building block: expand region names to their finest Geofabrik
+      leaves and, in parallel, extract + script-filter each, returning the list of
+      per-leaf filtered GeoJSON paths for a downstream merge.
+    tags: [heatmap, fanout, subregions, building-block, parallel]
+    entry_point: true
+    param_schema:
+      region_names: "[String]"
+      category: String
+      filter_script: String
+      cache_policy: String
+
+  # --- Geocoding -------------------------------------------------------------
+  - qualified_name: osm.geocode.GeocodeAddress
+    summary: >-
+      Forward-geocode a single street address or place name to latitude/longitude
+      coordinates via OSM Nominatim.
+    tags: [geocoding, forward-geocode, nominatim, address]
+    entry_point: true
+    param_schema:
+      address: String
+
+  - qualified_name: osm.geocode.ReverseGeocodePoint
+    summary: >-
+      Reverse-geocode a latitude/longitude coordinate to the nearest address or
+      place via OSM Nominatim, with a zoom level controlling address granularity.
+    tags: [geocoding, reverse-geocode, nominatim, coordinate]
+    entry_point: true
+    param_schema:
+      lat: Double
+      lon: Double
+      zoom: Long
+
+  - qualified_name: osm.geocode.GeocodeAll
+    summary: >-
+      Forward-geocode a batch of addresses in parallel (foreach fan-out),
+      returning the resolved coordinates for each.
+    tags: [geocoding, batch, fanout, nominatim]
+    entry_point: true
+    param_schema:
+      addresses: Json
+
+  # --- Spatial analysis ("X desert" family) ----------------------------------
+  - qualified_name: osm.Spatial.workflows.PlacesBeyondReach
+    summary: >-
+      Map the populated places of a region that lie beyond a distance from the
+      nearest matching amenity/shop — the parameterized "X desert" map (food
+      deserts, healthcare deserts, pharmacy deserts) over any tag at any radius.
+    tags: [spatial, accessibility, food-desert, healthcare-desert, distance, population, map]
+    entry_point: true
+    param_schema:
+      region: String
+      tag_key: String
+      tag_value: String
+      distance_miles: Double
+
+  # --- Networks / approximate routing ----------------------------------------
+  - qualified_name: osm.Network.workflows.CityRoutesByPopulation
+    summary: >-
+      Compute the all-pairs approximate interstate-route matrix between every
+      place in a region above a population threshold (e.g. routes between all US
+      cities over 1M people) using an in-process freeway network — no routing
+      engine daemon.
+    tags: [routing, network, all-pairs, interstate, population, matrix]
+    entry_point: true
+    param_schema:
+      region: String
+      min_population: Long
+      place_type: String
+      snap_tolerance_m: Double
+
+  # --- API routing (no local setup) ------------------------------------------
+  - qualified_name: osm.Routing.Workflows.RouteViaAPI
+    summary: >-
+      Compute a point-to-point driving/walking/cycling route between two
+      coordinates via a public routing API and render it on a map. No local graph
+      build required.
+    tags: [routing, point-to-point, api, map, directions]
+    entry_point: true
+    param_schema:
+      from_lat: Double
+      from_lon: Double
+      to_lat: Double
+      to_lon: Double
+      profile: String
+
+  - qualified_name: osm.Routing.Workflows.MultiStopViaAPI
+    summary: >-
+      Compute a multi-stop route through an ordered list of waypoints via a public
+      routing API and render the legs on a map.
+    tags: [routing, multi-stop, waypoints, api, map]
+    entry_point: true
+    param_schema:
+      waypoints: String
+      profile: String
+      title: String
+
+  - qualified_name: osm.Routing.Workflows.IsochroneViaAPI
+    summary: >-
+      Compute an isochrone (reachability area within N minutes by a travel
+      profile) from a center point via a public API and render it as a polygon map.
+    tags: [routing, isochrone, reachability, travel-time, api, map]
+    entry_point: true
+    param_schema:
+      center_lat: Double
+      center_lon: Double
+      time_minutes: Long
+      profile: String
+
+  # --- Source-adapter sourced workflows (PBF / PostGIS / GeoJSON) -------------
+  - qualified_name: osm.workflows.sourced.BicycleRoutesPBF
+    summary: >-
+      Extract a region's cycling routes from its OSM PBF extract and render an
+      interactive map with route count and total kilometres.
+    tags: [routes, cycling, pbf, source-adapter, map]
+    entry_point: true
+    param_schema:
+      region: String
+
+  - qualified_name: osm.workflows.sourced.BicycleRoutesPostGIS
+    summary: >-
+      Extract a region's cycling routes from a PostGIS OSM database and render an
+      interactive map — the PostGIS-sourced counterpart to BicycleRoutesPBF.
+    tags: [routes, cycling, postgis, source-adapter, map]
+    entry_point: true
+    param_schema:
+      postgis_url: String
+      region: String
+
+  - qualified_name: osm.workflows.sourced.HealthcareMapPostGIS
+    summary: >-
+      Map the hospitals of a region from a PostGIS OSM database, returning the
+      hospital count and an interactive map.
+    tags: [amenities, healthcare, hospitals, postgis, map]
+    entry_point: true
+    param_schema:
+      postgis_url: String
+      region: String
+
+  - qualified_name: osm.workflows.sourced.MajorRoadsPBF
+    summary: >-
+      Extract and map a region's major roads from its OSM PBF extract, returning
+      the road count and an interactive map.
+    tags: [roads, pbf, source-adapter, map]
+    entry_point: true
+    param_schema:
+      region: String
+
+  # --- Conversion ------------------------------------------------------------
+  - qualified_name: osm.convert.ConvertRegionToGeoJson
+    summary: >-
+      Convert an entire region's cached OSM PBF extract to GeoJSON via osmium
+      export (idempotent, cache-aware), with an optional size cap to skip oversized
+      extracts.
+    tags: [convert, geojson, pbf, osmium, source]
+    entry_point: true
+    param_schema:
+      region: String
+      max_pbf_mb: Long
+
+  # --- Elevation -------------------------------------------------------------
+  - qualified_name: osm.Elevation.RegionWorkflows.FindHighElevationHikingTrailsByRegion
+    summary: >-
+      Find a region's hiking trails above a minimum elevation by extracting trails
+      and enriching them with elevation data.
+    tags: [elevation, hiking, trails, routes, region]
+    entry_point: true
+    param_schema:
+      region: String
+
+  - qualified_name: osm.ElevationMap.BicycleElevationMap
+    summary: >-
+      Build an elevation-shaded map of a region's cycling routes (routes enriched
+      with elevation, rendered to an interactive map).
+    tags: [elevation, cycling, routes, map, visualization]
+    entry_point: true
+    param_schema:
+      region: String
+
+  # --- Cities / zoom-tiled maps ----------------------------------------------
+  - qualified_name: osm.Cities.CitiesByZoomTiledMap
+    summary: >-
+      Build a zoom-tiled (PMTiles/MapLibre) map of a region's populated places by
+      city/town/village tier, for smooth pan/zoom over large extents.
+    tags: [cities, population, vector-tiles, pmtiles, map, zoom]
+    entry_point: true
+    param_schema:
+      region: String
+
+  # --- Clip ------------------------------------------------------------------
+  - qualified_name: osm.Clip.workflows.ClipAndExtract
+    summary: >-
+      Clip a region's data to a bounding box and extract a feature category from
+      the clipped area, returning the clipped GeoJSON path and feature count.
+    tags: [clip, bbox, extract, geojson]
+    entry_point: true
+    param_schema:
+      region: String
+      west: Double
+      south: Double
+      east: Double
+      north: Double
+      category: String
+
+  # --- Composed analysis -----------------------------------------------------
+  - qualified_name: osm.workflows.AnalyzeParks
+    summary: >-
+      Analyze a region's parks and protected areas, returning total park count,
+      total area, and national/state breakdowns.
+    tags: [parks, analysis, statistics, protected-areas]
+    entry_point: true
+    param_schema:
+      region: String
+
+  - qualified_name: osm.workflows.TransportOverview
+    summary: >-
+      Summarize a region's transport network — total cycling, hiking, train
+      kilometres and bus route count — in a single overview.
+    tags: [transport, transit, statistics, overview, routes]
+    entry_point: true
+    param_schema:
+      region: String
+
+  - qualified_name: osm.workflows.RegionalAnalysis
+    summary: >-
+      Produce a combined regional analysis — parks, route kilometres, and city
+      counts — plus a summary map for a region.
+    tags: [analysis, overview, parks, routes, cities, map]
+    entry_point: true
+    param_schema:
+      region: String
+
+  # --- Voting / districts (census TIGER) -------------------------------------
+  - qualified_name: census.tiger.Workflows.GetCongressionalDistricts
+    summary: >-
+      Fetch the congressional district boundaries for a US state for a given year
+      and congress number (census TIGER), for voting/redistricting analysis.
+    tags: [voting, districts, congressional, boundaries, census, tiger]
+    entry_point: true
+    param_schema:
+      state: String
+      year: Long
+      congress_number: Long
+
+facets:
+  # --- osm.Vocab : NL term -> OSM tag (semantic discovery) --------------------
+  - qualified_name: osm.Vocab.ResolveTag
+    namespace: osm.Vocab
+    purpose: >-
+      Resolve a natural-language term (e.g. "gas station", "freeway") to its OSM
+      (key, value) tag, with confidence and ranked alternatives.
+    signature: "ResolveTag(term: String, key: String = \"\") => (result: TagResolution)"
+    effect: pure
+    cost: free
+
+  - qualified_name: osm.Vocab.ListTagValues
+    namespace: osm.Vocab
+    purpose: List the known OSM values for a tag key as a JSON array.
+    signature: "ListTagValues(key: String) => (values: Json, count: Long)"
+    effect: pure
+    cost: free
+
+  # --- osm.Region : region resolution ----------------------------------------
+  - qualified_name: osm.Region.ResolveRegion
+    namespace: osm.Region
+    purpose: Resolve a single region name to a fully-resolved Region (best match).
+    signature: "ResolveRegion(name: String, prefer_continent: String = \"\") => (region: Region)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Region.ResolveRegions
+    namespace: osm.Region
+    purpose: >-
+      Batch-resolve region names, with optional hierarchical expansion to the
+      finest Geofabrik leaves (the fan-out driver for continent/country runs).
+    signature: "ResolveRegions(names: [String], prefer_continent: String = \"\", strict: Boolean = false, expand: String = \"none\") => (regions: [Region], diagnostics: ResolutionDiagnostics)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Region.ListRegions
+    namespace: osm.Region
+    purpose: Enumerate the known region catalog, optionally filtered by level/continent/parent.
+    signature: "ListRegions(parent_canonical: String = \"\", level: String = \"\", continent: String = \"\") => (regions: [Region])"
+    effect: pure
+    cost: cheap
+
+  # --- osm.cache / osm.ops : PBF download ------------------------------------
+  - qualified_name: osm.cache.Download
+    namespace: osm.cache
+    purpose: >-
+      Download (or return the cached) Geofabrik PBF for a fully-resolved Region;
+      idempotent with a cache_policy controlling staleness.
+    signature: "Download(region: Region, cache_policy: String = \"prefer_cache\") => (cache: OSMCache)"
+    effect: external
+    cost: expensive
+
+  - qualified_name: osm.cache.ListCachedRegions
+    namespace: osm.cache
+    purpose: List the regions currently present in the local PBF cache (no network).
+    signature: "ListCachedRegions() => (regions: [Region])"
+    effect: io
+    cost: cheap
+
+  - qualified_name: osm.ops.CacheRegion
+    namespace: osm.ops
+    purpose: Resolve a region name and download its PBF in one step (name -> OSMCache).
+    signature: "CacheRegion(region: String) => (cache: OSMCache)"
+    effect: external
+    cost: expensive
+
+  # --- osm.Source.PBF : extraction (source adapter) --------------------------
+  - qualified_name: osm.Source.PBF.ExtractCategory
+    namespace: osm.Source.PBF
+    purpose: >-
+      Cheap, cached single-category extract — the uniform Extract(category)
+      primitive returning the requested category's GeoJSON path.
+    signature: "ExtractCategory(cache: OSMCache, category: String) => (output_path: String, feature_count: Long, category: String)"
+    effect: external
+    cost: expensive  # inferred from `with Timeout(minutes = 120)`; no explicit Cost mixin
+
+  - qualified_name: osm.Source.PBF.ToGeoJson
+    namespace: osm.Source.PBF
+    purpose: >-
+      Convert an entire region PBF to GeoJSON via osmium export (every feature,
+      not one category); idempotent and cache-aware with a size gate.
+    signature: "ToGeoJson(cache: OSMCache, format: String = \"geojson\", max_pbf_mb: Long = 0) => (output_path: String, size_bytes: Long, was_cached: Boolean, skipped: Boolean)"
+    effect: external
+    cost: expensive  # inferred from `with Timeout(minutes = 180)`; no explicit Cost mixin
+
+  - qualified_name: osm.Source.PBF.ExtractAmenities
+    namespace: osm.Source.PBF
+    purpose: Extract amenities by category from a PBF file.
+    signature: "ExtractAmenities(cache: OSMCache, category: String = \"all\") => (result: AmenityFeatures)"
+    effect: external
+    cost: expensive
+
+  - qualified_name: osm.Source.PBF.ExtractRoads
+    namespace: osm.Source.PBF
+    purpose: Extract roads by classification from a PBF file.
+    signature: "ExtractRoads(cache: OSMCache, road_class: String = \"all\") => (result: RoadFeatures)"
+    effect: external
+    cost: expensive
+
+  - qualified_name: osm.Source.PBF.ExtractParks
+    namespace: osm.Source.PBF
+    purpose: Extract parks and protected areas from a PBF file.
+    signature: "ExtractParks(cache: OSMCache, park_type: String = \"all\", protect_classes: String = \"*\") => (result: ParkFeatures)"
+    effect: external
+    cost: expensive
+
+  - qualified_name: osm.Source.PBF.ExtractRoutes
+    namespace: osm.Source.PBF
+    purpose: Extract routes by transport type from a PBF file.
+    signature: "ExtractRoutes(cache: OSMCache, route_type: String = \"all\", network: String = \"*\", include_infrastructure: Boolean = true) => (result: RouteFeatures)"
+    effect: external
+    cost: expensive
+
+  - qualified_name: osm.Source.PBF.ExtractBuildings
+    namespace: osm.Source.PBF
+    purpose: Extract building footprints from a PBF file.
+    signature: "ExtractBuildings(cache: OSMCache, building_type: String = \"all\") => (result: BuildingFeatures)"
+    effect: external
+    cost: expensive
+
+  - qualified_name: osm.Source.PBF.ExtractPopulation
+    namespace: osm.Source.PBF
+    purpose: Extract populated places from a PBF file, optionally above a population floor.
+    signature: "ExtractPopulation(cache: OSMCache, place_type: String = \"all\", min_population: Long = 0) => (result: PopulationFilteredFeatures)"
+    effect: external
+    cost: expensive
+
+  # --- osm.Filters : tag / script / type filtering ---------------------------
+  - qualified_name: osm.Filters.ByScript
+    namespace: osm.Filters
+    purpose: >-
+      Filter a GeoJSON FeatureCollection by an arbitrary sandboxed Python
+      expression/predicate over feature/props/geom — the most expressive filter.
+    signature: "ByScript(input_path: String, script: String) => (output_path: String, feature_count: Long, total: Long)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Filters.FilterGeoJSONByOSMType
+    namespace: osm.Filters
+    purpose: Filter pre-extracted GeoJSON by OSM type and an optional exact tag key/value.
+    signature: "FilterGeoJSONByOSMType(input_path: String, osm_type: String, tag_key: String = \"\", tag_value: String = \"*\") => (result: OSMFilteredFeatures)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Filters.FilterGeoJSONByTagPrefix
+    namespace: osm.Filters
+    purpose: Filter GeoJSON to features whose tag value starts with a prefix (e.g. ref family).
+    signature: "FilterGeoJSONByTagPrefix(input_path: String, tag_key: String, value_prefix: String) => (result: OSMFilteredFeatures)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Filters.FilterGeoJSONByTagContains
+    namespace: osm.Filters
+    purpose: Filter GeoJSON to features whose tag value contains a substring.
+    signature: "FilterGeoJSONByTagContains(input_path: String, tag_key: String, substring: String, case_sensitive: Boolean = false) => (result: OSMFilteredFeatures)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Filters.FilterGeoJSONByTagRegex
+    namespace: osm.Filters
+    purpose: Filter GeoJSON to features whose tag value matches a regular expression.
+    signature: "FilterGeoJSONByTagRegex(input_path: String, tag_key: String, pattern: String) => (result: OSMFilteredFeatures)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Filters.FilterByRadius
+    namespace: osm.Filters
+    purpose: Filter GeoJSON features by equivalent circular radius with a comparison operator.
+    signature: "FilterByRadius(input_path: String, radius: Double, unit: String = \"kilometers\", operator: String = \"gte\") => (result: FilteredFeatures)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Filters.FilterByOSMTag
+    namespace: osm.Filters
+    purpose: Filter a PBF by an OSM tag key/value, optionally restricted to an element type.
+    signature: "FilterByOSMTag(input_path: String, tag_key: String, tag_value: String = \"*\", osm_type: String = \"*\", include_dependencies: Boolean = false) => (result: OSMFilteredFeatures)"
+    effect: external
+    cost: expensive
+
+  # --- osm.Spatial : distance / topology relations ---------------------------
+  - qualified_name: osm.Spatial.WithinDistance
+    namespace: osm.Spatial
+    purpose: Keep subject features within a distance of any reference feature (ST_DWithin / "around").
+    signature: "WithinDistance(subject_path: String, reference_path: String, distance: Double, unit: String = \"miles\") => (result: SpatialResult)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Spatial.BeyondDistance
+    namespace: osm.Spatial
+    purpose: Keep subject features beyond a distance from every reference feature (the "X desert" primitive).
+    signature: "BeyondDistance(subject_path: String, reference_path: String, distance: Double, unit: String = \"miles\") => (result: SpatialResult)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Spatial.Nearest
+    namespace: osm.Spatial
+    purpose: Annotate every subject feature with the distance to its nearest reference feature (KNN).
+    signature: "Nearest(subject_path: String, reference_path: String, unit: String = \"miles\", distance: Double = 0.0) => (result: SpatialResult)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Spatial.SpatialJoin
+    namespace: osm.Spatial
+    purpose: Attach reference-layer properties onto subject features by a topological predicate (point-in-polygon join).
+    signature: "SpatialJoin(subject_path: String, reference_path: String, predicate: String = \"intersects\", prefix: String = \"ref_\", how: String = \"left\") => (result: SpatialResult)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Spatial.Buffer
+    namespace: osm.Spatial
+    purpose: Buffer every feature by a distance into polygons (service-area / coverage).
+    signature: "Buffer(input_path: String, distance: Double, unit: String = \"miles\") => (result: SpatialResult)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Spatial.Intersect
+    namespace: osm.Spatial
+    purpose: Clip each subject feature to a clip layer's geometry (geometric cookie-cutter).
+    signature: "Intersect(subject_path: String, clip_path: String) => (result: SpatialResult)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Spatial.Centroid
+    namespace: osm.Spatial
+    purpose: Replace each feature's geometry with its centroid point (preserving properties).
+    signature: "Centroid(input_path: String) => (result: SpatialResult)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Spatial.Simplify
+    namespace: osm.Spatial
+    purpose: Douglas-Peucker simplify each geometry at a metric tolerance.
+    signature: "Simplify(input_path: String, tolerance: Double, unit: String = \"meters\") => (result: SpatialResult)"
+    effect: pure
+    cost: cheap
+
+  # --- osm.Transform : combine / reduce / dissolve ---------------------------
+  - qualified_name: osm.Transform.MergeLayers
+    namespace: osm.Transform
+    purpose: Concatenate several GeoJSON layers into one FeatureCollection (the foreach-fanout aggregator).
+    signature: "MergeLayers(inputs: [String]) => (result: TransformResult)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Transform.Summarize
+    namespace: osm.Transform
+    purpose: Reduce a GeoJSON layer to an aggregate (count/sum/avg/min/max), optionally grouped by a tag.
+    signature: "Summarize(input_path: String, group_by: String = \"\", measure: String = \"\", op: String = \"count\") => (result: TransformResult)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Transform.Dissolve
+    namespace: osm.Transform
+    purpose: Dissolve features by a tag value, unioning each group's geometries into one feature.
+    signature: "Dissolve(input_path: String, group_by: String) => (result: TransformResult)"
+    effect: pure
+    cost: cheap
+
+  # --- osm.viz / osm.Tiles : rendering ---------------------------------------
+  - qualified_name: osm.viz.RenderMap
+    namespace: osm.viz
+    purpose: Generate an interactive HTML (or static PNG) map from a GeoJSON layer.
+    signature: "RenderMap(geojson_path: String, title: String = \"Map\", format: String = \"html\", width: Long = 800, height: Long = 600, color: String = \"#3388ff\") => (result: MapResult)"
+    effect: io
+    cost: cheap
+
+  - qualified_name: osm.viz.RenderLayers
+    namespace: osm.viz
+    purpose: Render multiple GeoJSON files as color-coded map layers.
+    signature: "RenderLayers(layers: [String], colors: [String], title: String = \"Map\", format: String = \"html\") => (result: MapResult)"
+    effect: io
+    cost: cheap
+
+  - qualified_name: osm.viz.RenderTiledMap
+    namespace: osm.viz
+    purpose: Render a MapLibre+PMTiles viewer over vector-tile layers (smooth pan/zoom on huge layers).
+    signature: "RenderTiledMap(tiles: [String], layer_names: [String], colors: [String], title: String = \"Tiled map\", center_lon: Double = 0.0, center_lat: Double = 20.0, zoom: Double = 2.0, basemap: String = \"dark\") => (result: MapResult)"
+    effect: io
+    cost: cheap
+
+  - qualified_name: osm.viz.RenderHeatmap
+    namespace: osm.viz
+    purpose: Render a point GeoJSON as an interactive heat-map HTML page (kernel or grid style).
+    signature: "RenderHeatmap(points: String, title: String = \"Heat map\", style: String = \"kernel\", weight_prop: String = \"\", cell_km: Double = 25.0) => (html_path: String, point_count: Long, style: String)"
+    effect: io
+    cost: cheap
+
+  - qualified_name: osm.Tiles.BuildVectorTiles
+    namespace: osm.Tiles
+    purpose: Encode a GeoJSON layer into vector tiles (PMTiles/MBTiles) via tippecanoe for scalable maps.
+    signature: "BuildVectorTiles(geojson_path: String, layer_name: String = \"features\", min_zoom: Long = 0, max_zoom: Long = 14) => (result: TileResult)"
+    effect: external
+    cost: expensive  # inferred from `with Timeout(minutes = 60)`; no explicit Cost mixin
+
+  # --- osm.Network : in-process approximate routing --------------------------
+  - qualified_name: osm.Network.BuildNetwork
+    namespace: osm.Network
+    purpose: Node freeway LineStrings into a routable in-process graph (cached directory artifact).
+    signature: "BuildNetwork(edges_path: String, snap_tolerance_m: Double = 25.0, ref_filter: String = \"\") => (result: NetworkResult)"
+    effect: pure
+    cost: moderate
+
+  - qualified_name: osm.Network.RouteMatrix
+    namespace: osm.Network
+    purpose: Compute all-pairs approximate routes over the small network (pure, no engine).
+    signature: "RouteMatrix(network_path: String, points: String) => (result: RouteMatrixResult)"
+    effect: pure
+    cost: cheap
+
+  - qualified_name: osm.Network.ApproxRoute
+    namespace: osm.Network
+    purpose: Approximate a single A->B route over the freeway network with the residual off-net gap.
+    signature: "ApproxRoute(network_path: String, from_lat: Double, from_lon: Double, to_lat: Double, to_lon: Double) => (result: ApproxRouteResult)"
+    effect: pure
+    cost: cheap
+
+  # --- osm.Routing.API : API-backed routing ----------------------------------
+  - qualified_name: osm.Routing.API.Route
+    namespace: osm.Routing.API
+    purpose: Compute a point-to-point route between two waypoints via a public routing API.
+    signature: "Route(from_lat: Double, from_lon: Double, from_name: String = \"\", to_lat: Double, to_lon: Double, to_name: String = \"\", profile: String = \"car\") => (result: PointToPointResult)"
+    effect: external
+    cost: moderate
+
+  - qualified_name: osm.Routing.API.Isochrone
+    namespace: osm.Routing.API
+    purpose: Compute an isochrone (reachability polygon) from a center point via a public API.
+    signature: "Isochrone(center_lat: Double, center_lon: Double, center_name: String = \"\", time_minutes: Long = 15, profile: String = \"car\") => (result: IsochroneResult)"
+    effect: external
+    cost: moderate
+
+  # --- osm.geocode : geocoding event facets ----------------------------------
+  - qualified_name: osm.geocode.Geocode
+    namespace: osm.geocode
+    purpose: Forward-geocode an address/place name to coordinates via OSM Nominatim.
+    signature: "Geocode(address: String) => (result: GeoCoordinate)"
+    effect: external
+    cost: cheap
+
+  - qualified_name: osm.geocode.ReverseGeocode
+    namespace: osm.geocode
+    purpose: Reverse-geocode coordinates to the nearest address/place via OSM Nominatim.
+    signature: "ReverseGeocode(lat: Double, lon: Double, zoom: Long = 18) => (result: GeoCoordinate)"
+    effect: external
+    cost: cheap
+
+  # --- osm.Population : population filtering ----------------------------------
+  - qualified_name: osm.Population.FilterByPopulation
+    namespace: osm.Population
+    purpose: Filter populated places by a minimum population and place type.
+    signature: "FilterByPopulation(input_path: String, min_population: Long, place_type: String = \"all\", operator: String = \"gte\") => (result: PopulationFilteredFeatures)"
+    effect: pure
+    cost: cheap
