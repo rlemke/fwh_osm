@@ -1,0 +1,70 @@
+// Incremental cache update via Geofabrik daily diffs (.osc.gz replication).
+//
+// `osm.cache.Download(cache_policy = "refresh")` re-pulls the WHOLE multi-GB
+// extract — heavy on Geofabrik's per-IP rate limit (a fleet-wide parallel
+// refresh got our IP temporarily blocked). Geofabrik's RECOMMENDED way to keep
+// an extract current is its per-extract replication directory (`<region>-updates/`,
+// `state.txt` + sequenced `.osc.gz` diffs): apply the day's diffs to the cached
+// PBF instead of re-downloading it. A "refresh" then transfers KB–MB per region
+// (a day of change) rather than GB, sequentially over one connection — well
+// inside fair use, and the blessed path for regular polling.
+//
+// Falls back to a full `Download(cache_policy = "refresh")` when the cached
+// extract has no replication baseline (header lacks osmosis_replication_*), or
+// is too far behind to catch up within `max_diff_mb` (the diff budget). Those
+// few stale regions take the heavy throttled path; everything current-ish stays
+// cheap.
+//
+// Prerequisites: compile with osmtypes.ffl, osmregion.ffl, osmcache_download.ffl.
+
+namespace osm.cache {
+    use osm.types
+    use osm.Region
+
+    /** Bring a region's cached PBF up to date via Geofabrik replication diffs,
+        not a full re-download.
+
+        Reads the cached extract's replication sequence from its PBF header,
+        fetches + applies the `.osc.gz` diffs since then (capped at `max_diff_mb`
+        of downloaded diff data), and finalizes the updated PBF back to the
+        cache. Returns the refreshed `OSMCache` plus how the update happened:
+
+          method = "current"  already up to date (no diffs to apply)
+                   "diff"     updated by applying replication diffs
+                   "full"     fell back to a full Download (no baseline, or the
+                              region was too far behind to finish within budget)
+
+        `applied_mb` is the diff data downloaded (≈0 for "current"; the full
+        extract size for "full"). Far lighter on Geofabrik than Download(refresh)
+        for the common case, so it is safe to fan out at modest concurrency. */
+    event facet UpdateRegion(region: Region, max_diff_mb: Long = 512) => (cache: OSMCache, method: String, applied_mb: Double) with Effect(kind = "external") with Cost(tier = "moderate")
+
+    /** Update EVERY cached region via replication diffs — the light, rate-limit-
+        friendly "update all caches". `ListCachedRegions` enumerates the cache
+        with no network; the foreach applies each region's daily diffs. Each leaf
+        transfers KB–MB (a day of change), not GB, so unlike `RefreshAllCaches`
+        (full re-pull, which got our IP blocked) this is safe to fan out across
+        the fleet. Stale-beyond-budget / baseline-less regions fall back to a full
+        download internally. The list-typed yield-merge collects the updated
+        paths. */
+    workflow UpdateAllCaches(max_diff_mb: Long = 512) => (updated: [String]) andThen {
+        cached = osm.cache.ListCachedRegions()
+    } andThen foreach r in cached.regions {
+        upd = osm.cache.UpdateRegion(region = $.r, max_diff_mb = $.max_diff_mb)
+        yield UpdateAllCaches(updated = [upd.cache.path])
+    }
+
+    /** Update an explicit list of regions via diffs. `expand` (default
+        "subregions") turns a parent name into its leaf extracts. The diff-based
+        counterpart of `RefreshRegionCaches`. */
+    workflow UpdateRegionCaches(
+        region_names: [String] = ["north-america"],
+        expand: String = "subregions",
+        max_diff_mb: Long = 512
+    ) => (updated: [String]) andThen {
+        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = $.expand)
+    } andThen foreach r in resolved.regions {
+        upd = osm.cache.UpdateRegion(region = $.r, max_diff_mb = $.max_diff_mb)
+        yield UpdateRegionCaches(updated = [upd.cache.path])
+    }
+}

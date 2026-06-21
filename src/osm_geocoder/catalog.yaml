@@ -22,6 +22,19 @@ version: 1
 package: osm-geocoder
 
 workflows:
+  # --- Cache maintenance -----------------------------------------------------
+  - qualified_name: osm.cache.UpdateAllCaches
+    summary: >-
+      Bring EVERY cached region up to date via Geofabrik replication diffs (the
+      light, rate-limit-friendly "update all caches"). Enumerates the cache with
+      no network, then applies each region's daily diffs in parallel — KB–MB per
+      region, not GB. The safe-to-fan-out counterpart of RefreshAllCaches (full
+      re-pull). Use for "refresh/update the OSM cache".
+    tags: [cache, update, refresh, replication, diff, maintenance, fanout]
+    entry_point: true
+    param_schema:
+      max_diff_mb: "Long"
+
   # --- Heat maps (the canonical composable-facet demo) -----------------------
   - qualified_name: osm.heatmap.ContinentHeatmap
     summary: >-
@@ -351,6 +364,17 @@ facets:
     signature: "Download(region: Region, cache_policy: String = \"prefer_cache\") => (cache: OSMCache)"
     effect: external
     cost: expensive
+
+  - qualified_name: osm.cache.UpdateRegion
+    namespace: osm.cache
+    purpose: >-
+      Bring a region's cached PBF up to date via Geofabrik replication diffs
+      (.osc.gz) instead of a full re-download — KB–MB per region, rate-limit
+      friendly. Falls back to a full download when there's no replication
+      baseline or the extract is too far behind the diff budget.
+    signature: "UpdateRegion(region: Region, max_diff_mb: Long = 512) => (cache: OSMCache, method: String, applied_mb: Double)"
+    effect: external
+    cost: moderate
 
   - qualified_name: osm.cache.ListCachedRegions
     namespace: osm.cache
