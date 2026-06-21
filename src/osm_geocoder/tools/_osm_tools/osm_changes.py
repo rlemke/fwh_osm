@@ -2,47 +2,72 @@
 
 Tool side of ``osm.Change.ExtractChanges``. Reuses the replication API used by
 ``pbf_update`` (``ReplicationServer.collect_diffs``) but, instead of applying the
-diffs to the cached PBF, surfaces them: which features were added / modified /
-deleted since a sequence/date.
+diffs to the cached PBF for a fresh extract, SURFACES them: which features were
+added / modified / deleted since a sequence/date.
 
-Split so the pure classification (diff objects -> GeoJSON FeatureCollections) is
-unit-tested offline, and only the network/IO reads are the seams:
+Geometry is built by the SAME engine the static extractors trust — the ``osmium``
+CLI's area assembler — rather than hand-rolled from node refs. A replication diff
+ships only node refs (ways) and member lists (relations), not coordinates, so we:
 
-  - ``_collect_changes``  THE NETWORK SEAM (mocked in tests): resolves the start
-    sequence and reads the merged change buffer into ``ChangeObj`` records.
-  - ``_resolve_way_node_locations``  THE BASE-SCAN IO SEAM (mocked in tests):
-    given the localized base PBF and the set of node ids referenced by changed
-    ways, scans the base PBF ONCE collecting locations for ONLY those ids.
-  - ``classify_changes``  pure: ChangeObj records + a node-location map ->
+  1. persist the collected diff to a local ``.osc.gz`` (``_collect_changes``),
+  2. ``osmium apply-changes`` it onto the cached base PBF -> the new state,
+  3. ``osmium getid -r`` the changed way/relation ids (recursively pulling their
+     member ways + nodes) -> a tiny subset PBF,
+  4. ``osmium export -a type,id`` the subset -> GeoJSON stamped with @type/@id,
+     deduped preferring the area interpretation.
+
+This yields correct Point / LineString / Polygon / MultiPolygon for nodes / ways /
+relations (including multipolygon holes and proper area-vs-line determination —
+a closed ``highway`` is a LineString, a closed ``building`` is a Polygon), keyed
+back to the change records by osm id.
+
+Split so the pure classification (diff objects + a geometry map -> GeoJSON
+FeatureCollections) is unit-tested offline, and only the network/CLI reads are
+seams:
+
+  - ``_collect_changes``   THE NETWORK SEAM (mocked in tests): resolves the start
+    sequence, reads the merged change buffer into ``ChangeObj`` records, and
+    writes the same changes to a local ``.osc.gz`` for the geometry pass.
+  - ``_assemble_geometry``  THE CLI/IO SEAM (mocked in tests): apply-changes ->
+    getid -r -> export, returning ``{(osm_type, osm_id): geometry}`` for the
+    changed ways/relations.
+  - ``classify_changes``  pure: ChangeObj records + a geometry map ->
     {added, modified, deleted} FeatureCollections + counts.
 
-Geometry:
-  - NODE changes -> Point (the POI case).
-  - WAY changes -> LineString (open way) or Polygon (closed/area way). A diff's
-    way object carries only its node REF list, not coordinates; coordinates are
-    resolved from (a) any changed nodes in the same diff and (b) a filtered
-    one-pass scan of the localized BASE cached PBF for the referenced ids. A way
-    whose nodes can't all be resolved is emitted with null geometry (still
-    identifies osm_id + change_type), never a crash.
-  - RELATION changes are counted only — their geometry (member resolution across
-    nodes/ways/nested relations) is a separate, bigger problem and a follow-up.
+Geometry degrades gracefully: a way/relation whose geometry can't be assembled
+(base PBF not cached, or osmium can't build it) is emitted with null geometry —
+it still identifies osm_id + change_type, never a crash. Deleted objects always
+carry null geometry (they no longer exist in the new state).
 """
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from typing import Any
 
 from .pbf_download import GEOFABRIK_BASE
+
+# The osmium CLI (already a hard dependency of the static extractors). Overridable
+# for hosts where it isn't on PATH.
+_OSMIUM_BIN = os.environ.get("AFL_OSMIUM_BIN", "osmium")
+
+# Type char <-> osmium @type, and the id-token form osmium getid -i expects.
+_TYPE_CHAR = {"node": "n", "way": "w", "relation": "r"}
+_AREA_GEOMS = {"Polygon", "MultiPolygon"}
 
 
 @dataclass
 class ChangeObj:
     """One changed OSM object from a replication diff.
 
-    Nodes carry ``lat``/``lon`` (their new coords). Ways carry ``nodes`` — the
-    ordered list of referenced node ids — but no coordinates (a replication diff
-    does not ship a way's node coordinates); those are resolved separately.
+    Nodes carry ``lat``/``lon`` (their new coords). Ways and relations carry no
+    coordinates in a diff — their geometry is assembled by ``_assemble_geometry``
+    from the diff-applied base extract and keyed back here by ``osm_id``.
     """
     osm_type: str          # "node" | "way" | "relation"
     osm_id: int
@@ -50,7 +75,6 @@ class ChangeObj:
     visible: bool
     lat: float | None = None
     lon: float | None = None
-    nodes: list[int] = field(default_factory=list)   # way node refs (ordered)
     tags: dict[str, str] = field(default_factory=dict)
 
 
@@ -60,40 +84,15 @@ def _change_type(c: ChangeObj) -> str:
     return "added" if c.version <= 1 else "modified"
 
 
-def _node_feature(c: ChangeObj, change_type: str) -> dict[str, Any]:
-    geometry = None
+def _node_geometry(c: ChangeObj) -> dict[str, Any] | None:
     if c.lat is not None and c.lon is not None:
-        geometry = {"type": "Point", "coordinates": [c.lon, c.lat]}
+        return {"type": "Point", "coordinates": [c.lon, c.lat]}
+    return None
+
+
+def _feature(c: ChangeObj, change_type: str, geometry: dict[str, Any] | None) -> dict[str, Any]:
     props = dict(c.tags)
-    props.update(osm_id=c.osm_id, osm_type="node", change_type=change_type, version=c.version)
-    return {"type": "Feature", "geometry": geometry, "properties": props}
-
-
-def _way_geometry(refs: list[int], node_locs: dict[int, tuple[float, float]]) -> dict[str, Any] | None:
-    """Build LineString/Polygon geometry for a way from resolved node coords.
-
-    Closed ring (first ref == last ref, >= 4 refs) -> Polygon; otherwise
-    LineString. Returns ``None`` if any referenced node is unresolved or there
-    are too few points to form a geometry.
-    """
-    if len(refs) < 2:
-        return None
-    try:
-        coords = [[node_locs[r][0], node_locs[r][1]] for r in refs]
-    except KeyError:
-        return None  # at least one node could not be resolved
-    is_closed = len(refs) >= 4 and refs[0] == refs[-1]
-    if is_closed:
-        return {"type": "Polygon", "coordinates": [coords]}
-    return {"type": "LineString", "coordinates": coords}
-
-
-def _way_feature(c: ChangeObj, change_type: str,
-                 node_locs: dict[int, tuple[float, float]]) -> dict[str, Any]:
-    # Deleted ways carry no node refs in the diff -> null geometry (id only).
-    geometry = _way_geometry(c.nodes, node_locs) if c.visible and c.nodes else None
-    props = dict(c.tags)
-    props.update(osm_id=c.osm_id, osm_type="way", change_type=change_type, version=c.version)
+    props.update(osm_id=c.osm_id, osm_type=c.osm_type, change_type=change_type, version=c.version)
     return {"type": "Feature", "geometry": geometry, "properties": props}
 
 
@@ -101,47 +100,53 @@ def _fc(features: list[dict]) -> dict[str, Any]:
     return {"type": "FeatureCollection", "features": features}
 
 
-def needed_way_node_ids(changes: list[ChangeObj]) -> set[int]:
-    """Pure: the set of node ids referenced by visible changed ways.
+def changed_geometry_tokens(changes: list[ChangeObj]) -> list[str]:
+    """Pure: id tokens (``w<id>`` / ``r<id>``) for visible added/modified ways &
+    relations — the objects whose geometry must be assembled from the base extract.
 
-    Used to drive the filtered base-PBF scan (so the scan resolves ONLY the
-    nodes actually needed by changed-way geometry, not a full node index).
+    Deleted objects (gone in the new state) and nodes (geometry inline) are
+    excluded, so an all-node diff yields ``[]`` and the handler skips the
+    expensive osmium pass entirely.
     """
-    needed: set[int] = set()
+    tokens: list[str] = []
     for c in changes:
-        if c.osm_type == "way" and c.visible:
-            needed.update(c.nodes)
-    return needed
+        if c.visible and c.osm_type in ("way", "relation") and _change_type(c) in ("added", "modified"):
+            tokens.append(_TYPE_CHAR[c.osm_type] + str(c.osm_id))
+    return tokens
 
 
 def classify_changes(changes: list[ChangeObj],
-                     node_locs: dict[int, tuple[float, float]] | None = None) -> dict[str, Any]:
+                     geom_map: dict[tuple[str, int], dict[str, Any]] | None = None) -> dict[str, Any]:
     """Pure: bucket changed objects into added/modified/deleted FeatureCollections.
 
-    ``node_locs`` maps node id -> (lon, lat) and is used to assemble changed-way
-    geometry (it should already include both the diff's own changed nodes and the
-    unchanged referenced nodes resolved from the base extract). Nodes resolve
-    their own coordinates from the ChangeObj.
+    ``geom_map`` maps ``(osm_type, osm_id) -> geometry`` for ways/relations (built
+    by ``_assemble_geometry``). Nodes resolve their own Point geometry inline from
+    the ChangeObj. A way/relation absent from ``geom_map`` (or any deleted object)
+    gets null geometry but still identifies its osm_id + change_type.
 
-    Returns ``{"added": FC, "modified": FC, "deleted": FC, "counts": {...}}``.
-    Node and way changes become features (way geometry may be null if
-    unresolvable); relation changes are counted only.
+    Returns ``{"added": FC, "modified": FC, "deleted": FC, "counts": {...}}`` —
+    node, way AND relation changes become features.
     """
-    node_locs = node_locs or {}
+    geom_map = geom_map or {}
     buckets: dict[str, list[dict]] = {"added": [], "modified": [], "deleted": []}
     way_counts = {"added": 0, "modified": 0, "deleted": 0}
-    rels = 0
+    rel_counts = {"added": 0, "modified": 0, "deleted": 0}
     for c in changes:
-        if c.osm_type == "relation":
-            rels += 1
-            continue
         ct = _change_type(c)
-        if c.osm_type == "way":
-            buckets[ct].append(_way_feature(c, ct, node_locs))
+        if c.osm_type == "node":
+            geom = _node_geometry(c) if c.visible else None
+        elif c.osm_type == "way":
+            geom = geom_map.get(("way", c.osm_id)) if c.visible else None
             way_counts[ct] += 1
+        elif c.osm_type == "relation":
+            geom = geom_map.get(("relation", c.osm_id)) if c.visible else None
+            rel_counts[ct] += 1
         else:
-            buckets[ct].append(_node_feature(c, ct))
-    ways_total = way_counts["added"] + way_counts["modified"] + way_counts["deleted"]
+            continue
+        buckets[ct].append(_feature(c, ct, geom))
+
+    ways_total = sum(way_counts.values())
+    rels_total = sum(rel_counts.values())
     return {
         "added": _fc(buckets["added"]),
         "modified": _fc(buckets["modified"]),
@@ -154,7 +159,10 @@ def classify_changes(changes: list[ChangeObj],
             "ways_modified": way_counts["modified"],
             "ways_deleted": way_counts["deleted"],
             "ways_changed": ways_total,
-            "relations_changed": rels,
+            "relations_added": rel_counts["added"],
+            "relations_modified": rel_counts["modified"],
+            "relations_deleted": rel_counts["deleted"],
+            "relations_changed": rels_total,
         },
     }
 
@@ -163,42 +171,81 @@ def _updates_url(region_path: str) -> str:
     return f"{GEOFABRIK_BASE}/{region_path.strip('/')}-updates/"
 
 
-def _resolve_way_node_locations(local_pbf: str,
-                                needed_ids: set[int]) -> dict[int, tuple[float, float]]:
-    """Resolve node id -> (lon, lat) for ``needed_ids`` from the BASE extract.
+def _parse_export(geojsonseq: str, wanted: set[str]) -> dict[tuple[str, int], dict[str, Any]]:
+    """Parse ``osmium export -a type,id`` GeoJSONSeq into ``{(type, id): geometry}``.
 
-    THE BASE-SCAN IO SEAM. Scans the localized base PBF ONCE, keeping only the
-    locations of nodes whose id is in ``needed_ids`` (the nodes referenced by
-    changed ways that were NOT themselves changed in the diff). This is a
-    filtered, memory-bounded pass — it stores at most ``len(needed_ids)``
-    coordinates, NOT a full all-nodes index.
-
-    Returns an empty map when there is nothing to resolve.
+    Keeps only features whose id token is in ``wanted`` (``getid -r`` also emits
+    tagged member ways of changed relations — we drop those). When osmium emits
+    both a line and an area for the same id (a closed area-tagged way), the area
+    interpretation wins.
     """
-    if not needed_ids or not local_pbf:
+    result: dict[tuple[str, int], dict[str, Any]] = {}
+    for line in geojsonseq.splitlines():
+        line = line.strip().lstrip("\x1e")  # RS-delimited geojsonseq
+        if not line:
+            continue
+        try:
+            feat = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        props = feat.get("properties") or {}
+        otype = props.get("@type")
+        oid = props.get("@id")
+        geom = feat.get("geometry")
+        if otype not in ("way", "relation") or oid is None or geom is None:
+            continue
+        token = _TYPE_CHAR[otype] + str(oid)
+        if token not in wanted:
+            continue
+        key = (otype, int(oid))
+        prev = result.get(key)
+        if prev is None or (geom.get("type") in _AREA_GEOMS and prev.get("type") not in _AREA_GEOMS):
+            result[key] = geom
+    return result
+
+
+def _assemble_geometry(base_pbf: str, osc_path: str,
+                       id_tokens: list[str]) -> dict[tuple[str, int], dict[str, Any]]:
+    """THE CLI/IO SEAM: build geometry for changed ways/relations via osmium.
+
+    apply-changes (diff onto the cached base) -> getid -r (changed ids + their
+    members) -> export (-a type,id). Returns ``{(osm_type, osm_id): geometry}``;
+    empty on any missing input or osmium failure (caller falls back to null
+    geometry, never crashes the whole extraction).
+    """
+    if not id_tokens or not base_pbf or not osc_path or not os.path.exists(osc_path):
         return {}
-    # pragma: no cover  (osmium base-PBF scan — finalize against installed pyosmium)
-    import osmium
+    work = tempfile.mkdtemp(prefix="osmchg-geom-")
+    try:
+        new_state = os.path.join(work, "new_state.osm.pbf")
+        subset = os.path.join(work, "subset.osm.pbf")
+        idfile = os.path.join(work, "ids.txt")
+        with open(idfile, "w") as f:
+            f.write("\n".join(id_tokens) + "\n")
 
-    needed = needed_ids  # local ref for the closure
-    locs: dict[int, tuple[float, float]] = {}
+        def _run(args: list[str]) -> subprocess.CompletedProcess:
+            return subprocess.run([_OSMIUM_BIN, *args], check=True,
+                                  capture_output=True, text=True)
 
-    class _NodeScan(osmium.SimpleHandler):
-        def node(self, n):
-            if n.id in needed:
-                loc = n.location
-                if loc.valid():
-                    locs[n.id] = (loc.lon, loc.lat)
-
-    # Node-only pass: no locations=True needed (nodes carry their own coords),
-    # so osmium builds no location index at all — bounded by len(needed_ids).
-    _NodeScan().apply_file(local_pbf)
-    return locs
+        _run(["apply-changes", base_pbf, osc_path, "-o", new_state, "--overwrite"])
+        _run(["getid", "-r", "-i", idfile, new_state, "-o", subset, "--overwrite"])
+        exported = _run(["export", "-a", "type,id", "-f", "geojsonseq", subset])
+        return _parse_export(exported.stdout, set(id_tokens))
+    except (OSError, subprocess.SubprocessError):
+        # osmium not on PATH / build failure -> degrade to null geometry.
+        return {}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def _collect_changes(region_path: str, since: str, max_diff_mb: int,
-                     local_pbf: str | None) -> tuple[int, list[ChangeObj]]:
-    """Resolve the start sequence and read changes since it. THE NETWORK SEAM.
+                     local_pbf: str | None) -> tuple[int, list[ChangeObj], str | None]:
+    """Resolve the start sequence, read changes, and persist them. THE NETWORK SEAM.
+
+    Returns ``(start_sequence, changes, osc_path)``. ``osc_path`` is a local
+    ``.osc.gz`` of the collected diff (for the geometry pass) inside a fresh temp
+    dir the CALLER must clean up (``shutil.rmtree(os.path.dirname(osc_path))``);
+    it is ``None`` when there were no changes.
 
     Start sequence: ``since`` is an ISO date, a sequence number, or "" (= the
     cached extract's own replication sequence, read from ``local_pbf``'s header).
@@ -228,12 +275,16 @@ def _collect_changes(region_path: str, since: str, max_diff_mb: int,
 
         result = server.collect_diffs(start, max_size=max_diff_mb * 1024)
         if result is None:
-            return start, []
+            return start, [], None
 
         collected: list[ChangeObj] = []
+        work = tempfile.mkdtemp(prefix="osmchg-osc-")
+        osc_path = os.path.join(work, "changes.osc.gz")
+        writer = osmium.SimpleWriter(osc_path)
 
         class _Reader(osmium.SimpleHandler):
             def node(self, n):
+                writer.add_node(n)
                 loc = n.location if n.visible else None
                 collected.append(ChangeObj(
                     "node", n.id, n.version, n.visible,
@@ -242,19 +293,19 @@ def _collect_changes(region_path: str, since: str, max_diff_mb: int,
                     tags={t.k: t.v for t in n.tags}))
 
             def way(self, w):
-                # The diff carries the way's node REF list but no coordinates;
-                # capture refs here and resolve coords from changed nodes + the
-                # base extract (see _resolve_way_node_locations).
-                refs = [n.ref for n in w.nodes] if w.visible else []
+                writer.add_way(w)
                 collected.append(ChangeObj(
                     "way", w.id, w.version, w.visible,
-                    nodes=refs,
                     tags={t.k: t.v for t in w.tags}))
 
             def relation(self, r):
-                collected.append(ChangeObj("relation", r.id, r.version, r.visible))
+                writer.add_relation(r)
+                collected.append(ChangeObj(
+                    "relation", r.id, r.version, r.visible,
+                    tags={t.k: t.v for t in r.tags}))
 
         result.reader.apply(_Reader())
-        return start, collected
+        writer.close()
+        return start, collected, osc_path
     finally:
         server.close()
