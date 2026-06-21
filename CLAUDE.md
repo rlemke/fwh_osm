@@ -156,6 +156,30 @@ filtering the full PBF per query.
   Scans that include a way/area/relation plugin keep `locations=True` and no
   filter (member nodes are needed for geometry).
 
+### Updating the cache — diffs, not full re-pulls (Geofabrik rate limits)
+
+Geofabrik rate-limits per IP: a fleet-wide parallel full re-download trips a
+temporary block (a 255-wide `RefreshAllCaches` fan-out got our shared egress IP
+blocked — `Connection refused` to `download.geofabrik.de` for hours, while the
+rest of the internet was fine). So there are two update paths:
+
+- **`osm.cache.UpdateRegion(region, max_diff_mb=512)` / `UpdateAllCaches` /
+  `UpdateRegionCaches` — the DEFAULT for "update the cache".** Applies Geofabrik's
+  daily replication diffs (`<region>-updates/` `.osc.gz`) to the cached PBF via
+  the pyosmium 4.x API (`osmium.replication.get_replication_header` +
+  `ReplicationServer.apply_diffs_to_file`). Transfers KB–MB per region (a day of
+  change), sequentially — the recommended, rate-limit-friendly path, safe to fan
+  out across the fleet. `method` returns `current` / `diff` / `full`; it falls
+  back to a full `Download(refresh)` only when an extract has no replication
+  baseline in its header or is too far behind the diff budget.
+- **`osm.cache.RefreshAllCaches` / `RefreshRegionCaches` (`Download` with
+  `cache_policy="refresh"`) — full re-pull. Heavy; rate-limit-dangerous at high
+  fan-out.** Use only for a deliberate from-scratch refresh, and throttle it
+  (low concurrency) — do NOT fan it out 200-wide.
+
+Rule of thumb: **to keep the cache current, use `UpdateAllCaches` (diffs); reserve
+the full-download `Refresh*` workflows for re-establishing extracts.**
+
 ### Composable facet library
 
 Beyond the source adapters, this package ships a layered library of orthogonal,
