@@ -180,6 +180,16 @@ rest of the internet was fine). So there are two update paths:
 Rule of thumb: **to keep the cache current, use `UpdateAllCaches` (diffs); reserve
 the full-download `Refresh*` workflows for re-establishing extracts.**
 
+The same replication machinery also powers **change detection** —
+`osm.Change.ExtractChanges(region, since="", max_diff_mb=512) => ChangeSet`
+surfaces the features *added / modified / deleted* since a date/sequence (or the
+cache's own replication timestamp) as GeoJSON, instead of applying the diffs.
+The "what's new/removed this month" feed. v1 emits NODE changes (POIs) with
+Point geometry; way/relation changes are counted (their geometry needs a
+base-extract node-location index — a follow-up). Both `UpdateRegion` and
+`ExtractChanges` read `ReplicationServer.collect_diffs` (pyosmium 4.x), so both
+depend on Geofabrik replication reachability.
+
 ### Composable facet library
 
 Beyond the source adapters, this package ships a layered library of orthogonal,
