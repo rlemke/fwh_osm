@@ -26,6 +26,7 @@ import hashlib
 import logging
 import os
 import http.client
+import random
 import threading
 import time
 import urllib.error
@@ -33,7 +34,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC
-from email.utils import parsedate_to_datetime
+from email.utils import format_datetime, parsedate_to_datetime
 from typing import Any
 
 try:
@@ -41,12 +42,18 @@ try:
 except ImportError:  # pragma: no cover - optional, only needed for bulk streaming
     requests = None
 
-from _osm_tools import sidecar
+from _osm_tools import download_gate, sidecar
 from _osm_tools.storage import LocalStorage, Storage, get_storage, local_staging_subdir
 
 NAMESPACE = "osm"
 CACHE_TYPE = "pbf"
-GEOFABRIK_BASE = "https://download.geofabrik.de"
+# Extract + replication base URL. Defaults to Geofabrik; override with
+# AFL_GEOFABRIK_BASE_URL to point at a mirror or internal cache (e.g. when
+# Geofabrik rate-limits/bans the fleet's egress IP). Every download / .md5 /
+# replication-diff URL derives from this, so one env var reroutes them all.
+GEOFABRIK_BASE = os.environ.get(
+    "AFL_GEOFABRIK_BASE_URL", "https://download.geofabrik.de"
+).rstrip("/")
 USER_AGENT = "facetwork-osm-geocoder/1.0 (OSM PBF downloader)"
 
 logger = logging.getLogger(__name__)
@@ -129,10 +136,30 @@ def _use_cache_if_present() -> bool:
 
 
 def fetch_md5(url: str) -> str:
-    """Fetch Geofabrik's ``.md5`` file for ``url``; return the hex digest."""
+    """Fetch Geofabrik's ``.md5`` file for ``url``; return the hex digest.
+
+    Retries on HTTP 429 / 503 (rate-limited), honouring ``Retry-After`` with a
+    jittered sleep, within RATE_LIMIT_MAX_ATTEMPTS — instead of bubbling up an
+    HTTPError the first time the shared IP gets throttled.
+    """
     md5_url = url + ".md5"
-    with urllib.request.urlopen(_request(md5_url), timeout=30) as resp:
-        body = resp.read().decode("utf-8").strip()
+    attempt = 0
+    while True:
+        try:
+            with urllib.request.urlopen(_request(md5_url), timeout=30) as resp:
+                body = resp.read().decode("utf-8").strip()
+            break
+        except urllib.error.HTTPError as exc:
+            if exc.code in (429, 503) and attempt < RATE_LIMIT_MAX_ATTEMPTS:
+                attempt += 1
+                delay = _retry_after_sleep(getattr(exc, "headers", None), attempt)
+                logger.warning(
+                    "Rate-limited (HTTP %d) fetching %s; retry %d/%d after %.1fs.",
+                    exc.code, md5_url, attempt, RATE_LIMIT_MAX_ATTEMPTS, delay,
+                )
+                time.sleep(delay)
+                continue
+            raise
     parts = body.split()
     if not parts or len(parts[0]) != 32:
         raise DownloadError(f"Unexpected .md5 body from {md5_url}: {body!r}")
@@ -175,6 +202,57 @@ def head_last_modified(url: str) -> str | None:
     return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _http_to_last_modified_header(iso_ts: str | None) -> str | None:
+    """Render a sidecar ISO-8601 UTC timestamp as an RFC-1123 HTTP-date for
+    ``If-Modified-Since``, or ``None`` if it can't be parsed."""
+    if not iso_ts:
+        return None
+    try:
+        dt = __import__("datetime").datetime.strptime(iso_ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except (TypeError, ValueError):
+        return None
+    return format_datetime(dt, usegmt=True)
+
+
+def revalidate_not_modified(url: str, cached_last_modified: str | None) -> bool:
+    """Conditional GET: return ``True`` iff the upstream is unchanged (HTTP 304).
+
+    Sends ``If-Modified-Since: <cached Last-Modified>``. A 304 means the cached
+    artifact is still current and the (multi-GB) re-download can be skipped. Any
+    other status, or a network/parse failure, returns ``False`` so the caller
+    falls through to a normal revalidation. Honours 429/503 Retry-After so a
+    rate-limited revalidation backs off rather than erroring.
+    """
+    ims = _http_to_last_modified_header(cached_last_modified)
+    if not ims:
+        return False
+    attempt = 0
+    while True:
+        req = urllib.request.Request(
+            url, headers={"User-Agent": USER_AGENT, "If-Modified-Since": ims}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                # A 2xx body means changed (we won't read it here); not-modified
+                # surfaces as a 304 HTTPError below in urllib.
+                return getattr(resp, "status", 200) == 304
+        except urllib.error.HTTPError as exc:
+            if exc.code == 304:
+                return True
+            if exc.code in (429, 503) and attempt < RATE_LIMIT_MAX_ATTEMPTS:
+                attempt += 1
+                delay = _retry_after_sleep(getattr(exc, "headers", None), attempt)
+                logger.warning(
+                    "Rate-limited (HTTP %d) revalidating %s; retry %d/%d after %.1fs.",
+                    exc.code, url, attempt, RATE_LIMIT_MAX_ATTEMPTS, delay,
+                )
+                time.sleep(delay)
+                continue
+            return False
+        except urllib.error.URLError:
+            return False
+
+
 def _already_cached(
     rel_path: str,
     expected_md5: str,
@@ -210,6 +288,63 @@ CONNECT_TIMEOUT_SECONDS = 30
 # restarts from zero and the file never lands. 50 resumes comfortably covers a
 # 30GB transfer that drops every couple GB. Tunable via AFL_OSM_RESUME_MAX_ATTEMPTS.
 RESUME_MAX_ATTEMPTS = int(os.environ.get("AFL_OSM_RESUME_MAX_ATTEMPTS") or 50)
+
+# Max seconds we'll honour an upstream Retry-After before capping. Geofabrik (or
+# a fronting CDN) returns 429 / 503 with a Retry-After when our shared egress IP
+# is being rate-limited; we sleep that long (+jitter) and retry rather than
+# hammering (which is what got the IP banned). A pathological Retry-After (hours)
+# is capped so a single request doesn't wedge the whole task. Tunable.
+RETRY_AFTER_CAP_SECONDS = int(os.environ.get("AFL_OSM_RETRY_AFTER_CAP_SECONDS") or 300)
+# How many times a small request (md5 fetch, HEAD-less GET) retries a 429/503
+# before giving up. Big streaming downloads use RESUME_MAX_ATTEMPTS instead.
+RATE_LIMIT_MAX_ATTEMPTS = int(os.environ.get("AFL_OSM_RATE_LIMIT_MAX_ATTEMPTS") or 6)
+
+
+def _jittered(seconds: float, *, frac: float = 0.25) -> float:
+    """``seconds`` perturbed by +/- ``frac`` so a fleet's retries don't sync up
+    into a thundering herd against a rate-limited origin."""
+    if seconds <= 0:
+        return 0.0
+    return seconds * (1.0 + random.uniform(-frac, frac))
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Parse an HTTP ``Retry-After`` header (delta-seconds OR an HTTP-date) to a
+    non-negative seconds-from-now float, or ``None`` if absent/unparseable."""
+    if not value:
+        return None
+    value = value.strip()
+    if value.isdigit():
+        return float(value)
+    try:
+        dt = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    delta = (dt - __import__("datetime").datetime.now(UTC)).total_seconds()
+    return max(0.0, delta)
+
+
+def _retry_after_sleep(headers: Any, attempt: int) -> float:
+    """Seconds to wait before retrying a rate-limited (429/503) response.
+
+    Honours an explicit ``Retry-After`` (capped at RETRY_AFTER_CAP_SECONDS),
+    else falls back to capped exponential backoff. Always jittered.
+    """
+    ra = None
+    try:
+        ra = _parse_retry_after(headers.get("Retry-After")) if headers is not None else None
+    except Exception:
+        ra = None
+    if ra is not None:
+        base = min(ra, RETRY_AFTER_CAP_SECONDS)
+    else:
+        base = min(RETRY_AFTER_CAP_SECONDS, 2 ** min(attempt, 6))
+    return _jittered(base)
+
 
 # Transient transport errors that warrant a Range-resume rather than a hard fail.
 _RESUMABLE_ERRORS: tuple[type[BaseException], ...] = (
@@ -285,6 +420,24 @@ def _download_resumable(
                     ) as resp:
                         if resp.status_code == 416:
                             break
+                        if resp.status_code in (429, 503):
+                            # Rate-limited by Geofabrik/CDN (shared egress IP).
+                            # Back off per Retry-After (+jitter) and retry within
+                            # the resume budget instead of hammering.
+                            attempt += 1
+                            if attempt > RESUME_MAX_ATTEMPTS:
+                                raise DownloadError(
+                                    f"{label}: still rate-limited (HTTP "
+                                    f"{resp.status_code}) after {attempt} attempts"
+                                )
+                            delay = _retry_after_sleep(resp.headers, attempt)
+                            logger.warning(
+                                "Rate-limited (HTTP %d) on %s; backing off %.1fs "
+                                "(attempt %d/%d).",
+                                resp.status_code, label, delay, attempt, RESUME_MAX_ATTEMPTS,
+                            )
+                            time.sleep(delay)
+                            continue
                         if have > 0 and resp.status_code == 200:
                             # Mirror ignored Range — body is the whole file. Reset.
                             writer.seek(0)
@@ -328,6 +481,23 @@ def _download_resumable(
             except urllib.error.HTTPError as exc:
                 if exc.code == 416:
                     break
+                if exc.code in (429, 503):
+                    # Rate-limited (shared egress IP). Honour Retry-After +jitter
+                    # and retry within the resume budget rather than failing.
+                    attempt += 1
+                    if attempt > RESUME_MAX_ATTEMPTS:
+                        raise DownloadError(
+                            f"{label}: still rate-limited (HTTP {exc.code}) "
+                            f"after {attempt} attempts"
+                        ) from exc
+                    delay = _retry_after_sleep(getattr(exc, "headers", None), attempt)
+                    logger.warning(
+                        "Rate-limited (HTTP %d) on %s; backing off %.1fs "
+                        "(attempt %d/%d).",
+                        exc.code, label, delay, attempt, RESUME_MAX_ATTEMPTS,
+                    )
+                    time.sleep(delay)
+                    continue
                 raise
             except _RESUMABLE_ERRORS as exc:
                 attempt += 1
@@ -346,7 +516,7 @@ def _download_resumable(
                     "(attempt %d/%d): %s",
                     label, have, attempt, RESUME_MAX_ATTEMPTS, exc,
                 )
-                time.sleep(min(30, 2 ** min(attempt, 5)))
+                time.sleep(_jittered(min(30, 2 ** min(attempt, 5))))
                 continue
             # Stream ended without raising. If the server closed early (clean
             # short read), resume the remainder; otherwise we're done.
@@ -493,6 +663,35 @@ def download_region(
                     sidecar=side,
                 )
 
+        # Conditional GET (revalidate): the upstream md5 changed (Geofabrik's
+        # daily rebuild) so the cache *looks* stale, but the actual extract may
+        # be byte-identical. Before re-downloading gigabytes, ask the origin with
+        # If-Modified-Since against the cached Last-Modified; a 304 means the
+        # cached artifact is still current and we skip the transfer entirely.
+        # Only when we have a cached entry to revalidate (an artifact on disk).
+        if not force and is_region_cached(region, storage=storage):
+            cached_side = sidecar_entry_for(region, storage=storage) or {}
+            cached_lm = cached_side.get("source", {}).get("source_timestamp")
+            if revalidate_not_modified(url, cached_lm):
+                source = cached_side.get("source", {})
+                logger.info(
+                    "Revalidated %s via If-Modified-Since (HTTP 304); cache is current.",
+                    region,
+                )
+                return DownloadResult(
+                    region=region,
+                    path=cache_file,
+                    relative_path=rel_path,
+                    source_url=source.get("url", url),
+                    size_bytes=cached_side.get("size_bytes", storage.size(cache_file)),
+                    sha256=cached_side.get("sha256", ""),
+                    md5=source.get("source_checksum", {}).get("value", expected_md5 or ""),
+                    source_timestamp=source.get("source_timestamp"),
+                    downloaded_at=source.get("downloaded_at", ""),
+                    was_cached=True,
+                    sidecar=cached_side,
+                )
+
         # Stage onto local disk first so socket-read rate is decoupled from
         # destination write rate (matters when dst is a slow network volume).
         # The download resumes via HTTP Range across mid-stream drops rather
@@ -502,10 +701,17 @@ def download_region(
         if os.path.exists(staged):
             os.unlink(staged)
 
+        # Fleet-wide concurrency gate: cap TOTAL concurrent Geofabrik downloads
+        # across all runners (one shared egress IP). Wrap ONLY the actual network
+        # fetch — cache hits / prefer_cache / 304-revalidation above never enter
+        # the gate. A no-op when AFL_MONGODB_URL is unset (local/test runs). A
+        # heartbeat thread renews the lease so a multi-GB download keeps its slot;
+        # a crashed runner's slot frees when its lease expires.
         try:
-            size, sha256_hex, md5_hex = _download_resumable(
-                url, staged, region, on_progress
-            )
+            with download_gate.download_slot():
+                size, sha256_hex, md5_hex = _download_resumable(
+                    url, staged, region, on_progress
+                )
         except BaseException:
             if os.path.exists(staged):
                 os.unlink(staged)

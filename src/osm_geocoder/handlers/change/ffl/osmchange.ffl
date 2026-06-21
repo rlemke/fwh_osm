@@ -5,9 +5,11 @@
 // features were added / modified / deleted since a point in time. "What new
 // restaurants opened", "which buildings were removed", freshness monitoring.
 //
-// v1 scope: NODE changes (the POI case) carry full Point geometry. Way/relation
-// changes are counted but not emitted as geometry — resolving a changed way's
-// geometry needs the base extract + a node-location index (a follow-up).
+// Scope: NODE changes (the POI case) carry Point geometry; WAY changes carry
+// LineString (open way) / Polygon (closed/area way) geometry, with the way's
+// node coordinates resolved from the diff's changed nodes plus a filtered scan
+// of the base cached extract. RELATION changes are counted only — their
+// geometry (member resolution) is a separate, bigger problem (a follow-up).
 //
 // Prerequisites: compile with osmtypes.ffl, osmregion.ffl, osmcache_download.ffl.
 
@@ -15,8 +17,10 @@ namespace osm.Change {
     use osm.types
 
     /** Result of a change extraction: three GeoJSON paths (added/modified/
-        deleted NODE features) + counts. `ways_changed`/`relations_changed` are
-        counted for awareness even though v1 doesn't emit their geometry. */
+        deleted features — nodes as Points, ways as LineString/Polygon) + counts.
+        `*_count` are total feature counts per bucket; `ways_*` break out how many
+        of those were ways. `relations_changed` is counted for awareness even
+        though relation geometry is not emitted. */
     schema ChangeSet {
         region: Region,
         added: String,
@@ -25,6 +29,9 @@ namespace osm.Change {
         added_count: Long,
         modified_count: Long,
         deleted_count: Long,
+        ways_added: Long,
+        ways_modified: Long,
+        ways_deleted: Long,
         ways_changed: Long,
         relations_changed: Long,
         since_sequence: Long
@@ -37,8 +44,10 @@ namespace osm.Change {
         "" (= the cached extract's own replication timestamp → "what changed since
         my cache was last current"). `max_diff_mb` caps the diff data pulled.
 
-        Emits node changes as GeoJSON (added = new, modified = edited, deleted =
-        removed), each feature carrying the node's tags + osm id + change_type +
-        version. Light on Geofabrik (diffs are KB–MB), like UpdateRegion. */
+        Emits node AND way changes as GeoJSON (added = new, modified = edited,
+        deleted = removed); nodes become Points, ways become LineString/Polygon
+        (geometry null if a way's node coords can't be resolved). Each feature
+        carries tags + osm id + osm_type + change_type + version. Light on
+        Geofabrik (diffs are KB–MB), like UpdateRegion. */
     event facet ExtractChanges(region: Region, since: String = "", max_diff_mb: Long = 512) => (changes: ChangeSet) with Effect(kind = "external") with Cost(tier = "moderate")
 }
