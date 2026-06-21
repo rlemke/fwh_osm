@@ -376,6 +376,17 @@ facets:
     effect: external
     cost: moderate
 
+  - qualified_name: osm.Change.ExtractChanges
+    namespace: osm.Change
+    purpose: >-
+      Surface the OSM features changed in a region since a date/sequence, from
+      Geofabrik replication diffs — added/modified/deleted node features as
+      GeoJSON (the "what's new/removed" feed; reuses the UpdateRegion diff
+      machinery). v1 emits node changes with geometry; ways/relations counted.
+    signature: "ExtractChanges(region: Region, since: String = \"\", max_diff_mb: Long = 512) => (changes: ChangeSet)"
+    effect: external
+    cost: moderate
+
   - qualified_name: osm.cache.ListCachedRegions
     namespace: osm.cache
     purpose: List the regions currently present in the local PBF cache (no network).

@@ -11,6 +11,7 @@ from .boundaries.boundary_handlers import register_boundary_handlers
 from .buildings.building_handlers import register_building_handlers
 from .cache.region_handlers import register_region_handlers
 from .cache.update_handlers import register_update_handlers
+from .change.change_handlers import register_change_handlers
 from .cities.cities_handlers import register_cities_handlers
 from .clip.clip_handlers import register_clip_handlers
 from .combined.combined_handlers import register_combined_handlers
@@ -103,6 +104,7 @@ def register_all_handlers(poller) -> None:
     register_population_handlers(poller)
     register_region_handlers(poller)
     register_update_handlers(poller)
+    register_change_handlers(poller)
     register_road_handlers(poller)
     register_route_handlers(poller)
     register_routing_handlers(poller)
@@ -130,6 +132,7 @@ def register_all_registry_handlers(runner) -> None:
     from .buildings.building_handlers import register_handlers as reg_building
     from .cache.region_handlers import register_handlers as reg_region
     from .cache.update_handlers import register_handlers as reg_update
+    from .change.change_handlers import register_handlers as reg_change
     from .cities.cities_handlers import register_handlers as reg_cities
     from .clip.clip_handlers import register_handlers as reg_clip
     from .filters.filter_handlers import register_handlers as reg_filter
@@ -168,6 +171,7 @@ def register_all_registry_handlers(runner) -> None:
     reg_population(runner)
     reg_region(runner)
     reg_update(runner)
+    reg_change(runner)
     reg_road(runner)
     reg_route(runner)
     reg_routing(runner)
