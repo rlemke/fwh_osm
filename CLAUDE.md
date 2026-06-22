@@ -180,15 +180,47 @@ rest of the internet was fine). So there are two update paths:
 Rule of thumb: **to keep the cache current, use `UpdateAllCaches` (diffs); reserve
 the full-download `Refresh*` workflows for re-establishing extracts.**
 
+**Rate-limit-safe downloads.** Independently of the diff-vs-full choice, every
+cache-miss network fetch is defended in `tools/_osm_tools/pbf_download.py` +
+`download_gate.py`: a **Mongo-backed, fleet-wide download semaphore**
+(`download_gate.py`) caps concurrent Geofabrik fetches so independent runners
+can't collectively hammer the shared egress IP (it wraps only the cache-miss
+fetch and **fails open** if Mongo is unavailable); HTTP `429`/`503` are retried
+honouring a **capped `Retry-After`**; and a cached file is revalidated with a
+conditional GET (`If-Modified-Since` → `304` → cache hit, no re-download). Knobs:
+`AFL_GEOFABRIK_BASE_URL` (constant `GEOFABRIK_BASE`, default
+`https://download.geofabrik.de`) reroutes **all** region + replication URLs to a
+mirror/internal cache; `AFL_OSM_DOWNLOAD_CONCURRENCY` (default `3`),
+`AFL_OSM_DOWNLOAD_LEASE_MS`, `AFL_OSM_RETRY_AFTER_CAP_SECONDS` (`300`),
+`AFL_OSM_RATE_LIMIT_MAX_ATTEMPTS` (`6`). See `tools/README.md` →
+**Rate-limit-safe downloads**.
+
 The same replication machinery also powers **change detection** —
 `osm.Change.ExtractChanges(region, since="", max_diff_mb=512) => ChangeSet`
 surfaces the features *added / modified / deleted* since a date/sequence (or the
 cache's own replication timestamp) as GeoJSON, instead of applying the diffs.
-The "what's new/removed this month" feed. v1 emits NODE changes (POIs) with
-Point geometry; way/relation changes are counted (their geometry needs a
-base-extract node-location index — a follow-up). Both `UpdateRegion` and
-`ExtractChanges` read `ReplicationServer.collect_diffs` (pyosmium 4.x), so both
-depend on Geofabrik replication reachability.
+The "what's new/removed this month" feed. It emits **full geometry for nodes,
+ways, AND relations**: `Point` (node), `LineString` (open way), `Polygon` (area
+way) and `Polygon`/`MultiPolygon` (relation) — relations were previously
+counted-only. Way/relation geometry is assembled by the **osmium CLI's area
+builder**: the collected replication diff is applied onto the cached base extract,
+the changed way/relation ids + members are subset out (`osmium apply-changes` →
+`getid -r` → `export -a type,id`), and the result is deduped preferring the area
+interpretation — so a closed *highway* stays a `LineString` while a closed
+*building* becomes a `Polygon` (area-vs-line is decided by OSM area rules, not a
+naive ring guess). The `ChangeSet` schema carries the per-type breakdown
+`nodes_*` plus `ways_added`/`ways_modified`/`ways_deleted` and
+`relations_added`/`relations_modified`/`relations_deleted`. **Bulkheads:** a
+node-only diff (the common POI case) skips the osmium pass entirely; an uncached
+region or any osmium failure yields **null** geometry rather than a crash, and
+deleted objects (whose geometry is gone upstream) are emitted with null geometry.
+Both `UpdateRegion` and `ExtractChanges` read `ReplicationServer.collect_diffs`
+(pyosmium 4.x), so both depend on Geofabrik replication reachability.
+
+The throttled **`update-delta`** CLI (`tools/update-delta.sh`) is the
+command-line counterpart to `UpdateRegion` — serial replication-diff updates,
+one region at a time with a `--delay`, diffs-only by default (`--allow-full` to
+permit the full-download fallback). See `tools/README.md` → **Cache updates**.
 
 ### Composable facet library
 

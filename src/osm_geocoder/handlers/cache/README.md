@@ -127,9 +127,11 @@ Downloaded files are stored under the system temp directory:
 └── ...
 ```
 
-The cache is keyed by region path. A file is considered up-to-date when its `.meta.json` sidecar's stored MD5 matches Geofabrik's current `<file>.md5` and the artifact is intact; otherwise it is re-downloaded. Pass `force=True` (or delete the file) to force a re-download.
+The cache is keyed by region path. A file is considered up-to-date when its `.meta.json` sidecar's stored MD5 matches Geofabrik's current `<file>.md5` and the artifact is intact; otherwise it is re-downloaded. Pass `force=True` (or delete the file) to force a re-download. Before any re-download, the cached file is revalidated with a conditional GET (`If-Modified-Since: <cached Last-Modified>`) — a `304 Not Modified` is treated as a cache hit, so an unchanged upstream never re-transfers the bytes.
 
 Concurrent downloads of the same region are safe — the PBF downloader uses per-region locks and atomic staging-then-finalize, so the cache file is always either absent or complete.
+
+**Rate-limit safety.** Geofabrik rate-limits per IP, so cache-miss fetches go through a Mongo-backed **fleet-wide download semaphore** (`tools/_osm_tools/download_gate.py`) that caps concurrent downloads across all runners (it fails open if Mongo is unavailable), and HTTP `429`/`503` responses are retried honouring a capped `Retry-After`. To keep an already-populated cache *current*, prefer the replication-diff path (`osm.cache.UpdateRegion` / the `update-delta` CLI) over a full re-download — see CLAUDE.md → **Updating the cache** and `tools/README.md` → **Rate-limit-safe downloads** for the env knobs (`AFL_OSM_DOWNLOAD_CONCURRENCY`, `AFL_OSM_RETRY_AFTER_CAP_SECONDS`, …).
 
 ## Geofabrik URL mapping
 
@@ -143,6 +145,8 @@ Region paths map directly to Geofabrik's directory structure:
 | `Planet` | `planet` | `https://download.geofabrik.de/planet-latest.osm.pbf` |
 
 Some facets share the same underlying Geofabrik path. For example, `Malaysia` and `Singapore` both resolve to `asia/malaysia-singapore-brunei` because Geofabrik provides them as a combined extract.
+
+**Configurable mirror.** The base URL is not hardcoded — `AFL_GEOFABRIK_BASE_URL` (constant `GEOFABRIK_BASE` in `tools/_osm_tools/pbf_download.py`, default `https://download.geofabrik.de`) reroutes **all** region *and* replication URLs to a mirror or internal cache, so CI/offline builds can stay off the public endpoint entirely.
 
 ## Adding a new region
 

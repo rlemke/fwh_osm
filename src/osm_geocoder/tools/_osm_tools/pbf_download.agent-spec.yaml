@@ -105,9 +105,14 @@ outputs:
 # ---------------------------------------------------------------------------
 side_effects:
   network:
-    - "HTTP GET https://download.geofabrik.de/<region>-latest.osm.pbf (streaming, Range-supporting)"
-    - "HTTP GET https://download.geofabrik.de/<region>-latest.osm.pbf.md5"
-    - "HTTP HEAD https://download.geofabrik.de/<region>-latest.osm.pbf (best-effort, for Last-Modified)"
+    # Base URL is AFL_GEOFABRIK_BASE_URL (constant GEOFABRIK_BASE), default
+    # https://download.geofabrik.de — reroute all of these to a mirror by setting it.
+    - "HTTP GET <GEOFABRIK_BASE>/<region>-latest.osm.pbf (streaming, Range-supporting)"
+    - "HTTP GET <GEOFABRIK_BASE>/<region>-latest.osm.pbf.md5"
+    - "HTTP HEAD <GEOFABRIK_BASE>/<region>-latest.osm.pbf (best-effort, for Last-Modified)"
+    - "Conditional GET with If-Modified-Since against the cached Last-Modified; a 304 is a cache hit (no body transfer)"
+    - "On a cache MISS, the network fetch acquires a Mongo-backed fleet-wide download slot (download_gate.py) first; fails open if Mongo is unavailable"
+    - "HTTP 429/503 responses are retried honouring a capped Retry-After (AFL_OSM_RETRY_AFTER_CAP_SECONDS, up to AFL_OSM_RATE_LIMIT_MAX_ATTEMPTS)"
   filesystem:
     reads:
       - "<AFL_OSM_LOCAL_TMP_DIR or $TMPDIR>/facetwork-pbf-staging/<region>.osm.pbf.tmp (staging)"
@@ -189,12 +194,18 @@ failure_modes:
 concurrency:
   threads: safe_per_region
   processes: safe
-  parallelism_limit: "Geofabrik rate-limits concurrent downloads per source IP; callers SHOULD serialize per-host but this library does not enforce it"
+  parallelism_limit: "Geofabrik rate-limits concurrent downloads per source IP; a Mongo-backed FLEET-WIDE semaphore (download_gate.py) caps concurrent cache-miss fetches across all hosts (default AFL_OSM_DOWNLOAD_CONCURRENCY=3). It wraps only the network fetch (cache hits / 304 revalidations are exempt) and FAILS OPEN if Mongo is unavailable, so it bounds — but never blocks — downloads."
   rationale: |
     A module-level dict of per-region threading.Lock() serializes concurrent
     calls for the SAME region within one process — so two threads racing to
     download ``europe/germany/berlin`` produce one download and one cache hit,
     not two downloads. Different regions proceed independently.
+
+    Across processes/hosts, the Mongo-backed download semaphore in
+    download_gate.py caps how many regions download at once fleet-wide
+    (lease-based; AFL_OSM_DOWNLOAD_CONCURRENCY slots, AFL_OSM_DOWNLOAD_LEASE_MS
+    renewed by heartbeat), so an N-wide fan-out can't trip Geofabrik's per-IP
+    rate limit. It fails open when Mongo is unreachable.
 
     Manifest writes use a module-level threading.Lock AND an fcntl advisory
     lock on ``<cache_root>/pbf/manifest.json.lock``, so concurrent processes
@@ -286,9 +297,14 @@ dependencies:
     - storage.agent-spec.yaml             # the Storage abstraction
   binaries: []
   environment:
-    - AFL_OSM_CACHE_ROOT        # cache root path; default is Storage-backend-specific
-    - AFL_OSM_STORAGE           # local | hdfs; default local
-    - AFL_OSM_LOCAL_TMP_DIR     # staging dir for downloads; default $TMPDIR
+    - AFL_OSM_CACHE_ROOT             # cache root path; default is Storage-backend-specific
+    - AFL_OSM_STORAGE                # local | hdfs; default local
+    - AFL_OSM_LOCAL_TMP_DIR          # staging dir for downloads; default $TMPDIR
+    - AFL_GEOFABRIK_BASE_URL         # base URL for region + replication fetches (GEOFABRIK_BASE); default https://download.geofabrik.de
+    - AFL_OSM_DOWNLOAD_CONCURRENCY   # fleet-wide max concurrent downloads (semaphore slots); default 3
+    - AFL_OSM_DOWNLOAD_LEASE_MS      # per-slot download-semaphore lease, ms; default 14400000 (4h)
+    - AFL_OSM_RETRY_AFTER_CAP_SECONDS # cap on an honoured upstream 429/503 Retry-After; default 300
+    - AFL_OSM_RATE_LIMIT_MAX_ATTEMPTS # max 429/503 retries for a small request; default 6
 
 # ---------------------------------------------------------------------------
 # Implementation notes — informational; not part of the contract. Regenerated

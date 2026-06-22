@@ -32,11 +32,14 @@ The data flow looks like this:
               vector_tiles/                  gtfs/
 
       ┌─────────────────────────┐  ┌─────────────────────────────┐
-      │  download-elevation     │  │  update-all (meta)           │
+      │  download-elevation     │  │  update-all (meta, FULL)     │
       │  (Copernicus DEM COG)   │  │  runs every --update-all in  │
       └───────────┬─────────────┘  │  dependency order            │
-                  ▼                └─────────────────────────────┘
-             elevation/
+                  ▼                ├─────────────────────────────┤
+             elevation/           │  update-delta (DELTA)        │
+                                  │  replication diffs, serial,  │
+                                  │  one region at a time        │
+                                  └─────────────────────────────┘
 ```
 
 Every arrow is manifest-mediated: each tool records the source's SHA-256 (plus engine/version for routing) in its own manifest, so re-running a tool is a no-op when nothing has changed, and a single `./tools/update-all.sh` propagates an upstream refresh through the whole chain.
@@ -47,12 +50,15 @@ Every arrow is manifest-mediated: each tool records the source's SHA-256 (plus e
 tools/
 ├── README.md                        ← this file
 ├── install-tools.sh                 ← one-shot binary installer (brew + GraphHopper jar)
-├── update-all.sh                    ← chains every --update-all in dependency order
+├── update-all.sh                    ← FULL-redownload rebuild chain (every --update-all, in order)
+├── update-delta.sh                  ← throttled, serial DELTA cache update (replication diffs only)
 │
 ├── _osm_tools/                            ← shared library (tools and FFL handlers both import these)
 │   ├── manifest.py                  ← per-cache-type JSON manifest I/O (atomic, flock'd)
 │   ├── storage.py                   ← Storage abstraction (LocalStorage, HdfsStorage)
-│   ├── pbf_download.py              ← Geofabrik PBF download + path-mirroring cache
+│   ├── pbf_download.py              ← Geofabrik PBF download + path-mirroring cache (rate-limit-safe)
+│   ├── download_gate.py             ← Mongo-backed fleet-wide download semaphore (caps concurrent fetches)
+│   ├── pbf_update.py                ← apply Geofabrik replication diffs to a cached extract
 │   ├── pbf_clip.py                  ← custom-geometry clipping into pbf/clips/
 │   ├── pbf_geojson.py               ← osmium export to GeoJSONSeq
 │   ├── pbf_shapefile.py             ← ogr2ogr export to multi-layer shapefile
@@ -74,7 +80,8 @@ tools/
 ├── build-osrm-graph.sh    / build_osrm_graph.py
 ├── build-vector-tiles.sh  / build_vector_tiles.py
 ├── download-gtfs.sh       / download_gtfs.py
-└── download-elevation.sh  / download_elevation.py
+├── download-elevation.sh  / download_elevation.py
+└── update-delta.sh        / update_delta.py
 ```
 
 One `.py` + one `.sh` per tool. Shared code lives in `tools/_osm_tools/` — anything reused by two or more tools (or by FFL handlers) goes there. Handler-side code imports from `_osm_tools/` via thin re-export shims in `handlers/shared/` (e.g. `pbf_cache.py`, `pbf_convert.py`).
@@ -103,7 +110,7 @@ Organized by role in the pipeline.
 
 ### Source acquisition
 
-- **download-pbf** — fetch Geofabrik PBFs into `pbf/<region>-latest.osm.pbf`. Verified against Geofabrik's published `.md5`; local `sha256` recorded for tamper detection. Sequential (Geofabrik rate-limits per IP). Region selection: positional args, `--regions-file`, or `--all` / `--all-under PREFIX` resolved from Geofabrik's `index-v1.json` (leaves-only by default; `--include-parents` for continent/country-level PBFs). `--list-missing` previews uncached regions; `--update-all` refreshes only those whose upstream MD5 changed. Supports `--backend {local,hdfs}`.
+- **download-pbf** — fetch Geofabrik PBFs into `pbf/<region>-latest.osm.pbf`. Verified against Geofabrik's published `.md5`; local `sha256` recorded for tamper detection. Sequential (Geofabrik rate-limits per IP). Region selection: positional args, `--regions-file`, or `--all` / `--all-under PREFIX` resolved from Geofabrik's `index-v1.json` (leaves-only by default; `--include-parents` for continent/country-level PBFs). `--list-missing` previews uncached regions; `--update-all` refreshes only those whose upstream MD5 changed. Supports `--backend {local,hdfs}`. **Rate-limit-safe by default** (see [Rate-limit-safe downloads](#rate-limit-safe-downloads) below): a Mongo-backed fleet-wide semaphore caps concurrent fetches, HTTP `429`/`503` are honoured with a capped `Retry-After` backoff, and a cached file is revalidated with a conditional GET (`If-Modified-Since` → `304` → no re-download). All URLs (region + replication) route through `AFL_GEOFABRIK_BASE_URL` so a mirror can stand in for `download.geofabrik.de`.
 - **clip-pbf** — custom-geometry PBF via `osmium extract`. Output lands at `pbf/clips/<name>-latest.osm.pbf` so **every downstream tool treats it as a normal region called `clips/<name>`** — no special casing. Cache validity: source region SHA + clip spec (bbox values or polygon content hash). `--update-all` re-clips entries whose source has changed.
 - **download-gtfs** — per-agency GTFS feed downloader. Cache validity via HTTP `Last-Modified` / `ETag` — a HEAD request decides whether to skip. Manifest records parsed `feed_info.txt` fields (publisher, version, validity window). Zip integrity verified before the cache is committed.
 - **download-elevation** — Copernicus DEM GLO-30 rasters for a bbox via `gdalwarp` + `/vsicurl/` against AWS Open Data (no auth). Computes the 1°×1° tile grid intersecting the bbox, streams only the bytes needed, outputs a compressed tiled GeoTIFF at `elevation/<name>-latest.tif`.
@@ -124,9 +131,77 @@ All three follow the same interface. Each keys its cache on `source PBF SHA-256 
 - **build-valhalla-tiles** — Valhalla tilesets at `valhalla/<region>-latest/`. No profile axis — a tileset serves every profile at query time (`auto`, `bicycle`, `pedestrian`, `truck`, `motor_scooter`, `motorcycle`, `bus`, `taxi`). Cross-region queries are native within one tileset (build a parent region for coverage across children). `valhalla_build_*` binaries (installed by `install-tools.sh`).
 - **build-osrm-graph** — OSRM MLD graphs at `osrm/<region>-latest/<profile>/`. Profiles: `car`, `bicycle`, `foot`. Profile is **build-time** (like GraphHopper). Uses OSRM's shipped `.lua` profiles from `share/osrm/profiles/` (override with `--profile-file`). `osrm-extract` → `osrm-partition` → `osrm-customize`.
 
-### Meta
+### Cache updates
 
-- **update-all** — runs every tool's `--update-all` in dependency order: download-pbf → clip-pbf → convert-pbf-geojson → convert-pbf-shapefile → extract (all categories) → build-graphhopper-graph → build-valhalla-tiles → build-osrm-graph → build-vector-tiles → render-html-maps → download-gtfs. Safe to re-run as often as desired — each step is a no-op when nothing is stale. `UPDATE_ALL_SKIP="gtfs osrm"` skips named steps (useful when some binaries aren't installed); `UPDATE_ALL_STOP_ON_FAIL=1` aborts on first failure.
+Two distinct ways to bring the cache current — pick by how much they pull:
+
+- **update-delta** — throttled, serial **DELTA** update: applies Geofabrik
+  **replication diffs** (`.osc.gz`, KB–MB per region) to cached extracts **one
+  region at a time**, with a `--delay` between requests (default `5`s).
+  Rate-limit-safe and the right tool to catch caches up after they've drifted
+  (e.g. once a rate-limit block clears). **Diffs-only by default**: a region with
+  no cached baseline (method `uncached`) or one too far behind the diff budget
+  (method `stale`) is reported and **skipped** — it is never silently promoted to
+  a multi-GB full re-download. Region selection: positional region paths,
+  `--regions-file`, or `--all` (every cached region). Flags: `--delay SECONDS`,
+  `--max-diff-mb` (default `512`), `--allow-full` (opt into the full-download
+  fallback for skipped regions), `--dry-run`. This is the command-line
+  counterpart to the `osm.cache.UpdateRegion` facet (the facet keeps the
+  full-fallback default; runtime behavior is unchanged).
+
+  ```bash
+  ./tools/update-delta.sh europe/germany north-america/us/california  # named regions
+  ./tools/update-delta.sh --all --delay 10                            # every cached region, 10s apart
+  ./tools/update-delta.sh --all --dry-run                             # preview what's eligible
+  ```
+
+- **update-all** — runs every tool's `--update-all` in dependency order:
+  download-pbf → clip-pbf → convert-pbf-geojson → convert-pbf-shapefile → extract
+  (all categories) → build-graphhopper-graph → build-valhalla-tiles →
+  build-osrm-graph → build-vector-tiles → render-html-maps → download-gtfs. This
+  is the **FULL-redownload rebuild chain** — `download-pbf --update-all` re-pulls
+  whole PBFs (heavy; rate-limit-dangerous at high fan-out), then every downstream
+  tool refreshes off the new SHAs. Safe to re-run as often as desired — each step
+  is a no-op when nothing is stale. `UPDATE_ALL_SKIP="gtfs osrm"` skips named
+  steps (useful when some binaries aren't installed); `UPDATE_ALL_STOP_ON_FAIL=1`
+  aborts on first failure. **For routine "keep the cache current", prefer
+  `update-delta` (diffs); reserve `update-all` for a deliberate from-scratch
+  rebuild.**
+
+## Rate-limit-safe downloads
+
+Geofabrik rate-limits per IP — a fleet-wide parallel full re-download has tripped
+a temporary block (`Connection refused` to `download.geofabrik.de` for hours).
+`download-pbf` and the cache facets defend against this on three fronts, all in
+`_osm_tools/pbf_download.py` + `_osm_tools/download_gate.py`:
+
+- **Fleet-wide download semaphore** (`download_gate.py`) — a Mongo-backed counting
+  lease caps the number of concurrent Geofabrik fetches **across the whole
+  fleet**, so independent runners can't collectively hammer the IP. It wraps only
+  the cache-**miss** network fetch (cache hits / `304` revalidations skip it) and
+  **fails open** if Mongo is unavailable (a missing semaphore must never block a
+  download).
+- **`429`/`503` `Retry-After` handling** — a rate-limited response is retried,
+  honouring an explicit `Retry-After` (capped) with jitter, up to a max attempt
+  count.
+- **Conditional GET** — a cached file is revalidated with
+  `If-Modified-Since: <cached Last-Modified>`; a `304 Not Modified` is treated as
+  a cache hit (no re-download).
+
+Env knobs:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AFL_GEOFABRIK_BASE_URL` | `https://download.geofabrik.de` | Mirror/base URL for **all** region + replication fetches (`GEOFABRIK_BASE`) |
+| `AFL_OSM_DOWNLOAD_CONCURRENCY` | `3` | Max concurrent fleet-wide downloads (semaphore slots) |
+| `AFL_OSM_DOWNLOAD_LEASE_MS` | `14400000` (4h) | Per-slot lease duration (renewed by heartbeat) |
+| `AFL_OSM_RETRY_AFTER_CAP_SECONDS` | `300` | Cap on an honoured upstream `Retry-After` |
+| `AFL_OSM_RATE_LIMIT_MAX_ATTEMPTS` | `6` | Max `429`/`503` retries for a small request |
+
+Point `AFL_GEOFABRIK_BASE_URL` at an internal mirror (or local cache server) to
+keep CI/offline builds off the public Geofabrik endpoint entirely — it reroutes
+both the `-latest.osm.pbf` region fetches and the `<region>-updates/` replication
+diffs.
 
 ## Cache layout and sidecars
 
