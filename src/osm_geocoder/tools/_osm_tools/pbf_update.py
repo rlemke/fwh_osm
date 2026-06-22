@@ -120,11 +120,23 @@ def update_region(
     max_diff_mb: int = DEFAULT_MAX_DIFF_MB,
     storage: Storage | None = None,
     region: dict | None = None,
+    diff_only: bool = False,
 ) -> UpdateResult:
-    """Update a region's cached PBF via replication diffs; full-download fallback."""
+    """Update a region's cached PBF via replication diffs; full-download fallback.
+
+    ``diff_only=True`` (the rate-limit-safe mode used by the ``update-delta`` CLI)
+    NEVER re-downloads a whole PBF: an uncached region returns method ``uncached``
+    and a region too stale for the diff budget returns ``stale``/``no_baseline``,
+    both as no-ops, so a throttled catch-up can't accidentally pull GBs and trip
+    Geofabrik's rate limit.
+    """
     storage = storage or get_storage()
 
     if not is_region_cached(region_path, storage=storage):       # no baseline to diff
+        if diff_only:
+            return UpdateResult("uncached", 0,
+                                _osm_cache_dict(region_path, cached_path(region_path),
+                                                region=region, was_in_cache=False))
         res = download_region(region_path, force=True, storage=storage)
         return UpdateResult("full", res.size, to_osm_cache(res, region=region))
 
@@ -145,8 +157,11 @@ def update_region(
         return UpdateResult("diff", applied.bytes_changed,
                             _osm_cache_dict(region_path, local_pbf, region=region, was_in_cache=False))
 
-    # "stale" (beyond budget) or "no_baseline" -> clean full re-pull (overwrites
-    # any partial diff progress). Rare; bounded by the diff budget above.
+    # "stale" (beyond budget) or "no_baseline": a full re-pull would catch up but
+    # is heavy. diff_only skips it (no-op); otherwise do the clean full re-download.
+    if diff_only:
+        return UpdateResult(applied.status, 0,
+                            _osm_cache_dict(region_path, local_pbf, region=region, was_in_cache=True))
     res = download_region(region_path, force=True, storage=storage)
     return UpdateResult("full", res.size, to_osm_cache(res, region=region))
 
