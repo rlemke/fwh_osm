@@ -54,6 +54,29 @@ CACHE_TYPE = "pbf"
 GEOFABRIK_BASE = os.environ.get(
     "AFL_GEOFABRIK_BASE_URL", "https://download.geofabrik.de"
 ).rstrip("/")
+
+# Alternative extract provider — for when Geofabrik rate-limits/bans the egress
+# IP. AFL_OSM_EXTRACT_PROVIDER=osmfr routes DOWNLOADS to OpenStreetMap France
+# (download.openstreetmap.fr/extracts/<region>-latest.osm.pbf). OSM France
+# publishes no .md5 (we anchor integrity on the locally-computed sha256) and its
+# extracts embed THEIR OWN replication header — so once a region is re-downloaded
+# from OSM France, `update-delta` follows OSM France's diffs automatically (a
+# Geofabrik-sourced PBF can NOT be delta-updated against OSM France: the two
+# replication streams use independent, incompatible sequence numbers). The cache
+# layout stays provider-agnostic (`<region>-latest.osm.pbf`); only the remote URL
+# changes. Geofabrik stays the default.
+EXTRACT_PROVIDER = os.environ.get("AFL_OSM_EXTRACT_PROVIDER", "geofabrik").strip().lower()
+OSMFR_BASE = os.environ.get("AFL_OSMFR_BASE_URL", "https://download.openstreetmap.fr").rstrip("/")
+# OSM France's continent tree differs from Geofabrik's at the top level.
+_OSMFR_TOPLEVEL = {"australia-oceania": "oceania"}
+
+
+def _osmfr_region(region: str) -> str:
+    """Map a Geofabrik region key to OSM France's tree (top-level remaps only)."""
+    top, sep, rest = region.partition("/")
+    return _OSMFR_TOPLEVEL.get(top, top) + sep + rest
+
+
 USER_AGENT = "facetwork-osm-geocoder/1.0 (OSM PBF downloader)"
 
 logger = logging.getLogger(__name__)
@@ -107,12 +130,19 @@ def staging_path(region: str) -> str:
 
 
 def region_to_paths(region: str) -> tuple[str, str]:
-    """Return ``(relative_path, remote_url)`` for a Geofabrik region key."""
+    """Return ``(relative_path, remote_url)`` for a region key.
+
+    The cache ``relative_path`` is always Geofabrik-style (``<region>-latest.osm.pbf``)
+    so the on-disk layout is provider-agnostic; only the REMOTE url changes with
+    ``AFL_OSM_EXTRACT_PROVIDER`` (``geofabrik`` | ``osmfr``)."""
     region = region.strip().strip("/")
     if not region:
         raise ValueError("Empty region")
     rel = f"{region}-latest.osm.pbf"
-    url = f"{GEOFABRIK_BASE}/{rel}"
+    if EXTRACT_PROVIDER == "osmfr":
+        url = f"{OSMFR_BASE}/extracts/{_osmfr_region(region)}-latest.osm.pbf"
+    else:
+        url = f"{GEOFABRIK_BASE}/{rel}"
     return rel, url
 
 
@@ -176,6 +206,8 @@ def fetch_md5_or_none(url: str) -> str | None:
     proceed and anchor integrity on the locally-computed sha256 instead of
     treating the region as permanently un-cacheable.
     """
+    if EXTRACT_PROVIDER == "osmfr":
+        return None  # OSM France publishes no .md5; anchor integrity on sha256
     try:
         return fetch_md5(url)
     except urllib.error.HTTPError as exc:

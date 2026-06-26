@@ -42,6 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from _osm_tools import pbf_download  # noqa: E402  (module handle for --provider override)
 from _osm_tools.pbf_download import (  # noqa: E402
     GEOFABRIK_BASE,
     DownloadError,
@@ -237,7 +238,21 @@ def main() -> int:
         "(default: $AFL_STORAGE or 'local'). HDFS assumes single-writer "
         "semantics (no advisory locking).",
     )
+    parser.add_argument(
+        "--provider",
+        choices=("geofabrik", "osmfr"),
+        default=None,
+        help="Extract provider (default: $AFL_OSM_EXTRACT_PROVIDER or 'geofabrik'). "
+        "'osmfr' = OpenStreetMap France (download.openstreetmap.fr) — use when "
+        "Geofabrik has rate-limited/banned this IP. Re-downloaded extracts then "
+        "carry OSM France's replication header, so update-delta follows it.",
+    )
     args = parser.parse_args()
+
+    if args.provider:
+        pbf_download.EXTRACT_PROVIDER = args.provider
+    if pbf_download.EXTRACT_PROVIDER != "geofabrik":
+        print(f"extract provider: {pbf_download.EXTRACT_PROVIDER}", file=sys.stderr)
 
     try:
         storage = get_storage(args.backend)
