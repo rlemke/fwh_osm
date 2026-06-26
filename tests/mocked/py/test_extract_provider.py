@@ -35,11 +35,22 @@ def test_osmfr_url_and_provider_agnostic_cache_path(restore_provider):
 
 
 def test_osmfr_toplevel_remap(restore_provider):
-    pd.EXTRACT_PROVIDER = "osmfr"
-    _, url = pd.region_to_paths("australia-oceania/fiji")
-    assert url == f"{pd.OSMFR_BASE}/extracts/oceania/fiji-latest.osm.pbf"
-    assert pd._osmfr_region("australia-oceania") == "oceania"
+    assert pd._osmfr_region("australia-oceania/fiji") == "oceania/fiji"
     assert pd._osmfr_region("europe/france") == "europe/france"
+
+
+def test_osmfr_hyphen_to_underscore(restore_provider):
+    # OSM France uses underscores in multi-word country/sub names (Geofabrik hyphens).
+    assert pd._osmfr_region("africa/burkina-faso") == "africa/burkina_faso"
+    assert pd._osmfr_region("africa/south-africa") == "africa/south_africa"
+    # top-level remap + underscore together
+    assert pd._osmfr_region("australia-oceania/papua-new-guinea") == "oceania/papua_new_guinea"
+    # single-word names + the continent segment are unaffected (no false rewrites)
+    assert pd._osmfr_region("europe/germany") == "europe/germany"
+    assert pd._osmfr_region("central-america/belize") == "central-america/belize"
+    pd.EXTRACT_PROVIDER = "osmfr"
+    _, url = pd.region_to_paths("africa/burkina-faso")
+    assert url == f"{pd.OSMFR_BASE}/extracts/africa/burkina_faso-latest.osm.pbf"
 
 
 def test_osmfr_skips_md5(restore_provider):

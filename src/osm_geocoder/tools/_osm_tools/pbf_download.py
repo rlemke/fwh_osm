@@ -72,9 +72,24 @@ _OSMFR_TOPLEVEL = {"australia-oceania": "oceania"}
 
 
 def _osmfr_region(region: str) -> str:
-    """Map a Geofabrik region key to OSM France's tree (top-level remaps only)."""
+    """Map a Geofabrik region key to OSM France's extract tree.
+
+    Two systematic differences (verified against download.openstreetmap.fr):
+    1. Top-level remap (``australia-oceania`` → ``oceania``).
+    2. OSM France uses **underscores** in multi-word country/sub-region names
+       where Geofabrik uses hyphens (``burkina-faso`` → ``burkina_faso``,
+       ``south-africa`` → ``south_africa``). Continent segments keep their form.
+
+    No-op for single-word names, so the ~107 already-matching regions are
+    unaffected. This does NOT invent coverage: OSM France carries a French-centric
+    SUBSET of Geofabrik's regions (Denmark, Greece, Iran, Bangladesh, most US
+    states, … are simply absent), and Geofabrik's *combined* extracts
+    (``senegal-and-gambia``) have no 1:1 equivalent — those still 404 and are
+    skipped per region."""
     top, sep, rest = region.partition("/")
-    return _OSMFR_TOPLEVEL.get(top, top) + sep + rest
+    top = _OSMFR_TOPLEVEL.get(top, top)
+    rest = rest.replace("-", "_")  # OSM France: underscores in country/sub names
+    return top + sep + rest
 
 
 USER_AGENT = "facetwork-osm-geocoder/1.0 (OSM PBF downloader)"
