@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# summary: Refresh every upstream-dependent cache in dependency order (PBFs -> derived outputs).
 # Refresh every cache that depends on upstream data.
 #
 # Runs each tool's --update-all in dependency order:

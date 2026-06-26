@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# summary: Serve rendered HTML maps locally with Range support (needed by PMTiles).
 # Serve rendered HTML maps with Range-request support (required by PMTiles).
 #
 # Usage:

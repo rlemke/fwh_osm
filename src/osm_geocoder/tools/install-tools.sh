@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# summary: Install the binary deps (osmium, tippecanoe, ...) the osm tools need.
 # Install binary dependencies required by the osm-geocoder tool set.
 #
 # Installs via Homebrew (macOS native + Linux Homebrew both supported).

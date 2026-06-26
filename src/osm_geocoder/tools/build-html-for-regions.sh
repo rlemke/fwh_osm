@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# summary: Run the full tool chain for specific region(s) and produce HTML map pages.
 # Run the OSM tool chain for specific region(s) and produce HTML map pages.
 #
 # Pipeline (each stage is a no-op when its cache is already current):

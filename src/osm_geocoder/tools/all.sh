@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# summary: Whole-planet OSM pipeline from scratch (download every continent, then build all outputs).
 # Whole-planet OSM pipeline from scratch.
 #
 # Two phases:

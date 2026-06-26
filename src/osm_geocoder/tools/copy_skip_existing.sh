@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# summary: Recursively copy SRC -> DST, skipping files already present with same size+mtime.
 # Copy files from SRC to DST recursively. Skip a file when the destination
 # already has the same size AND modification time. Preserve the source's
 # timestamps on copied files.
