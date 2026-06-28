@@ -19,7 +19,7 @@ logic (subprocess invocation, config JSON generation, manifest-based
 cache, per-region locking, finalize-from-local staging) lives in the
 library so the CLI (``build-valhalla-tiles``) and these handlers share
 one code path and one cache layout at
-``$AFL_DATA_ROOT/cache/osm/valhalla/<region>-latest/``.
+``$FW_DATA_ROOT/cache/osm/valhalla/<region>-latest/``.
 """
 
 from __future__ import annotations

@@ -30,7 +30,7 @@ from pathlib import Path
 import pytest
 from facetwork.runtime import ExecutionStatus
 from helpers import (
-    EXAMPLE_AFL_FILES,
+    EXAMPLE_FW_FILES,
     compile_afl_files,
     extract_workflow,
     run_to_completion,
@@ -81,9 +81,9 @@ _LIBRARY_FILES = [
 
 def _compile_city_routing():
     """Compile the CityRouteMap workflow with all dependencies."""
-    libs = [EXAMPLE_AFL_FILES[f] for f in _LIBRARY_FILES]
+    libs = [EXAMPLE_FW_FILES[f] for f in _LIBRARY_FILES]
     return compile_afl_files(
-        EXAMPLE_AFL_FILES["osmcityrouting.ffl"],
+        EXAMPLE_FW_FILES["osmcityrouting.ffl"],
         *libs,
     )
 

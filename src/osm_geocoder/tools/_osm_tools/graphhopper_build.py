@@ -118,9 +118,9 @@ def _staging_dir(region: str, profile: str, storage: Any = None) -> Path:
     # Java writes the graph into a real local directory, so staging must be
     # local. On a remote backend (S3/MinIO, HDFS) graph_abs_path is an
     # ``s3://``/``hdfs://`` URI — unusable as a build target — so always stage
-    # under local scratch there (also honoured via AFL_CONVERT_STAGING=tmp).
-    if s.name != "local" or (os.environ.get("AFL_CONVERT_STAGING") or "").lower() == "tmp":
-        base = os.environ.get("AFL_LOCAL_SCRATCH") or tempfile.gettempdir()
+    # under local scratch there (also honoured via FW_CONVERT_STAGING=tmp).
+    if s.name != "local" or (os.environ.get("FW_CONVERT_STAGING") or "").lower() == "tmp":
+        base = os.environ.get("FW_LOCAL_SCRATCH") or tempfile.gettempdir()
         safe = region.replace("/", "_")
         return Path(base) / "facetwork-graphhopper-staging" / safe / profile
     out = graph_abs_path(region, profile, storage)

@@ -5,7 +5,7 @@ multi-GB files never need to fit in memory.  Features are bulk-upserted
 with a compound unique key ``(dataset_key, feature_key)`` to allow
 idempotent re-imports.
 
-Collection: ``osm_features`` in the ``AFL_EXAMPLES_DATABASE`` database
+Collection: ``osm_features`` in the ``FW_EXAMPLES_DATABASE`` database
 (default ``facetwork_examples``), keeping OSM data isolated from the
 Facetwork runtime database.
 """
@@ -28,8 +28,8 @@ BATCH_SIZE = 1000
 
 def get_mongo_db() -> Database:
     """Connect to MongoDB for OSM feature storage."""
-    url = os.environ.get("AFL_MONGODB_URL", "mongodb://afl-mongodb:27017")
-    db_name = os.environ.get("AFL_EXAMPLES_DATABASE", "facetwork_examples")
+    url = os.environ.get("FW_MONGODB_URL", "mongodb://afl-mongodb:27017")
+    db_name = os.environ.get("FW_EXAMPLES_DATABASE", "facetwork_examples")
     return MongoClient(url)[db_name]
 
 

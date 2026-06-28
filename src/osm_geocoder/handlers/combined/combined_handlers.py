@@ -19,7 +19,7 @@ def _scan_outputs_usable(rv: dict, step_log=None) -> bool:
     A manifest records per-category ``output_path``s nested in its ``results``
     JSON (which ``cached_result``'s top-level existence check never sees). If
     those were written under a different backend than the one in effect now —
-    e.g. local paths cached before ``AFL_STORAGE=s3`` — handing them downstream
+    e.g. local paths cached before ``FW_STORAGE=s3`` — handing them downstream
     fails: a local path is unreadable as an S3 key, and a deleted artifact is a
     dead path. Returns False (→ re-scan) when any cached output is on a different
     backend than where a fresh scan would write, or no longer exists there."""

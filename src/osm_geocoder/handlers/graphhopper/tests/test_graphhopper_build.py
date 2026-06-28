@@ -42,8 +42,8 @@ def test_counts_from_log_absent():
 
 
 def test_build_graph_local_roundtrip(monkeypatch, tmp_path):
-    monkeypatch.setenv("AFL_STORAGE", "local")
-    monkeypatch.setenv("AFL_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("FW_STORAGE", "local")
+    monkeypatch.setenv("FW_DATA_ROOT", str(tmp_path))
     s = get_storage()
     region, profile = "test/region", "car"
 
@@ -84,8 +84,8 @@ def test_build_graph_local_roundtrip(monkeypatch, tmp_path):
 def test_validate_graph_handler_uses_carried_counts_and_storage(monkeypatch, tmp_path):
     # ValidateGraph must not depend on parsing the binary GH8 properties file:
     # it trusts the counts carried on the cache and confirms existence via storage.
-    monkeypatch.setenv("AFL_STORAGE", "local")
-    monkeypatch.setenv("AFL_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("FW_STORAGE", "local")
+    monkeypatch.setenv("FW_DATA_ROOT", str(tmp_path))
     from osm_geocoder.handlers.graphhopper.graphhopper_handlers import (
         validate_graph_handler,
     )

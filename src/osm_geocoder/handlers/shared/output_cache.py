@@ -142,7 +142,7 @@ def cached_result(
     from facetwork.config import get_output_base
 
     meta_dir = os.environ.get(
-        "AFL_OSM_OUTPUT_BASE",
+        "FW_OSM_OUTPUT_BASE",
         os.path.join(get_output_base(), "osm"),
     )
     meta_file = f"{meta_dir.rstrip('/')}/.osm-meta/{key[:2]}/{key}.json"
@@ -234,7 +234,7 @@ def save_result_meta(
     from facetwork.config import get_output_base
 
     meta_dir = os.environ.get(
-        "AFL_OSM_OUTPUT_BASE",
+        "FW_OSM_OUTPUT_BASE",
         os.path.join(get_output_base(), "osm"),
     )
     meta_file = f"{meta_dir.rstrip('/')}/.osm-meta/{key[:2]}/{key}.json"

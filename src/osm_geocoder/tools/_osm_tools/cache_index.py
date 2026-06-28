@@ -3,7 +3,7 @@
 Per ``agent-spec/cache-layout.agent-spec.yaml``, each ``(namespace,
 cache_type)`` pair may have a cached index at::
 
-    AFL_DATA_ROOT/_indexes/<namespace>/<cache_type>.index.json
+    FW_DATA_ROOT/_indexes/<namespace>/<cache_type>.index.json
 
 The index is **never authoritative** — the sidecars under
 ``cache/<namespace>/<cache_type>/`` are. The index exists purely so that

@@ -84,7 +84,7 @@ independently.
   processes sharing one handler registration.
 - **Remote host:** `fw runner start --host h2.example --domain osm-geocoder --no-dashboard`
   (the osm package must be installed on the remote venv too; needs SSH
-  reachability and `AFL_RUNNER_HOSTS` or repeated `--host` flags).
+  reachability and `FW_RUNNER_HOSTS` or repeated `--host` flags).
 - **Register handlers without starting a runner:**
   `python -m facetwork.domains osm-geocoder` — handy if a runner is
   already running but its handler set is stale.

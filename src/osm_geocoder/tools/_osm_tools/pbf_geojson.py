@@ -128,13 +128,13 @@ def _staging_path(region: str, fmt: str, storage: Any = None) -> Path:
     there would resolve, via ``geojson_abs_path``'s ``Path()``, to a mangled
     ``s3:/…`` path written on the container's internal disk (which previously
     ENOSPC-crashed mongo). ``local_staging_subdir`` roots staging at
-    ``AFL_LOCAL_SCRATCH`` (the external scratch disk). For local storage, stage
+    ``FW_LOCAL_SCRATCH`` (the external scratch disk). For local storage, stage
     adjacent to the destination (same FS → atomic rename).
     """
     s = storage or get_storage()
     safe = region.replace("/", "_")
     fname = f"{safe}-latest.{FORMAT_EXT[fmt]}.tmp"
-    force_local_scratch = (os.environ.get("AFL_CONVERT_STAGING") or "").lower() == "tmp"
+    force_local_scratch = (os.environ.get("FW_CONVERT_STAGING") or "").lower() == "tmp"
     if force_local_scratch or getattr(s, "name", "local") != "local":
         return Path(local_staging_subdir("facetwork-geojson-staging")) / fname
     out = geojson_abs_path(region, fmt, s)
@@ -183,12 +183,12 @@ def convert_region(
     Storage-agnostic: the cached PBF is localized (downloaded from S3/MinIO or
     HDFS to a local cache, a no-op for local storage) before osmium reads it,
     and the GeoJSON output is finalized back to the same backend — so on
-    ``AFL_STORAGE=s3`` both the read and the write go through MinIO.
+    ``FW_STORAGE=s3`` both the read and the write go through MinIO.
 
     ``max_pbf_mb`` (0 = no limit) skips regions whose cached PBF exceeds the
     limit, returning ``ConvertResult(skipped=True)`` WITHOUT localizing or
     converting (so an oversized PBF isn't even downloaded). Falls back to the
-    ``AFL_OSM_MAX_PBF_MB`` env var when the argument is 0. This lives here in the
+    ``FW_OSM_MAX_PBF_MB`` env var when the argument is 0. This lives here in the
     shared library — not in any one handler — so every caller (the
     ``convert-pbf-geojson`` CLI, the FFL ``osm.Source.PBF.ToGeoJson`` handler,
     and any other consumer) gets the same size-gate behaviour.
@@ -205,7 +205,7 @@ def convert_region(
         )
 
     # Size gate (shared by CLI + handler): skip oversized PBFs BEFORE localizing.
-    effective_max = int(max_pbf_mb or 0) or int(os.environ.get("AFL_OSM_MAX_PBF_MB") or 0)
+    effective_max = int(max_pbf_mb or 0) or int(os.environ.get("FW_OSM_MAX_PBF_MB") or 0)
     pbf_bytes = int(pbf_side.get("size_bytes") or 0)
     if effective_max > 0 and pbf_bytes > effective_max * 1024 * 1024:
         return ConvertResult(
@@ -267,8 +267,8 @@ def convert_region(
         # flex_mem index grows unbounded and OOM-kills osmium on large regions
         # (continents need GBs just for the index) on memory-constrained hosts.
         # sparse_file_array suits OSM extracts (sparse global node IDs); override
-        # with AFL_OSMIUM_INDEX_TYPE (e.g. flex_mem for small-region speed).
-        index_type = os.environ.get("AFL_OSMIUM_INDEX_TYPE", "sparse_file_array")
+        # with FW_OSMIUM_INDEX_TYPE (e.g. flex_mem for small-region speed).
+        index_type = os.environ.get("FW_OSMIUM_INDEX_TYPE", "sparse_file_array")
         idx_path = staging.with_name(staging.name + ".nodeidx")
         idx_path.unlink(missing_ok=True)
         index_arg = (

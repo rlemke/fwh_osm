@@ -9,7 +9,7 @@ lock for the rare case of two writers replacing the same key.
 
 Layout (see ``agent-spec/cache-layout.agent-spec.yaml``)::
 
-    AFL_DATA_ROOT/
+    FW_DATA_ROOT/
       cache/<namespace>/<cache_type>/<relative_path>
       cache/<namespace>/<cache_type>/<relative_path>.meta.json
       staging/<namespace>/<cache_type>/<relative_path>.stage-<tag>

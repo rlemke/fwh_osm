@@ -34,7 +34,7 @@ public final class RouteBatchHandler implements Handler {
     public RouteBatchHandler(GraphHopperPool pool, S3Util s3) {
         this.pool = pool;
         this.s3 = s3;
-        this.outputBase = S3Util.env("AFL_OSM_OUTPUT_BASE", "s3://afl-cache/osm-output");
+        this.outputBase = S3Util.env("FW_OSM_OUTPUT_BASE", "s3://afl-cache/osm-output");
     }
 
     @Override

@@ -1,6 +1,6 @@
 """Phase 2 tests for osm.Network.ApproxRoute — snap + Dijkstra + reachability.
 
-Deterministic synthetic networks built in a tmp AFL_DATA_ROOT, then routed.
+Deterministic synthetic networks built in a tmp FW_DATA_ROOT, then routed.
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ def _line(coords, **props):
 
 
 def _build(tmp_path, monkeypatch, features, ref_filter=""):
-    monkeypatch.setenv("AFL_DATA_ROOT", str(tmp_path / "data"))
-    monkeypatch.setenv("AFL_OUTPUT_BASE", str(tmp_path / "out"))
+    monkeypatch.setenv("FW_DATA_ROOT", str(tmp_path / "data"))
+    monkeypatch.setenv("FW_OUTPUT_BASE", str(tmp_path / "out"))
     src = tmp_path / "edges.geojson"
     src.write_text(json.dumps({"type": "FeatureCollection", "features": features}))
     return ops.build_network(str(src), ref_filter=ref_filter, snap_tolerance_m=25.0).network_path

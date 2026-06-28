@@ -19,7 +19,7 @@ Thin adapters over ``tools/_osm_tools/graphhopper_build.py``. The real logic
 (region, profile) locking, finalize-from-local staging) lives in the
 library so the CLI tool (``build-graphhopper-graph``) and these
 handlers share one code path and one cache layout at
-``$AFL_DATA_ROOT/cache/osm/graphhopper/<region>-latest/<profile>/``.
+``$FW_DATA_ROOT/cache/osm/graphhopper/<region>-latest/<profile>/``.
 """
 
 from __future__ import annotations

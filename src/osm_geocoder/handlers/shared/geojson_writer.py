@@ -191,7 +191,7 @@ class GeoJSONStreamWriter:
             w.write_feature({"type": "Feature", ...})
         print(w.feature_count)
 
-    When *atomic* is True, writes go to a temporary file under ``AFL_OUTPUT_BASE/tmp``
+    When *atomic* is True, writes go to a temporary file under ``FW_OUTPUT_BASE/tmp``
     and are moved to *path* only on successful :meth:`close`.  This
     prevents corrupt partial files when the process is killed mid-scan
     (especially on VirtioFS mounts).

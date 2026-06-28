@@ -54,7 +54,7 @@ from .pbf_download import GEOFABRIK_BASE
 
 # The osmium CLI (already a hard dependency of the static extractors). Overridable
 # for hosts where it isn't on PATH.
-_OSMIUM_BIN = os.environ.get("AFL_OSMIUM_BIN", "osmium")
+_OSMIUM_BIN = os.environ.get("FW_OSMIUM_BIN", "osmium")
 
 # Type char <-> osmium @type, and the id-token form osmium getid -i expects.
 _TYPE_CHAR = {"node": "n", "way": "w", "relation": "r"}

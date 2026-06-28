@@ -18,7 +18,7 @@ Thin adapters over ``tools/_osm_tools/html_render.py``. The real render
 logic (style generation, per-region directory, master index rewrite,
 manifest-based cache) lives in the library so the CLI
 (``render-html-maps``) and these handlers share one code path and
-one cache layout at ``$AFL_DATA_ROOT/cache/osm/html/``.
+one cache layout at ``$FW_DATA_ROOT/cache/osm/html/``.
 """
 
 from __future__ import annotations

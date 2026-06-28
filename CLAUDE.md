@@ -64,9 +64,9 @@ pass or a full-PBF tag filter.
 max_pbf_mb=0)` exports an *entire* region PBF to GeoJSON via `osmium export`
 (every feature, not a category), object-store-native: it localizes the cached
 PBF, runs osmium with a disk-backed node index (`-i sparse_file_array`,
-overridable via `AFL_OSMIUM_INDEX_TYPE`), and finalizes to the `geojson` cache
-type (MinIO on `AFL_STORAGE=s3`). Idempotent on the source SHA. `max_pbf_mb`
-(0 = no limit; env fallback `AFL_OSM_MAX_PBF_MB`) skips regions whose cached PBF
+overridable via `FW_OSMIUM_INDEX_TYPE`), and finalizes to the `geojson` cache
+type (MinIO on `FW_STORAGE=s3`). Idempotent on the source SHA. `max_pbf_mb`
+(0 = no limit; env fallback `FW_OSM_MAX_PBF_MB`) skips regions whose cached PBF
 exceeds the limit (returns `skipped=true` without downloading), so a bulk run on
 a memory-constrained host skips the continents/big countries that OOM or
 seek-thrash osmium's index instead of stalling. Driven by the `osm.convert`
@@ -188,11 +188,11 @@ can't collectively hammer the shared egress IP (it wraps only the cache-miss
 fetch and **fails open** if Mongo is unavailable); HTTP `429`/`503` are retried
 honouring a **capped `Retry-After`**; and a cached file is revalidated with a
 conditional GET (`If-Modified-Since` → `304` → cache hit, no re-download). Knobs:
-`AFL_GEOFABRIK_BASE_URL` (constant `GEOFABRIK_BASE`, default
+`FW_GEOFABRIK_BASE_URL` (constant `GEOFABRIK_BASE`, default
 `https://download.geofabrik.de`) reroutes **all** region + replication URLs to a
-mirror/internal cache; `AFL_OSM_DOWNLOAD_CONCURRENCY` (default `3`),
-`AFL_OSM_DOWNLOAD_LEASE_MS`, `AFL_OSM_RETRY_AFTER_CAP_SECONDS` (`300`),
-`AFL_OSM_RATE_LIMIT_MAX_ATTEMPTS` (`6`). See `tools/README.md` →
+mirror/internal cache; `FW_OSM_DOWNLOAD_CONCURRENCY` (default `3`),
+`FW_OSM_DOWNLOAD_LEASE_MS`, `FW_OSM_RETRY_AFTER_CAP_SECONDS` (`300`),
+`FW_OSM_RATE_LIMIT_MAX_ATTEMPTS` (`6`). See `tools/README.md` →
 **Rate-limit-safe downloads**.
 
 The same replication machinery also powers **change detection** —
@@ -261,9 +261,9 @@ a facet taking `cache: OSMCache` scans the PBF (external/expensive); one taking 
 is in-process (pure/cheap); anything hitting a server/DB/subprocess is external.
 
 **External-engine deps** (the only non-pure facets): Routing needs a running OSRM
-(`AFL_OSRM_URL`, default `http://localhost:5000`); `BuildVectorTiles` needs
+(`FW_OSRM_URL`, default `http://localhost:5000`); `BuildVectorTiles` needs
 `tippecanoe` (+ `pmtiles` for PMTiles output); geocoding hits Nominatim
-(`AFL_NOMINATIM_URL`). Each degrades gracefully or fails explicitly when its
+(`FW_NOMINATIM_URL`). Each degrades gracefully or fails explicitly when its
 engine is absent.
 
 **`osm.Network` is the engine-free routing tier.** When you only need approximate
@@ -291,14 +291,14 @@ now-unique GeoJSON stem, so it is unique too.
 extracts, scan manifests) — those are input-addressed and shared across runs by
 design (that sharing is what makes `ExtractCategory` cheap).
 
-Opt-in per-run isolation: set **`AFL_OUTPUT_PER_RUN=1`** and leaf artifacts land
+Opt-in per-run isolation: set **`FW_OUTPUT_PER_RUN=1`** and leaf artifacts land
 under `<category>/runs/<workflow_id>/` (handlers pass `run_id=payload["_workflow_id"]`,
 the execution id injected by the runner) — a retained, easily-cleaned per-run
 tree. Default (unset) keeps the shared, cache-friendly directory.
 
 ### PostGIS source
 
-Connects to the `osm` database (default: `AFL_POSTGIS_URL`). The
+Connects to the `osm` database (default: `FW_POSTGIS_URL`). The
 `PostGISSource` schema takes `postgis_url` and `region` parameters. Queries
 use `tags JSONB` for filtering, e.g. `tags->>'amenity' = 'hospital'`.
 
@@ -312,7 +312,7 @@ osm2pgsql-compatible views are auto-created by `ensure_schema`:
 Every domain pipeline follows one contract: a `tools/` dir of Python CLIs +
 shell wrappers backed by `tools/_osm_tools/`, FFL handlers that call into the
 same `_osm_tools/` via a `handlers/shared/<domain>_utils.py` shim, and a
-sidecar-backed cache under `$AFL_CACHE_ROOT/<namespace>/`. See
+sidecar-backed cache under `$FW_CACHE_ROOT/<namespace>/`. See
 `agent-spec/tools-pattern.agent-spec.yaml` and
 `agent-spec/cache-layout.agent-spec.yaml` for the full contract.
 
@@ -325,8 +325,8 @@ they apply automatically:
 
 ```python
 runner_env = {
-    "AFL_TASK_EXECUTION_TIMEOUT_MS": "14400000",  # 4 hours
-    "AFL_STUCK_TIMEOUT_MS":           "14400000",
+    "FW_TASK_EXECUTION_TIMEOUT_MS": "14400000",  # 4 hours
+    "FW_STUCK_TIMEOUT_MS":           "14400000",
 }
 ```
 
@@ -338,7 +338,7 @@ possible single-batch DB write.
 
 For large imports, a disposable Docker-based PostgreSQL instance can absorb
 the hours of PBF parsing I/O, then bulk-transfer the finished data to the
-main server. Set `AFL_IMPORT_POSTGIS_URL` (e.g.
+main server. Set `FW_IMPORT_POSTGIS_URL` (e.g.
 `postgresql://afl_osm:afl_osm_2024@localhost:5433/osm`) to enable; the
 import flow then:
 

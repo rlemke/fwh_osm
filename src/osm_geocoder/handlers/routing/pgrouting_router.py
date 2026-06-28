@@ -15,8 +15,8 @@ Route philosophy).
 
 Setup (one-time per region): osm2pgrouting -f region.osm.pbf -d <db> ... then
 ``CREATE EXTENSION pgrouting;``. Environment:
-    AFL_POSTGIS_URL: PostgreSQL DSN (default postgresql://afl:afl@afl-postgres:5432/afl_gis)
-    AFL_PGROUTING_PREFIX: table-name prefix (default "" -> ways / ways_vertices_pgr)
+    FW_POSTGIS_URL: PostgreSQL DSN (default postgresql://afl:afl@afl-postgres:5432/afl_gis)
+    FW_PGROUTING_PREFIX: table-name prefix (default "" -> ways / ways_vertices_pgr)
 """
 
 from __future__ import annotations
@@ -40,8 +40,8 @@ except ImportError:  # pragma: no cover
     psycopg2 = None
     HAS_PSYCOPG2 = False
 
-POSTGIS_URL = os.environ.get("AFL_POSTGIS_URL", "postgresql://afl:afl@afl-postgres:5432/afl_gis")
-_PREFIX = os.environ.get("AFL_PGROUTING_PREFIX", "")
+POSTGIS_URL = os.environ.get("FW_POSTGIS_URL", "postgresql://afl:afl@afl-postgres:5432/afl_gis")
+_PREFIX = os.environ.get("FW_PGROUTING_PREFIX", "")
 
 # Profile -> assumed speed (km/h) for duration estimation over distance-optimal routes.
 _SPEED_KMH = {"car": 80, "driving": 80, "auto": 80,

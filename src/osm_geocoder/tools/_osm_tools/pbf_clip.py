@@ -144,7 +144,7 @@ def _source_pbf_path(region: str, storage: Any = None) -> Path:
 
 def _staging_path(name: str, storage: Any = None) -> Path:
     """Stage adjacent to the final destination unless forced to tmp."""
-    if (os.environ.get("AFL_CONVERT_STAGING") or "").lower() == "tmp":
+    if (os.environ.get("FW_CONVERT_STAGING") or "").lower() == "tmp":
         base = tempfile.gettempdir()
         safe = name.replace("/", "_")
         return Path(base) / "facetwork-pbf-clip-staging" / safe / f"{name}-latest.osm.pbf"

@@ -288,7 +288,7 @@ namespace osm.africa {
 You don't need to register all 580+ handlers. Use topic filtering:
 
 ```bash
-AFL_USE_REGISTRY=1 AFL_RUNNER_TOPICS=osm.geocode,osm.cache.Europe \
+FW_USE_REGISTRY=1 FW_RUNNER_TOPICS=osm.geocode,osm.cache.Europe \
     PYTHONPATH=src python agent.py
 ```
 
@@ -303,7 +303,7 @@ public endpoint. Point every region **and** replication fetch at a mirror or
 internal cache with one environment variable:
 
 ```bash
-export AFL_GEOFABRIK_BASE_URL=https://mirror.example.org/geofabrik   # default: https://download.geofabrik.de
+export FW_GEOFABRIK_BASE_URL=https://mirror.example.org/geofabrik   # default: https://download.geofabrik.de
 ```
 
 This reroutes both the `-latest.osm.pbf` downloads and the `<region>-updates/`
@@ -311,7 +311,7 @@ replication diffs. Independently of the mirror, cache-miss downloads pass throug
 a Mongo-backed **fleet-wide download semaphore** (caps concurrent fetches; fails
 open if Mongo is absent) and honour HTTP `429`/`503` `Retry-After`, so even a
 shared egress IP stays under Geofabrik's limits. The related knobs
-(`AFL_OSM_DOWNLOAD_CONCURRENCY`, `AFL_OSM_RETRY_AFTER_CAP_SECONDS`, …) and the
+(`FW_OSM_DOWNLOAD_CONCURRENCY`, `FW_OSM_RETRY_AFTER_CAP_SECONDS`, …) and the
 diffs-only **`update-delta`** CLI are documented in
 [`tools/README.md`](src/osm_geocoder/tools/README.md) → *Rate-limit-safe
 downloads* / *Cache updates*.

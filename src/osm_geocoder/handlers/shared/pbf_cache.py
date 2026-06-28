@@ -9,7 +9,7 @@ is shared verbatim by:
 
 Both entry points call ``download_region`` here, so they end up reading
 and writing the same on-disk PBF cache
-(``$AFL_DATA_ROOT/cache/osm/pbf/...``) and the same per-entry
+(``$FW_DATA_ROOT/cache/osm/pbf/...``) and the same per-entry
 ``.meta.json`` sidecars — the tool and the FFL are two surfaces onto one
 cache.
 

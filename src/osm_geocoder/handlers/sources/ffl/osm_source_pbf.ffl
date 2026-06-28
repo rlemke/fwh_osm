@@ -46,7 +46,7 @@ namespace osm.Source.PBF {
      *  feature, not a single category (unlike the Extract* facets above).
      *  Reads the cached PBF (localizing from the object store first when on
      *  S3/MinIO) and writes the GeoJSON to the configured storage backend
-     *  under the `geojson` cache type — i.e. into MinIO when AFL_STORAGE=s3.
+     *  under the `geojson` cache type — i.e. into MinIO when FW_STORAGE=s3.
      *  Idempotent: a region already converted (matching source SHA) returns
      *  the cached GeoJSON without re-running osmium.
      *
@@ -56,7 +56,7 @@ namespace osm.Source.PBF {
      *  node-location index in (disk-backed) memory; on a memory-constrained host
      *  the largest extracts (continents, big countries) either OOM or seek-thrash
      *  the index off the page cache, so a size gate lets a bulk run skip them
-     *  cleanly instead of stalling. Falls back to the AFL_OSM_MAX_PBF_MB env var
+     *  cleanly instead of stalling. Falls back to the FW_OSM_MAX_PBF_MB env var
      *  when the parameter is 0, so an operator can cap a run already in flight. */
     event facet ToGeoJson(cache: OSMCache, format: String = "geojson", max_pbf_mb: Long = 0) => (output_path: String, size_bytes: Long, was_cached: Boolean, skipped: Boolean) with Timeout(minutes = 180) with Effect(kind = "external")
 }

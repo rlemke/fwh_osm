@@ -32,8 +32,8 @@ namespace osm.cache {
      *     Geofabrik call) — so a present-but-out-of-date extract is used as is,
      *     never re-pulling gigabytes (Geofabrik rebuilds PBFs daily). This is the
      *     default so cache-backed runs (e.g. the MinIO object store) don't depend
-     *     on internet egress or the AFL_OSM_USE_CACHE_IF_PRESENT env.
-     *   - "auto": follow the AFL_OSM_USE_CACHE_IF_PRESENT env.
+     *     on internet egress or the FW_OSM_USE_CACHE_IF_PRESENT env.
+     *   - "auto": follow the FW_OSM_USE_CACHE_IF_PRESENT env.
      *   - "refresh": always re-download fresh (used by the cache-update
      *     workflows in osmcache_refresh.ffl).
      *   - "revalidate": always check Geofabrik, re-download only if changed. */

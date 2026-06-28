@@ -110,7 +110,7 @@ Organized by role in the pipeline.
 
 ### Source acquisition
 
-- **download-pbf** — fetch Geofabrik PBFs into `pbf/<region>-latest.osm.pbf`. Verified against Geofabrik's published `.md5`; local `sha256` recorded for tamper detection. Sequential (Geofabrik rate-limits per IP). Region selection: positional args, `--regions-file`, or `--all` / `--all-under PREFIX` resolved from Geofabrik's `index-v1.json` (leaves-only by default; `--include-parents` for continent/country-level PBFs). `--list-missing` previews uncached regions; `--update-all` refreshes only those whose upstream MD5 changed. Supports `--backend {local,hdfs}`. **Rate-limit-safe by default** (see [Rate-limit-safe downloads](#rate-limit-safe-downloads) below): a Mongo-backed fleet-wide semaphore caps concurrent fetches, HTTP `429`/`503` are honoured with a capped `Retry-After` backoff, and a cached file is revalidated with a conditional GET (`If-Modified-Since` → `304` → no re-download). All URLs (region + replication) route through `AFL_GEOFABRIK_BASE_URL` so a mirror can stand in for `download.geofabrik.de`.
+- **download-pbf** — fetch Geofabrik PBFs into `pbf/<region>-latest.osm.pbf`. Verified against Geofabrik's published `.md5`; local `sha256` recorded for tamper detection. Sequential (Geofabrik rate-limits per IP). Region selection: positional args, `--regions-file`, or `--all` / `--all-under PREFIX` resolved from Geofabrik's `index-v1.json` (leaves-only by default; `--include-parents` for continent/country-level PBFs). `--list-missing` previews uncached regions; `--update-all` refreshes only those whose upstream MD5 changed. Supports `--backend {local,hdfs}`. **Rate-limit-safe by default** (see [Rate-limit-safe downloads](#rate-limit-safe-downloads) below): a Mongo-backed fleet-wide semaphore caps concurrent fetches, HTTP `429`/`503` are honoured with a capped `Retry-After` backoff, and a cached file is revalidated with a conditional GET (`If-Modified-Since` → `304` → no re-download). All URLs (region + replication) route through `FW_GEOFABRIK_BASE_URL` so a mirror can stand in for `download.geofabrik.de`.
 - **clip-pbf** — custom-geometry PBF via `osmium extract`. Output lands at `pbf/clips/<name>-latest.osm.pbf` so **every downstream tool treats it as a normal region called `clips/<name>`** — no special casing. Cache validity: source region SHA + clip spec (bbox values or polygon content hash). `--update-all` re-clips entries whose source has changed.
 - **download-gtfs** — per-agency GTFS feed downloader. Cache validity via HTTP `Last-Modified` / `ETag` — a HEAD request decides whether to skip. Manifest records parsed `feed_info.txt` fields (publisher, version, validity window). Zip integrity verified before the cache is committed.
 - **download-elevation** — Copernicus DEM GLO-30 rasters for a bbox via `gdalwarp` + `/vsicurl/` against AWS Open Data (no auth). Computes the 1°×1° tile grid intersecting the bbox, streams only the bytes needed, outputs a compressed tiled GeoTIFF at `elevation/<name>-latest.tif`.
@@ -121,7 +121,7 @@ Organized by role in the pipeline.
 - **convert-pbf-shapefile** — `ogr2ogr` PBF → multi-layer ESRI Shapefile **bundle directory** (one `.shp`/`.shx`/`.dbf`/`.prj`/`.cpg` set per layer). Layers: `points`, `lines`, `multilinestrings`, `multipolygons` (the `other_relations` GeometryCollection is always skipped — shapefile can't hold it). `--layers` restricts the output; superset-semantics cache hits (a cache built with all four layers satisfies a later request for a subset).
 - **extract** — `osmium tags-filter | osmium export` — one pre-filtered GeoJSONSeq per category. Categories live in `_osm_tools/pbf_extract.py::CATEGORIES` (one dict entry defines a category: name, FFL facet name, tag expression, filter_version). Current set: `water`, `protected_areas`, `parks`, `forests`, `roads_routable`, `turn_restrictions`, `railways_routable`, `cycle_routes`, `hiking_routes`. `--extract-all-categories` runs every category per region; `--update-all` pre-filters to just the stale work. Adding a new category = one dict entry + one FFL `event facet` line.
 - **build-vector-tiles** — `tippecanoe` GeoJSONSeq → PMTiles. `--source` picks the input cache (`geojson` for whole-region, or any extract category); `--all-sources` fans out across every valid source. Tiling options (min/max zoom, layer name) are part of the cache key, so changing them triggers a rebuild only for affected entries.
-- **render-html-maps** — MapLibre GL JS + PMTiles viewer per region. Consumes the `vector_tiles/` cache and emits `html/<region>-latest/index.html` + `style.json`. Sub-classifies layers at render time via MapLibre filter expressions — **highways split into motorway / trunk / primary / secondary / tertiary / residential**, **water split into lakes, rivers (line + polygon), canals, streams**, **protected areas split into national park / state park / other protected / nature reserve**, and **16 POI categories with per-category colored circles with click popups showing OSM tags**. Also refreshes the master `html/index.html` table on every run. Cache validity: source PMTiles SHAs + `STYLE_VERSION`. Serve with `python -m http.server --directory $AFL_OSM_CACHE_ROOT 8000` and open `http://localhost:8000/html/`.
+- **render-html-maps** — MapLibre GL JS + PMTiles viewer per region. Consumes the `vector_tiles/` cache and emits `html/<region>-latest/index.html` + `style.json`. Sub-classifies layers at render time via MapLibre filter expressions — **highways split into motorway / trunk / primary / secondary / tertiary / residential**, **water split into lakes, rivers (line + polygon), canals, streams**, **protected areas split into national park / state park / other protected / nature reserve**, and **16 POI categories with per-category colored circles with click popups showing OSM tags**. Also refreshes the master `html/index.html` table on every run. Cache validity: source PMTiles SHAs + `STYLE_VERSION`. Serve with `python -m http.server --directory $FW_OSM_CACHE_ROOT 8000` and open `http://localhost:8000/html/`.
 
 ### Routing engines
 
@@ -192,13 +192,13 @@ Env knobs:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AFL_GEOFABRIK_BASE_URL` | `https://download.geofabrik.de` | Mirror/base URL for **all** region + replication fetches (`GEOFABRIK_BASE`) |
-| `AFL_OSM_DOWNLOAD_CONCURRENCY` | `3` | Max concurrent fleet-wide downloads (semaphore slots) |
-| `AFL_OSM_DOWNLOAD_LEASE_MS` | `14400000` (4h) | Per-slot lease duration (renewed by heartbeat) |
-| `AFL_OSM_RETRY_AFTER_CAP_SECONDS` | `300` | Cap on an honoured upstream `Retry-After` |
-| `AFL_OSM_RATE_LIMIT_MAX_ATTEMPTS` | `6` | Max `429`/`503` retries for a small request |
+| `FW_GEOFABRIK_BASE_URL` | `https://download.geofabrik.de` | Mirror/base URL for **all** region + replication fetches (`GEOFABRIK_BASE`) |
+| `FW_OSM_DOWNLOAD_CONCURRENCY` | `3` | Max concurrent fleet-wide downloads (semaphore slots) |
+| `FW_OSM_DOWNLOAD_LEASE_MS` | `14400000` (4h) | Per-slot lease duration (renewed by heartbeat) |
+| `FW_OSM_RETRY_AFTER_CAP_SECONDS` | `300` | Cap on an honoured upstream `Retry-After` |
+| `FW_OSM_RATE_LIMIT_MAX_ATTEMPTS` | `6` | Max `429`/`503` retries for a small request |
 
-Point `AFL_GEOFABRIK_BASE_URL` at an internal mirror (or local cache server) to
+Point `FW_GEOFABRIK_BASE_URL` at an internal mirror (or local cache server) to
 keep CI/offline builds off the public Geofabrik endpoint entirely — it reroutes
 both the `-latest.osm.pbf` region fetches and the `<region>-updates/` replication
 diffs.
@@ -211,7 +211,7 @@ contend. See [`agent-spec/cache-layout.agent-spec.yaml`](../../../agent-spec/cac
 for the full contract.
 
 ```
-$AFL_DATA_ROOT/           (default: /Volumes/afl_data — override via env)
+$FW_DATA_ROOT/           (default: /Volumes/afl_data — override via env)
 ├── cache/
 │   └── osm/
 │       ├── pbf/
@@ -254,7 +254,7 @@ $AFL_DATA_ROOT/           (default: /Volumes/afl_data — override via env)
 - `local` (default) — standard POSIX filesystem, atomic temp+rename writes, per-entry `fcntl` advisory locking when overwriting an existing entry (no global lock).
 - `hdfs` — HDFS via WebHDFS (soft-imports `facetwork.runtime.storage`). Default root `/user/afl`. **No advisory locking** — single-writer semantics assumed. Rename is atomic at the namenode; directory-finalize tools (shapefile, graphhopper, valhalla, osrm) don't support HDFS yet.
 
-Select the backend per invocation with `--backend {local,hdfs}` or globally via `AFL_STORAGE`. Override the data root with `AFL_DATA_ROOT` (or individually: `AFL_CACHE_ROOT`, `AFL_STAGING_ROOT`, `AFL_TMP_ROOT`, `AFL_INDEXES_ROOT`, `AFL_LOCKS_ROOT`).
+Select the backend per invocation with `--backend {local,hdfs}` or globally via `FW_STORAGE`. Override the data root with `FW_DATA_ROOT` (or individually: `FW_CACHE_ROOT`, `FW_STAGING_ROOT`, `FW_TMP_ROOT`, `FW_INDEXES_ROOT`, `FW_LOCKS_ROOT`).
 
 ### Manifest entry shape
 
@@ -296,7 +296,7 @@ Every tool records:
 - `main()` function and `if __name__ == "__main__": main()` guard.
 - Exit codes: `0` on success, non-zero on failure. Errors to `stderr`.
 - Log to `stderr`; reserve `stdout` for structured output (JSON, CSV, region lists).
-- Config from env vars where possible (`AFL_DATA_ROOT`, `AFL_POSTGIS_URL`, etc.). CLI flags override env vars.
+- Config from env vars where possible (`FW_DATA_ROOT`, `FW_POSTGIS_URL`, etc.). CLI flags override env vars.
 - Do **not** depend on the Facetwork runtime, MongoDB, or the dashboard. Tools should run without a workflow stack. PostGIS, HDFS, external APIs are fine.
 - Type hints on every function. Module docstring with usage + external deps.
 - If your tool caches outputs, put the core logic in `_osm_tools/<name>.py` so the FFL handlers can call it too. The CLI becomes a thin wrapper.
@@ -313,7 +313,7 @@ Every tool records:
 - Pick a short, plural-noun-ish cache type name (`shapefiles`, `parks`, `vector_tiles`, `elevation`).
 - Use per-entry `.meta.json` sidecars (no shared manifest). See `agent-spec/cache-layout.agent-spec.yaml`.
 - Mirror upstream path hierarchy where there is one (Geofabrik: `europe/germany/berlin-...`).
-- Stage downloads / builds under `$AFL_STAGING_ROOT/<namespace>/<cache_type>/` and finalize via `storage.finalize_from_local` / `finalize_dir_from_local`. Don't write partial files to the destination.
+- Stage downloads / builds under `$FW_STAGING_ROOT/<namespace>/<cache_type>/` and finalize via `storage.finalize_from_local` / `finalize_dir_from_local`. Don't write partial files to the destination.
 - Record source-lineage SHA + tool version in every entry so cache validity is self-describing.
 - Expose a `--list`, `--list-missing`, `--update-all`, `--force`, `--dry-run` surface. If your tool has an axis (profile, category, source), match the existing tools' flag shape.
 
@@ -364,7 +364,7 @@ Every tool records:
 ./tools/render-html-maps.sh europe/liechtenstein
 
 # Serve everything and open the result in a browser:
-python -m http.server --directory "$AFL_CACHE_ROOT/osm" 8000 &
+python -m http.server --directory "$FW_CACHE_ROOT/osm" 8000 &
 open http://localhost:8000/html/           # the master index
 # → click into europe/liechtenstein-latest/
 ```

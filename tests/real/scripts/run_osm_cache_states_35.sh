@@ -22,7 +22,7 @@ fi
 HDFS_NAMENODE_DIR="${HDFS_NAMENODE_DIR:-$HOME/data/hdfs/namenode}"
 HDFS_DATANODE_DIR="${HDFS_DATANODE_DIR:-$HOME/data/hdfs/datanode}"
 MONGODB_DATA_DIR="${MONGODB_DATA_DIR:-}"
-GEOFABRIK_MIRROR="${AFL_GEOFABRIK_MIRROR:-}"
+GEOFABRIK_MIRROR="${FW_GEOFABRIK_MIRROR:-}"
 
 # ---------------------------------------------------------------------------
 # 1. Create data directories
@@ -79,13 +79,13 @@ echo ""
 # 4. Compile the AFL workflow
 # ---------------------------------------------------------------------------
 echo "=== Compiling osm_cache_states_35.afl ==="
-AFL_FILE="$REAL_DIR/ffl/osm_cache_states_35.ffl"
+FW_FILE="$REAL_DIR/ffl/osm_cache_states_35.ffl"
 OUTPUT_FILE="$REAL_DIR/osm_cache_states_35.json"
 
 cd "$PROJECT_DIR"
 source .venv/bin/activate 2>/dev/null || true
 
-afl --primary "$AFL_FILE" \
+afl --primary "$FW_FILE" \
     --library "$EXAMPLE_DIR/handlers/cache/ffl/osmtypes.ffl" \
     --library "$EXAMPLE_DIR/handlers/downloads/ffl/osmoperations.ffl" \
     --library "$EXAMPLE_DIR/handlers/cache/ffl/osmcache.ffl" \
@@ -98,9 +98,9 @@ echo ""
 # 5. Submit the workflow
 # ---------------------------------------------------------------------------
 echo "=== Submitting DownloadStates_35 workflow ==="
-export AFL_MONGODB_URL="mongodb://afl-mongodb:27017"
+export FW_MONGODB_URL="mongodb://afl-mongodb:27017"
 python -m afl.runtime.submit \
-    --primary "$AFL_FILE" \
+    --primary "$FW_FILE" \
     --library "$EXAMPLE_DIR/handlers/cache/ffl/osmtypes.ffl" \
     --library "$EXAMPLE_DIR/handlers/downloads/ffl/osmoperations.ffl" \
     --library "$EXAMPLE_DIR/handlers/cache/ffl/osmcache.ffl" \

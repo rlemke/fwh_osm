@@ -7,7 +7,7 @@
 // claimed by any osm runner in the fleet, so the 51 builds run in parallel
 // across all servers. Each state's PBF is downloaded (cache hit if present) and
 // fed to GraphHopper; the graph cache + PBF finalize to durable storage (MinIO
-// when AFL_STORAGE=s3). The list-typed `graphs` yield aggregates one
+// when FW_STORAGE=s3). The list-typed `graphs` yield aggregates one
 // GraphHopperCache per state at completion.
 //
 // Prerequisites: compile with osmtypes.ffl, osmregion.ffl, osmcache_download.ffl,
@@ -28,7 +28,7 @@ namespace osm.GraphHopper.UnitedStates {
      *  an already-cached extract AS-IS without re-downloading (skips Geofabrik
      *  revalidation — fast and resilient when upstream is slow/flaky, at the cost
      *  of a potentially out-of-date extract); "auto" defers to the runner's
-     *  AFL_OSM_USE_CACHE_IF_PRESENT env; "refresh" forces a fresh download. */
+     *  FW_OSM_USE_CACHE_IF_PRESENT env; "refresh" forces a fresh download. */
     workflow BuildAllStateGraphs(
         region_names: [String] = ["us"],
         profile: String = "car",

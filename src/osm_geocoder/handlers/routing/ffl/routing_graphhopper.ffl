@@ -3,7 +3,7 @@
 // Routes via a locally running open-source GraphHopper instance (GET params).
 // Same result schemas as the OSRM / Valhalla / API backends. Covers the verbs
 // the OSS server reliably exposes (Route, Isochrone); Matrix / map-matching are
-// separate/commercial GraphHopper modules. Set AFL_GRAPHHOPPER_URL (default
+// separate/commercial GraphHopper modules. Set FW_GRAPHHOPPER_URL (default
 // http://localhost:8989).
 
 /** GraphHopper routing adapter — routes via a self-hosted GraphHopper server. */

@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pytest
 from helpers import (
-    EXAMPLE_AFL_FILES,
+    EXAMPLE_FW_FILES,
     compile_afl_files,
     extract_workflow,
     run_to_completion,
@@ -84,8 +84,8 @@ ALL_WORKFLOW_NAMES = [
 
 def _compile_composed():
     """Compile all FFL files with osmworkflows_composed.afl as primary."""
-    primary = EXAMPLE_AFL_FILES["osmworkflows_composed.ffl"]
-    libs = [p for n, p in sorted(EXAMPLE_AFL_FILES.items()) if n != "osmworkflows_composed.ffl"]
+    primary = EXAMPLE_FW_FILES["osmworkflows_composed.ffl"]
+    libs = [p for n, p in sorted(EXAMPLE_FW_FILES.items()) if n != "osmworkflows_composed.ffl"]
     return compile_afl_files(primary, *libs)
 
 

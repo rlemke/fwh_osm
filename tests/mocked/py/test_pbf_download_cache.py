@@ -2,7 +2,7 @@
 
 Geofabrik rebuilds every PBF daily with a fresh md5, so the normal freshness
 check treats an older-but-valid cached PBF as stale and re-downloads it. The
-opt-in ``AFL_OSM_USE_CACHE_IF_PRESENT`` flag short-circuits that: a cached
+opt-in ``FW_OSM_USE_CACHE_IF_PRESENT`` flag short-circuits that: a cached
 region is returned as-is with NO Geofabrik call. These tests assert the
 no-network behaviour without touching the filesystem or network.
 """
@@ -50,7 +50,7 @@ def _patch_cached(monkeypatch, *, cached: bool):
 
 
 def test_cache_if_present_skips_geofabrik(monkeypatch):
-    monkeypatch.setenv("AFL_OSM_USE_CACHE_IF_PRESENT", "1")
+    monkeypatch.setenv("FW_OSM_USE_CACHE_IF_PRESENT", "1")
     calls = _patch_cached(monkeypatch, cached=True)
 
     res = pd.download_region("north-america/us/california", storage=_FakeStorage())
@@ -64,7 +64,7 @@ def test_cache_if_present_skips_geofabrik(monkeypatch):
 
 def test_cache_if_present_but_not_cached_falls_through(monkeypatch):
     # Flag on but region NOT cached → must still revalidate (hits fetch_md5).
-    monkeypatch.setenv("AFL_OSM_USE_CACHE_IF_PRESENT", "1")
+    monkeypatch.setenv("FW_OSM_USE_CACHE_IF_PRESENT", "1")
     calls = _patch_cached(monkeypatch, cached=False)
     # _stream_download would run next; stop after the md5 fetch to keep it offline.
     monkeypatch.setattr(pd, "_already_cached", lambda *a, **k: {"source": {}})
@@ -78,7 +78,7 @@ def test_cache_if_present_but_not_cached_falls_through(monkeypatch):
 
 
 def test_flag_off_always_revalidates(monkeypatch):
-    monkeypatch.delenv("AFL_OSM_USE_CACHE_IF_PRESENT", raising=False)
+    monkeypatch.delenv("FW_OSM_USE_CACHE_IF_PRESENT", raising=False)
     calls = _patch_cached(monkeypatch, cached=True)
     monkeypatch.setattr(pd, "_already_cached", lambda *a, **k: {"source": {}})
     monkeypatch.setattr(pd, "_region_lock", lambda region: __import__("contextlib").nullcontext())

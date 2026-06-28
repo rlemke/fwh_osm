@@ -82,7 +82,7 @@ The legacy shared `handlers/downloader.py` (a single `download()` with a `fmt`
 parameter for PBF/shapefile) has been **removed**. OSM PBF downloads now go
 through the tool library `tools/_osm_tools/pbf_download.py`
 (`download_region()`), which caches with MD5-based freshness and `.meta.json`
-sidecars under `$AFL_DATA_ROOT/cache/osm/`. PBF→shapefile conversion lives in
+sidecars under `$FW_DATA_ROOT/cache/osm/`. PBF→shapefile conversion lives in
 `tools/_osm_tools/pbf_shapefile.py`.
 
 The `FORMAT_EXTENSIONS` dict maps format keys to file extensions:

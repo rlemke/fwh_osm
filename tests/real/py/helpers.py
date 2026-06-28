@@ -23,13 +23,13 @@ from facetwork.validator import validate
 _EXAMPLE_ROOT = Path(__file__).parent.parent.parent.parent
 # Integration FFL fixtures live under tests/real/ffl/ (the directory was
 # renamed afl/ -> ffl/ during the migration).
-INTEGRATION_AFL_DIR = Path(__file__).parent.parent / "ffl"
+INTEGRATION_FW_DIR = Path(__file__).parent.parent / "ffl"
 
 # All FFL files indexed by filename (handlers/*/ffl/ across the package)
-EXAMPLE_AFL_FILES: dict[str, Path] = {}
+EXAMPLE_FW_FILES: dict[str, Path] = {}
 for _p in sorted(_EXAMPLE_ROOT.rglob("*.ffl")):
     if "/tests/" not in str(_p):
-        EXAMPLE_AFL_FILES[_p.name] = _p
+        EXAMPLE_FW_FILES[_p.name] = _p
 
 
 def compile_afl_files(

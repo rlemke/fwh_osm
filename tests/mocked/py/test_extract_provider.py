@@ -1,4 +1,4 @@
-"""Unit tests for the alternative extract provider (AFL_OSM_EXTRACT_PROVIDER).
+"""Unit tests for the alternative extract provider (FW_OSM_EXTRACT_PROVIDER).
 
 `osmfr` routes downloads to OpenStreetMap France (download.openstreetmap.fr) for
 when Geofabrik rate-limits/bans the egress IP. The cache layout stays

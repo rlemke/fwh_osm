@@ -3,7 +3,7 @@
 
 The tool layer behind the ``osm.geocode`` facets. Talks to a Nominatim instance
 over HTTP (the public ``nominatim.openstreetmap.org`` by default; point
-``AFL_NOMINATIM_URL`` at your own instance for volume). Forward and reverse are
+``FW_NOMINATIM_URL`` at your own instance for volume). Forward and reverse are
 the two geocoding primitives that recur across Nominatim / Photon / Pelias.
 
 Public-instance etiquette is built in: a required ``User-Agent`` and a polite
@@ -24,13 +24,13 @@ from urllib.request import Request, urlopen
 
 log = logging.getLogger(__name__)
 
-NOMINATIM_URL = os.environ.get("AFL_NOMINATIM_URL", "https://nominatim.openstreetmap.org")
+NOMINATIM_URL = os.environ.get("FW_NOMINATIM_URL", "https://nominatim.openstreetmap.org")
 USER_AGENT = os.environ.get(
-    "AFL_NOMINATIM_USER_AGENT", "facetwork-osm-geocoder/1.0 (+https://github.com/rlemke/fwh_osm)"
+    "FW_NOMINATIM_USER_AGENT", "facetwork-osm-geocoder/1.0 (+https://github.com/rlemke/fwh_osm)"
 )
 # Nominatim's public usage policy is at most ~1 request/second. Self-hosted
-# instances can set AFL_NOMINATIM_MIN_INTERVAL=0.
-_MIN_INTERVAL = float(os.environ.get("AFL_NOMINATIM_MIN_INTERVAL", "1.0"))
+# instances can set FW_NOMINATIM_MIN_INTERVAL=0.
+_MIN_INTERVAL = float(os.environ.get("FW_NOMINATIM_MIN_INTERVAL", "1.0"))
 DEFAULT_TIMEOUT = 15
 
 _throttle_lock = threading.Lock()

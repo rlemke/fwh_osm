@@ -99,7 +99,7 @@ def graph_abs_path(region: str, profile: str, storage: Any = None) -> Path:
 
 
 def _staging_dir(region: str, profile: str, storage: Any = None) -> Path:
-    if (os.environ.get("AFL_CONVERT_STAGING") or "").lower() == "tmp":
+    if (os.environ.get("FW_CONVERT_STAGING") or "").lower() == "tmp":
         base = tempfile.gettempdir()
         safe = region.replace("/", "_")
         return Path(base) / "facetwork-osrm-staging" / safe / profile

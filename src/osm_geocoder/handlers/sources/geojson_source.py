@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 NAMESPACE = "osm.Source.GeoJSON"
 
-_LOCAL_OUTPUT = os.environ.get("AFL_LOCAL_OUTPUT_DIR", "/tmp")
+_LOCAL_OUTPUT = os.environ.get("FW_LOCAL_OUTPUT_DIR", "/tmp")
 
 
 def _now() -> str:

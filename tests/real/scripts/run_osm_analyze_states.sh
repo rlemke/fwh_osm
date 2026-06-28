@@ -25,7 +25,7 @@ fi
 HDFS_NAMENODE_DIR="${HDFS_NAMENODE_DIR:-$HOME/data/hdfs/namenode}"
 HDFS_DATANODE_DIR="${HDFS_DATANODE_DIR:-$HOME/data/hdfs/datanode}"
 MONGODB_DATA_DIR="${MONGODB_DATA_DIR:-}"
-GEOFABRIK_MIRROR="${AFL_GEOFABRIK_MIRROR:-}"
+GEOFABRIK_MIRROR="${FW_GEOFABRIK_MIRROR:-}"
 
 # ---------------------------------------------------------------------------
 # 1. Create data directories
@@ -82,7 +82,7 @@ echo ""
 # 4. Compile the AFL workflow
 # ---------------------------------------------------------------------------
 echo "=== Compiling osm_analyze_states.afl ==="
-AFL_FILE="$REAL_DIR/ffl/osm_analyze_states.ffl"
+FW_FILE="$REAL_DIR/ffl/osm_analyze_states.ffl"
 OUTPUT_FILE="$REAL_DIR/osm_analyze_states.json"
 
 cd "$PROJECT_DIR"
@@ -97,7 +97,7 @@ done < <(find "$EXAMPLE_DIR" -name '*.ffl' -not -path '*/tests/*' | sort)
 PYTHON="${PROJECT_DIR}/.venv/bin/python3"
 [[ -x "$PYTHON" ]] || PYTHON=python3
 
-afl --primary "$AFL_FILE" \
+afl --primary "$FW_FILE" \
     "${LIB_ARGS[@]}" \
     -o "$OUTPUT_FILE"
 
@@ -108,9 +108,9 @@ echo ""
 # 5. Submit the workflow
 # ---------------------------------------------------------------------------
 echo "=== Submitting AnalyzeAllStates workflow ==="
-export AFL_MONGODB_URL="mongodb://afl-mongodb:27017"
+export FW_MONGODB_URL="mongodb://afl-mongodb:27017"
 "$PYTHON" -m afl.runtime.submit \
-    --primary "$AFL_FILE" \
+    --primary "$FW_FILE" \
     "${LIB_ARGS[@]}" \
     --workflow "osm.UnitedStates.analysis.AnalyzeAllStates"
 echo ""

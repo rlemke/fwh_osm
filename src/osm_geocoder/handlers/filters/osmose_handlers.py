@@ -41,7 +41,7 @@ def handle_verify_all(payload: dict) -> dict:
 
     Params:
         cache: OSMCache dict with 'path' key pointing to the .osm.pbf file
-        output_dir: Base output directory (default AFL_OUTPUT_BASE/osm/osmose)
+        output_dir: Base output directory (default FW_OUTPUT_BASE/osm/osmose)
         check_geometry: Enable geometry checks (default true)
         check_tags: Enable tag checks (default true)
         check_references: Enable reference integrity checks (default true)

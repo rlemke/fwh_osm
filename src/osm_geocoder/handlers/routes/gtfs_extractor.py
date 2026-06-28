@@ -37,7 +37,7 @@ from facetwork.config import get_output_base
 
 _LOCAL_OUTPUT = get_output_base()
 GTFS_CACHE_DIR = os.environ.get(
-    "AFL_GTFS_CACHE_DIR", os.path.join(_LOCAL_OUTPUT, "osm", "gtfs-cache")
+    "FW_GTFS_CACHE_DIR", os.path.join(_LOCAL_OUTPUT, "osm", "gtfs-cache")
 )
 
 # Safety cap for grid-based analyses
@@ -320,7 +320,7 @@ def download_gtfs_feed(url: str, output_dir: str = "") -> dict:
 
     Args:
         url: URL of the GTFS ZIP file
-        output_dir: Base directory for extraction (defaults to AFL_GTFS_CACHE_DIR)
+        output_dir: Base directory for extraction (defaults to FW_GTFS_CACHE_DIR)
 
     Returns:
         Dict with url, path, date, size, wasInCache, agency_name, has_shapes

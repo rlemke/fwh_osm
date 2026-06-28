@@ -117,7 +117,7 @@ def tileset_abs_path(region: str, source: str, storage: Any = None) -> Path:
 
 
 def _staging_path(region: str, source: str, storage: Any = None) -> Path:
-    if (os.environ.get("AFL_CONVERT_STAGING") or "").lower() == "tmp":
+    if (os.environ.get("FW_CONVERT_STAGING") or "").lower() == "tmp":
         base = tempfile.gettempdir()
         safe = region.replace("/", "_")
         return Path(base) / "facetwork-vector-tiles-staging" / safe / f"{source}.pmtiles"

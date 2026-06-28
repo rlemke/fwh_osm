@@ -48,15 +48,15 @@ from _osm_tools.storage import LocalStorage, Storage, get_storage, local_staging
 NAMESPACE = "osm"
 CACHE_TYPE = "pbf"
 # Extract + replication base URL. Defaults to Geofabrik; override with
-# AFL_GEOFABRIK_BASE_URL to point at a mirror or internal cache (e.g. when
+# FW_GEOFABRIK_BASE_URL to point at a mirror or internal cache (e.g. when
 # Geofabrik rate-limits/bans the fleet's egress IP). Every download / .md5 /
 # replication-diff URL derives from this, so one env var reroutes them all.
 GEOFABRIK_BASE = os.environ.get(
-    "AFL_GEOFABRIK_BASE_URL", "https://download.geofabrik.de"
+    "FW_GEOFABRIK_BASE_URL", "https://download.geofabrik.de"
 ).rstrip("/")
 
 # Alternative extract provider — for when Geofabrik rate-limits/bans the egress
-# IP. AFL_OSM_EXTRACT_PROVIDER=osmfr routes DOWNLOADS to OpenStreetMap France
+# IP. FW_OSM_EXTRACT_PROVIDER=osmfr routes DOWNLOADS to OpenStreetMap France
 # (download.openstreetmap.fr/extracts/<region>-latest.osm.pbf). OSM France
 # publishes no .md5 (we anchor integrity on the locally-computed sha256) and its
 # extracts embed THEIR OWN replication header — so once a region is re-downloaded
@@ -65,8 +65,8 @@ GEOFABRIK_BASE = os.environ.get(
 # replication streams use independent, incompatible sequence numbers). The cache
 # layout stays provider-agnostic (`<region>-latest.osm.pbf`); only the remote URL
 # changes. Geofabrik stays the default.
-EXTRACT_PROVIDER = os.environ.get("AFL_OSM_EXTRACT_PROVIDER", "geofabrik").strip().lower()
-OSMFR_BASE = os.environ.get("AFL_OSMFR_BASE_URL", "https://download.openstreetmap.fr").rstrip("/")
+EXTRACT_PROVIDER = os.environ.get("FW_OSM_EXTRACT_PROVIDER", "geofabrik").strip().lower()
+OSMFR_BASE = os.environ.get("FW_OSMFR_BASE_URL", "https://download.openstreetmap.fr").rstrip("/")
 # OSM France's continent tree differs from Geofabrik's at the top level.
 _OSMFR_TOPLEVEL = {"australia-oceania": "oceania"}
 
@@ -149,7 +149,7 @@ def region_to_paths(region: str) -> tuple[str, str]:
 
     The cache ``relative_path`` is always Geofabrik-style (``<region>-latest.osm.pbf``)
     so the on-disk layout is provider-agnostic; only the REMOTE url changes with
-    ``AFL_OSM_EXTRACT_PROVIDER`` (``geofabrik`` | ``osmfr``)."""
+    ``FW_OSM_EXTRACT_PROVIDER`` (``geofabrik`` | ``osmfr``)."""
     region = region.strip().strip("/")
     if not region:
         raise ValueError("Empty region")
@@ -176,8 +176,8 @@ def _request(url: str, method: str = "GET") -> urllib.request.Request:
 
 
 def _use_cache_if_present() -> bool:
-    """True when ``AFL_OSM_USE_CACHE_IF_PRESENT`` opts into pinned-cache mode."""
-    return os.environ.get("AFL_OSM_USE_CACHE_IF_PRESENT", "").lower() in ("1", "true", "yes")
+    """True when ``FW_OSM_USE_CACHE_IF_PRESENT`` opts into pinned-cache mode."""
+    return os.environ.get("FW_OSM_USE_CACHE_IF_PRESENT", "").lower() in ("1", "true", "yes")
 
 
 def fetch_md5(url: str) -> str:
@@ -325,26 +325,26 @@ STREAM_CHUNK_SIZE = 64 * 1024
 # north-america ~15GB) often redirect to slow mirrors (e.g. ftp5.gwdg.de) that
 # stall for long stretches; the 120s default trips a read timeout mid-transfer
 # and — because there's no HTTP resume — the whole multi-GB download restarts
-# from zero, easily exhausting retries. Tunable via AFL_OSM_READ_TIMEOUT_SECONDS;
+# from zero, easily exhausting retries. Tunable via FW_OSM_READ_TIMEOUT_SECONDS;
 # default raised to 600s so a slow-but-alive mirror isn't killed.
-READ_TIMEOUT_SECONDS = int(os.environ.get("AFL_OSM_READ_TIMEOUT_SECONDS") or 600)
+READ_TIMEOUT_SECONDS = int(os.environ.get("FW_OSM_READ_TIMEOUT_SECONDS") or 600)
 CONNECT_TIMEOUT_SECONDS = 30
 # Max times a single download will reconnect-and-resume (HTTP Range) after a
 # mid-stream drop before giving up. Geofabrik's mirrors drop connections on
 # big extracts (europe ~30GB, north-america ~19GB) — without resume each drop
 # restarts from zero and the file never lands. 50 resumes comfortably covers a
-# 30GB transfer that drops every couple GB. Tunable via AFL_OSM_RESUME_MAX_ATTEMPTS.
-RESUME_MAX_ATTEMPTS = int(os.environ.get("AFL_OSM_RESUME_MAX_ATTEMPTS") or 50)
+# 30GB transfer that drops every couple GB. Tunable via FW_OSM_RESUME_MAX_ATTEMPTS.
+RESUME_MAX_ATTEMPTS = int(os.environ.get("FW_OSM_RESUME_MAX_ATTEMPTS") or 50)
 
 # Max seconds we'll honour an upstream Retry-After before capping. Geofabrik (or
 # a fronting CDN) returns 429 / 503 with a Retry-After when our shared egress IP
 # is being rate-limited; we sleep that long (+jitter) and retry rather than
 # hammering (which is what got the IP banned). A pathological Retry-After (hours)
 # is capped so a single request doesn't wedge the whole task. Tunable.
-RETRY_AFTER_CAP_SECONDS = int(os.environ.get("AFL_OSM_RETRY_AFTER_CAP_SECONDS") or 300)
+RETRY_AFTER_CAP_SECONDS = int(os.environ.get("FW_OSM_RETRY_AFTER_CAP_SECONDS") or 300)
 # How many times a small request (md5 fetch, HEAD-less GET) retries a 429/503
 # before giving up. Big streaming downloads use RESUME_MAX_ATTEMPTS instead.
-RATE_LIMIT_MAX_ATTEMPTS = int(os.environ.get("AFL_OSM_RATE_LIMIT_MAX_ATTEMPTS") or 6)
+RATE_LIMIT_MAX_ATTEMPTS = int(os.environ.get("FW_OSM_RATE_LIMIT_MAX_ATTEMPTS") or 6)
 
 
 def _jittered(seconds: float, *, frac: float = 0.25) -> float:
@@ -652,7 +652,7 @@ def download_region(
     per-region lock so only one download happens.
 
     ``use_cache_if_present`` controls pinned-cache mode per call:
-    ``None`` (default) defers to the ``AFL_OSM_USE_CACHE_IF_PRESENT`` env,
+    ``None`` (default) defers to the ``FW_OSM_USE_CACHE_IF_PRESENT`` env,
     ``True`` forces it on, ``False`` forces normal revalidation. ``force=True``
     always re-downloads and overrides both.
     """
@@ -665,7 +665,7 @@ def download_region(
     # md5, so the normal freshness check treats an older-but-valid cache as stale
     # and re-downloads gigabytes — undesirable when an existing extract is fine
     # (reproducing a map, working offline, or when upstream is slow/flaky). Opt-in
-    # per call (use_cache_if_present) or globally (AFL_OSM_USE_CACHE_IF_PRESENT);
+    # per call (use_cache_if_present) or globally (FW_OSM_USE_CACHE_IF_PRESENT);
     # `force=True` still bypasses it.
     prefer_cache = _use_cache_if_present() if use_cache_if_present is None else use_cache_if_present
     if not force and prefer_cache and is_region_cached(region, storage=storage):
@@ -751,7 +751,7 @@ def download_region(
         # Fleet-wide concurrency gate: cap TOTAL concurrent Geofabrik downloads
         # across all runners (one shared egress IP). Wrap ONLY the actual network
         # fetch — cache hits / prefer_cache / 304-revalidation above never enter
-        # the gate. A no-op when AFL_MONGODB_URL is unset (local/test runs). A
+        # the gate. A no-op when FW_MONGODB_URL is unset (local/test runs). A
         # heartbeat thread renews the lease so a multi-GB download keeps its slot;
         # a crashed runner's slot frees when its lease expires.
         try:
@@ -781,13 +781,13 @@ def download_region(
             fresh = fetch_md5(url)
             if md5_hex == fresh:
                 expected_md5 = fresh
-            elif os.environ.get("AFL_OSM_TOLERATE_MD5", "").lower() in ("1", "true", "yes"):
+            elif os.environ.get("FW_OSM_TOLERATE_MD5", "").lower() in ("1", "true", "yes"):
                 # Still mismatched, but accept the COMPLETE download with a warning
                 # (a stale upstream md5 during the rebuild window, not a corrupt
-                # file). Opt-in via AFL_OSM_TOLERATE_MD5.
+                # file). Opt-in via FW_OSM_TOLERATE_MD5.
                 logger.warning(
                     "MD5 mismatch for %s (upstream=%s computed=%s); accepting %d-byte "
-                    "download (AFL_OSM_TOLERATE_MD5).", region, fresh, md5_hex, size
+                    "download (FW_OSM_TOLERATE_MD5).", region, fresh, md5_hex, size
                 )
                 expected_md5 = md5_hex
             else:

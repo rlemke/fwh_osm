@@ -17,9 +17,9 @@ from osm_geocoder.handlers.shared.output_cache import (
 
 @pytest.fixture
 def cache_dir(tmp_path, monkeypatch):
-    """Set AFL_LOCAL_OUTPUT_DIR to a temp directory."""
-    monkeypatch.setenv("AFL_LOCAL_OUTPUT_DIR", str(tmp_path))
-    monkeypatch.delenv("AFL_OSM_OUTPUT_BASE", raising=False)
+    """Set FW_LOCAL_OUTPUT_DIR to a temp directory."""
+    monkeypatch.setenv("FW_LOCAL_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.delenv("FW_OSM_OUTPUT_BASE", raising=False)
     return tmp_path
 
 

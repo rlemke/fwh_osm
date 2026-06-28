@@ -9,7 +9,7 @@ tool processes regions sequentially with a configurable delay between
 files. Each file is verified against Geofabrik's published ``.md5``
 before being promoted into the cache.
 
-Backends (``--backend`` / ``AFL_STORAGE``):
+Backends (``--backend`` / ``FW_STORAGE``):
 
 - ``local`` (default): standard POSIX filesystem cache, atomic temp+rename.
 - ``hdfs``: writes into HDFS via WebHDFS. HDFS has no advisory locking, so
@@ -27,7 +27,7 @@ Usage::
 Regions are Geofabrik paths relative to ``https://download.geofabrik.de/``,
 *without* the ``-latest.osm.pbf`` suffix.
 
-Data root: ``$AFL_DATA_ROOT`` (defaults to ``/Volumes/afl_data`` for
+Data root: ``$FW_DATA_ROOT`` (defaults to ``/Volumes/afl_data`` for
 local, ``/user/afl`` for hdfs). PBFs cache under ``<data_root>/cache/osm/pbf/``.
 """
 
@@ -235,14 +235,14 @@ def main() -> int:
         choices=("local", "hdfs"),
         default=default_backend(),
         help="Storage backend for the cache "
-        "(default: $AFL_STORAGE or 'local'). HDFS assumes single-writer "
+        "(default: $FW_STORAGE or 'local'). HDFS assumes single-writer "
         "semantics (no advisory locking).",
     )
     parser.add_argument(
         "--provider",
         choices=("geofabrik", "osmfr"),
         default=None,
-        help="Extract provider (default: $AFL_OSM_EXTRACT_PROVIDER or 'geofabrik'). "
+        help="Extract provider (default: $FW_OSM_EXTRACT_PROVIDER or 'geofabrik'). "
         "'osmfr' = OpenStreetMap France (download.openstreetmap.fr) — use when "
         "Geofabrik has rate-limited/banned this IP. Re-downloaded extracts then "
         "carry OSM France's replication header, so update-delta follows it.",

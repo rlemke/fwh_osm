@@ -4,13 +4,13 @@ The whole runner fleet shares one egress IP; Geofabrik bans an IP that opens too
 many parallel full-extract downloads. ``download_gate`` is a Mongo-backed
 semaphore capping the TOTAL concurrent downloads across the fleet. These tests
 run fully offline against ``mongomock`` (the gate's only external dependency is
-a pymongo ``MongoClient`` reachable at ``AFL_MONGODB_URL``).
+a pymongo ``MongoClient`` reachable at ``FW_MONGODB_URL``).
 
 Covered:
   * N concurrent acquires succeed; the (N+1)th blocks, then succeeds after a
     release frees a slot.
   * A slot whose lease has EXPIRED is reclaimable by another holder.
-  * With ``AFL_MONGODB_URL`` unset the gate is a transparent no-op (never blocks
+  * With ``FW_MONGODB_URL`` unset the gate is a transparent no-op (never blocks
     local/test runs).
 """
 
@@ -31,10 +31,10 @@ def gate(monkeypatch):
     """
     client = mongomock.MongoClient()
 
-    # AFL_MONGODB_URL must be set for the gate to engage; the value is irrelevant
+    # FW_MONGODB_URL must be set for the gate to engage; the value is irrelevant
     # because we stub MongoClient.
-    monkeypatch.setenv("AFL_MONGODB_URL", "mongodb://fake/")
-    monkeypatch.setenv("AFL_MONGODB_DB", "facetwork")
+    monkeypatch.setenv("FW_MONGODB_URL", "mongodb://fake/")
+    monkeypatch.setenv("FW_MONGODB_DB", "facetwork")
     # Fresh resolution each test.
     dg._collection_cache = None
 
@@ -128,7 +128,7 @@ def test_context_manager_acquires_and_releases(gate):
 
 
 def test_noop_when_mongo_url_unset(monkeypatch):
-    monkeypatch.delenv("AFL_MONGODB_URL", raising=False)
+    monkeypatch.delenv("FW_MONGODB_URL", raising=False)
     mod = importlib.reload(dg)
     mod._collection_cache = None
     try:

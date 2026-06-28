@@ -19,15 +19,15 @@ the entire fleet with a distributed semaphore stored in MongoDB:
   crashes, its lease simply expires and another runner reclaims the slot. No
   cleanup daemon, no leader.
 
-**Graceful degradation.** If ``AFL_MONGODB_URL`` is unset, or pymongo isn't
+**Graceful degradation.** If ``FW_MONGODB_URL`` is unset, or pymongo isn't
 importable, the gate is a *no-op*: ``acquire_slot`` returns a sentinel token and
 ``release_slot``/``renew_slot`` do nothing, and ``download_slot`` is a plain
 pass-through. Local dev and the offline test suite never block on Mongo.
 
 Config (env):
-    AFL_MONGODB_URL                 Mongo connection string (gate active iff set)
-    AFL_OSM_DOWNLOAD_CONCURRENCY    max concurrent fleet downloads (default 3)
-    AFL_OSM_DOWNLOAD_LEASE_MS       per-slot lease, ms (default 14400000 = 4h,
+    FW_MONGODB_URL                 Mongo connection string (gate active iff set)
+    FW_OSM_DOWNLOAD_CONCURRENCY    max concurrent fleet downloads (default 3)
+    FW_OSM_DOWNLOAD_LEASE_MS       per-slot lease, ms (default 14400000 = 4h,
                                     matching the OSM task execution timeout)
 """
 
@@ -57,7 +57,7 @@ def _now_ms() -> int:
 
 def _default_concurrency() -> int:
     try:
-        n = int(os.environ.get("AFL_OSM_DOWNLOAD_CONCURRENCY") or 3)
+        n = int(os.environ.get("FW_OSM_DOWNLOAD_CONCURRENCY") or 3)
     except ValueError:
         n = 3
     return max(1, n)
@@ -68,7 +68,7 @@ def _default_lease_ms() -> int:
         # Default to the OSM task execution timeout (4h) so a slow multi-GB
         # download that *isn't* heart-beating still doesn't lose its slot before
         # the task itself is reaped.
-        return int(os.environ.get("AFL_OSM_DOWNLOAD_LEASE_MS") or 14_400_000)
+        return int(os.environ.get("FW_OSM_DOWNLOAD_LEASE_MS") or 14_400_000)
     except ValueError:
         return 14_400_000
 
@@ -98,7 +98,7 @@ _collection_lock = threading.Lock()
 def _resolve_collection():
     """Return the Mongo collection, or ``None`` when the gate is disabled.
 
-    Disabled when ``AFL_MONGODB_URL`` is unset or pymongo can't be imported /
+    Disabled when ``FW_MONGODB_URL`` is unset or pymongo can't be imported /
     connected. The result is cached for the life of the process.
     """
     global _collection_cache
@@ -109,9 +109,9 @@ def _resolve_collection():
         if _collection_cache is not None:
             return None if _collection_cache is False else _collection_cache
 
-        url = os.environ.get("AFL_MONGODB_URL")
+        url = os.environ.get("FW_MONGODB_URL")
         if not url:
-            logger.debug("Download gate disabled: AFL_MONGODB_URL unset (no-op).")
+            logger.debug("Download gate disabled: FW_MONGODB_URL unset (no-op).")
             _collection_cache = False
             return None
         try:
@@ -121,7 +121,7 @@ def _resolve_collection():
             _collection_cache = False
             return None
         try:
-            db_name = os.environ.get("AFL_MONGODB_DB") or "facetwork"
+            db_name = os.environ.get("FW_MONGODB_DB") or "facetwork"
             client = MongoClient(url, serverSelectionTimeoutMS=5000)
             coll = client[db_name][COLLECTION]
         except Exception as exc:

@@ -15,17 +15,17 @@ from facetwork.validator import validate
 
 _OSM_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 # Collect all FFL files from root afl/ and handlers/*/ffl/ (skip tests/)
-_AFL_BY_NAME: dict[str, Path] = {}
+_FW_BY_NAME: dict[str, Path] = {}
 for _p in sorted(_OSM_ROOT.rglob("*.ffl")):
     if "/tests/" not in str(_p):
-        _AFL_BY_NAME[_p.name] = _p
+        _FW_BY_NAME[_p.name] = _p
 
 
 def _compile(*filenames: str) -> dict:
     """Compile one or more FFL files from the OSM example directory."""
     entries = []
     for i, name in enumerate(filenames):
-        path = _AFL_BY_NAME[name]
+        path = _FW_BY_NAME[name]
         entries.append(
             SourceEntry(
                 text=path.read_text(),
@@ -165,9 +165,9 @@ class TestOsmValidationCompilation:
         result = main(
             [
                 "--primary",
-                str(_AFL_BY_NAME["osmvalidation.ffl"]),
+                str(_FW_BY_NAME["osmvalidation.ffl"]),
                 "--library",
-                str(_AFL_BY_NAME["osmtypes.ffl"]),
+                str(_FW_BY_NAME["osmtypes.ffl"]),
                 "--check",
             ]
         )
@@ -180,7 +180,7 @@ class TestComposedValidationWorkflow:
     def test_compile_validate_and_summarize(self):
         """The ValidateAndSummarize workflow compiles with all dependencies."""
         # Collect all FFL files needed (the composed workflows reference many namespaces)
-        filenames = sorted(_AFL_BY_NAME.keys())
+        filenames = sorted(_FW_BY_NAME.keys())
 
         # Put osmworkflows_composed.afl first as primary
         filenames.remove("osmworkflows_composed.ffl")

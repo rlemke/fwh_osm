@@ -1,8 +1,8 @@
 """Shared output helpers for OSM extractor handlers.
 
 Provides HDFS-aware output directory resolution and file writing.
-When AFL_OSM_OUTPUT_BASE is set (e.g. hdfs://afl-hadoop-hdfs:8020/osm-output),
-extractors write output there. Otherwise they derive from AFL_OUTPUT_BASE/osm.
+When FW_OSM_OUTPUT_BASE is set (e.g. hdfs://afl-hadoop-hdfs:8020/osm-output),
+extractors write output there. Otherwise they derive from FW_OUTPUT_BASE/osm.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from typing import IO
 from facetwork.config import get_output_base
 from facetwork.runtime.storage import get_storage_backend
 
-_OUTPUT_BASE = os.environ.get("AFL_OSM_OUTPUT_BASE", "")
+_OUTPUT_BASE = os.environ.get("FW_OSM_OUTPUT_BASE", "")
 _REMOTE_SCHEMES = ("hdfs://", "s3://")
 
 
@@ -23,14 +23,14 @@ def _osm_output_base() -> str:
     """Resolve the base directory for durable osm output.
 
     Precedence:
-      1. AFL_OSM_OUTPUT_BASE if set (explicit override — e.g. a dedicated prefix).
-      2. AFL_DATA_ROOT/osm-output when the durable store is remote (s3://, hdfs://).
+      1. FW_OSM_OUTPUT_BASE if set (explicit override — e.g. a dedicated prefix).
+      2. FW_DATA_ROOT/osm-output when the durable store is remote (s3://, hdfs://).
       3. "" → caller falls back to a host-local path.
 
     Rule (2) is the important one: EVERY RegistryRunner auto-loads the osm
     handlers, so any runner — not just the dedicated osm ones that set
-    AFL_OSM_OUTPUT_BASE — can win an osm task claim. Without (2), a runner that
-    only set AFL_STORAGE=s3 (+ AFL_DATA_ROOT) but not AFL_OSM_OUTPUT_BASE would
+    FW_OSM_OUTPUT_BASE — can win an osm task claim. Without (2), a runner that
+    only set FW_STORAGE=s3 (+ FW_DATA_ROOT) but not FW_OSM_OUTPUT_BASE would
     write osm output to a HOST-LOCAL path, unreadable by the S3-backed downstream
     steps (ByScript, MergeLayers) that run on a different runner — dead-lettering
     the workflow. Defaulting to the object store keeps output where any runner
@@ -38,7 +38,7 @@ def _osm_output_base() -> str:
     """
     if _OUTPUT_BASE:
         return _OUTPUT_BASE.rstrip("/")
-    data_root = os.environ.get("AFL_DATA_ROOT", "")
+    data_root = os.environ.get("FW_DATA_ROOT", "")
     if data_root.startswith(_REMOTE_SCHEMES):
         return f"{data_root.rstrip('/')}/osm-output"
     return ""
@@ -47,9 +47,9 @@ def _osm_output_base() -> str:
 def resolve_output_dir(category: str, default_local: str = "") -> str:
     """Return output directory for a handler category.
 
-    Uses the durable osm output base (AFL_OSM_OUTPUT_BASE, or AFL_DATA_ROOT/
+    Uses the durable osm output base (FW_OSM_OUTPUT_BASE, or FW_DATA_ROOT/
     osm-output when storage is remote) → '{base}/{category}'. Falls back to a
-    host-local AFL_OUTPUT_BASE/osm/{category} only when no remote store is
+    host-local FW_OUTPUT_BASE/osm/{category} only when no remote store is
     configured. See :func:`_osm_output_base`.
     """
     base = _osm_output_base()
@@ -60,7 +60,7 @@ def resolve_output_dir(category: str, default_local: str = "") -> str:
 
 
 def resolve_local_output_dir(*parts: str) -> str:
-    """Return local output directory under AFL_LOCAL_OUTPUT_DIR.
+    """Return local output directory under FW_LOCAL_OUTPUT_DIR.
 
     Joins *parts* as subdirectories.  Creates the directory if it doesn't exist.
 
@@ -140,7 +140,7 @@ def _slugify_discriminators(discriminators: tuple) -> str:
 
 
 def _per_run_enabled() -> bool:
-    return os.environ.get("AFL_OUTPUT_PER_RUN", "").strip().lower() in ("1", "true", "yes")
+    return os.environ.get("FW_OUTPUT_PER_RUN", "").strip().lower() in ("1", "true", "yes")
 
 
 def derive_output_path(
@@ -166,7 +166,7 @@ def derive_output_path(
     Do **not** use this for cacheable intermediates (category extracts, scan
     manifests) — those are input-addressed and shared across runs by design.
 
-    Per-run isolation (opt-in): when ``AFL_OUTPUT_PER_RUN`` is set and ``run_id``
+    Per-run isolation (opt-in): when ``FW_OUTPUT_PER_RUN`` is set and ``run_id``
     (the execution workflow id) is provided, the artifact lands under
     ``<category-dir>/runs/<run_id>/`` instead — a retained, easily-cleaned
     per-run output tree. The shared cache is untouched either way.

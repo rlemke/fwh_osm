@@ -1,16 +1,16 @@
 """Opt-in S3/MinIO test for the osm.Network cache + output round-trip.
 
-Gated on ``AFL_S3_ENDPOINT`` (a reachable S3/MinIO). Verifies that with the
+Gated on ``FW_S3_ENDPOINT`` (a reachable S3/MinIO). Verifies that with the
 durable roots on ``s3://`` the build cache, the sidecar, the read-back loader,
 and a route-layer output all live on the object store — i.e. the step-payload
 paths a fleet shares are portable, not local. Start MinIO with::
 
     docker run -d -p 9000:9000 -e MINIO_ROOT_USER=minioadmin \\
         -e MINIO_ROOT_PASSWORD=minioadmin minio/minio server /data
-    export AFL_STORAGE=s3 AFL_DATA_ROOT=s3://afl-cache \\
-        AFL_S3_ENDPOINT=http://localhost:9000 \\
-        AFL_S3_ACCESS_KEY=minioadmin AFL_S3_SECRET_KEY=minioadmin \\
-        AFL_OSM_OUTPUT_BASE=s3://afl-cache/osm-output
+    export FW_STORAGE=s3 FW_DATA_ROOT=s3://afl-cache \\
+        FW_S3_ENDPOINT=http://localhost:9000 \\
+        FW_S3_ACCESS_KEY=minioadmin FW_S3_SECRET_KEY=minioadmin \\
+        FW_OSM_OUTPUT_BASE=s3://afl-cache/osm-output
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ pytest.importorskip("shapely")
 pytest.importorskip("networkx")
 
 pytestmark = pytest.mark.skipif(
-    not os.environ.get("AFL_S3_ENDPOINT") or os.environ.get("AFL_STORAGE") != "s3",
-    reason="set AFL_STORAGE=s3 + AFL_S3_ENDPOINT (and s3:// roots) to run the live S3 cache test",
+    not os.environ.get("FW_S3_ENDPOINT") or os.environ.get("FW_STORAGE") != "s3",
+    reason="set FW_STORAGE=s3 + FW_S3_ENDPOINT (and s3:// roots) to run the live S3 cache test",
 )
 
 from osm_geocoder.handlers.network import network_ops as ops  # noqa: E402

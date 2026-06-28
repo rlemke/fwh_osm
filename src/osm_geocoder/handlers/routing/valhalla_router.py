@@ -13,7 +13,7 @@ use the official Docker image ghcr.io/valhalla/valhalla):
     valhalla_service valhalla.json   # serves on :8002
 
 Environment:
-    AFL_VALHALLA_URL: Valhalla server URL (default: http://localhost:8002)
+    FW_VALHALLA_URL: Valhalla server URL (default: http://localhost:8002)
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 NAMESPACE = "osm.Routing.Valhalla"
 
-VALHALLA_URL = os.environ.get("AFL_VALHALLA_URL", "http://localhost:8002")
+VALHALLA_URL = os.environ.get("FW_VALHALLA_URL", "http://localhost:8002")
 
 # Facetwork profile -> Valhalla costing model.
 _COSTING = {

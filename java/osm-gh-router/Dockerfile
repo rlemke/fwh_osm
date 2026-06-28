@@ -11,10 +11,10 @@
 #
 # Run it against the shared infra (mirrors the env the Python osm runners use):
 #   docker run -d --name gh-router --network <osm-net> \
-#     -e AFL_MONGODB_URL=mongodb://mongodb:27017 -e AFL_MONGODB_DATABASE=facetwork \
-#     -e AFL_S3_ENDPOINT=http://<minio>:9000 -e AFL_S3_REGION=us-east-1 \
-#     -e AFL_S3_ACCESS_KEY=... -e AFL_S3_SECRET_KEY=... \
-#     -e AFL_OSM_OUTPUT_BASE=s3://afl-cache/osm-output -e AFL_TASK_LIST=osm \
+#     -e FW_MONGODB_URL=mongodb://mongodb:27017 -e FW_MONGODB_DATABASE=facetwork \
+#     -e FW_S3_ENDPOINT=http://<minio>:9000 -e FW_S3_REGION=us-east-1 \
+#     -e FW_S3_ACCESS_KEY=... -e FW_S3_SECRET_KEY=... \
+#     -e FW_OSM_OUTPUT_BASE=s3://afl-cache/osm-output -e FW_TASK_LIST=osm \
 #     osm-gh-router:latest
 
 # ── Stage 1: build the fat jar (fw-agent SDK + graphhopper-core + AWS SDK) ────

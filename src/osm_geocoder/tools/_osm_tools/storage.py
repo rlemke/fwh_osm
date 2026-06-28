@@ -7,19 +7,19 @@ Two backends are supported:
   (soft-imported; only loaded when the backend is selected). HDFS uses
   WebHDFS over HTTP, so no Hadoop native libraries are required.
 
-The backend is chosen by ``AFL_STORAGE`` or the tool's ``--backend`` flag.
+The backend is chosen by ``FW_STORAGE`` or the tool's ``--backend`` flag.
 
-Filesystem layout is rooted at ``AFL_DATA_ROOT`` with five derived
+Filesystem layout is rooted at ``FW_DATA_ROOT`` with five derived
 subtrees (see ``agent-spec/cache-layout.agent-spec.yaml``):
 
-- ``AFL_DATA_ROOT/cache/``    — durable cached artifacts
-- ``AFL_DATA_ROOT/staging/``  — in-flight downloads, atomically renamed on success
-- ``AFL_DATA_ROOT/tmp/``      — scratch
-- ``AFL_DATA_ROOT/_indexes/`` — lazy cache-type indexes (advisory)
-- ``AFL_DATA_ROOT/locks/``    — per-entry fcntl lock targets
+- ``FW_DATA_ROOT/cache/``    — durable cached artifacts
+- ``FW_DATA_ROOT/staging/``  — in-flight downloads, atomically renamed on success
+- ``FW_DATA_ROOT/tmp/``      — scratch
+- ``FW_DATA_ROOT/_indexes/`` — lazy cache-type indexes (advisory)
+- ``FW_DATA_ROOT/locks/``    — per-entry fcntl lock targets
 
-Each derived root is also individually overridable by ``AFL_CACHE_ROOT``,
-``AFL_STAGING_ROOT``, etc., for deployments that split them across
+Each derived root is also individually overridable by ``FW_CACHE_ROOT``,
+``FW_STAGING_ROOT``, etc., for deployments that split them across
 different volumes.
 
 Defaults:
@@ -503,7 +503,7 @@ class S3Storage(Storage):
 # ---------------------------------------------------------------------------
 
 def default_backend() -> str:
-    return (os.environ.get("AFL_STORAGE") or "local").lower()
+    return (os.environ.get("FW_STORAGE") or "local").lower()
 
 
 def get_storage(backend: str | None = None) -> Storage:
@@ -526,10 +526,10 @@ def get_storage(backend: str | None = None) -> Storage:
 def data_root(backend: str | None = None) -> str:
     """Return the top-level data root.
 
-    ``AFL_DATA_ROOT`` overrides everything. Otherwise the backend-specific
+    ``FW_DATA_ROOT`` overrides everything. Otherwise the backend-specific
     default is used.
     """
-    env = os.environ.get("AFL_DATA_ROOT")
+    env = os.environ.get("FW_DATA_ROOT")
     if env:
         return env
     name = (backend or default_backend()).lower()
@@ -541,7 +541,7 @@ def data_root(backend: str | None = None) -> str:
 
 
 def _derived_root(env_var: str, subdir: str, backend: str | None = None) -> str:
-    """Return AFL_DATA_ROOT/<subdir>, or the env override if set."""
+    """Return FW_DATA_ROOT/<subdir>, or the env override if set."""
     override = os.environ.get(env_var)
     if override:
         return override
@@ -553,42 +553,42 @@ def _scratch_derived_root(env_var: str, subdir: str, backend: str | None = None)
     that MUST live on the local filesystem — you stage locally and finalize onto
     the durable backend. When the data root is remote (s3://, hdfs://) and no
     explicit override is set, fall back to a local scratch base
-    (``AFL_LOCAL_SCRATCH`` or the system temp dir)."""
+    (``FW_LOCAL_SCRATCH`` or the system temp dir)."""
     override = os.environ.get(env_var)
     if override:
         return override
     root = data_root(backend)
     if _is_remote_root(root):
-        base = os.environ.get("AFL_LOCAL_SCRATCH") or os.path.join(tempfile.gettempdir(), "afl")
+        base = os.environ.get("FW_LOCAL_SCRATCH") or os.path.join(tempfile.gettempdir(), "afl")
         return Storage.join(base, subdir)
     return Storage.join(root, subdir)
 
 
 def cache_root(backend: str | None = None) -> str:
     """Durable cached artifacts live here."""
-    return _derived_root("AFL_CACHE_ROOT", "cache", backend)
+    return _derived_root("FW_CACHE_ROOT", "cache", backend)
 
 
 def staging_root(backend: str | None = None) -> str:
     """In-flight downloads and builds live here until atomically renamed.
 
     Local even when the durable root is remote (stage-locally-then-finalize)."""
-    return _scratch_derived_root("AFL_STAGING_ROOT", "staging", backend)
+    return _scratch_derived_root("FW_STAGING_ROOT", "staging", backend)
 
 
 def tmp_root(backend: str | None = None) -> str:
     """Scratch working area. Safe to wipe at any time. Always local."""
-    return _scratch_derived_root("AFL_TMP_ROOT", "tmp", backend)
+    return _scratch_derived_root("FW_TMP_ROOT", "tmp", backend)
 
 
 def indexes_root(backend: str | None = None) -> str:
     """Lazy, advisory cache-type indexes. Never authoritative."""
-    return _derived_root("AFL_INDEXES_ROOT", "_indexes", backend)
+    return _derived_root("FW_INDEXES_ROOT", "_indexes", backend)
 
 
 def locks_root(backend: str | None = None) -> str:
     """Per-entry fcntl lock targets for overwrite contention. Always local."""
-    return _scratch_derived_root("AFL_LOCKS_ROOT", "locks", backend)
+    return _scratch_derived_root("FW_LOCKS_ROOT", "locks", backend)
 
 
 # ---------------------------------------------------------------------------
@@ -601,7 +601,7 @@ def local_staging_subdir(subdir: str) -> str:
 
     Always returns a POSIX path under ``staging_root('local')``, regardless
     of which backend is active, because downloads must stream to local disk
-    before being finalized onto HDFS. Honors ``AFL_STAGING_ROOT`` if set.
+    before being finalized onto HDFS. Honors ``FW_STAGING_ROOT`` if set.
     """
     path = Storage.join(staging_root("local"), subdir)
     os.makedirs(path, exist_ok=True)

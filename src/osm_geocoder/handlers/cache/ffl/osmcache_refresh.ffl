@@ -1,7 +1,7 @@
 // Deliberate PBF cache refresh.
 //
 // Day-to-day workflows run with `cache_policy = "prefer_cache"` (or the
-// AFL_OSM_USE_CACHE_IF_PRESENT env) so a cached PBF is used AS-IS — Geofabrik
+// FW_OSM_USE_CACHE_IF_PRESENT env) so a cached PBF is used AS-IS — Geofabrik
 // rebuilds every extract daily, so revalidating would re-pull gigabytes for
 // data that is, for most analyses, effectively unchanged.
 //

@@ -409,7 +409,7 @@ def filter_geojson_by_osm_type(
             param-addressed name encoding osm_type/tag_key/tag_value, so distinct
             queries on the same input do not overwrite each other)
         heartbeat: Optional callback to signal progress during long operations
-        run_id: Optional execution id; when AFL_OUTPUT_PER_RUN is set, isolates
+        run_id: Optional execution id; when FW_OUTPUT_PER_RUN is set, isolates
             the default output under a per-run subdirectory
 
     Returns:

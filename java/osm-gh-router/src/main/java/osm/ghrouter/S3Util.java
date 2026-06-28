@@ -21,17 +21,17 @@ import java.nio.file.Paths;
  * Minimal S3/MinIO helper for pulling a GraphHopper graph directory down to
  * local disk (GraphHopper reads a local dir) and pushing the routes GeoJSON
  * back. Mirrors the Python S3Storage: endpoint + path-style + static creds from
- * the AFL_S3_* env that the osm runners already use.
+ * the FW_S3_* env that the osm runners already use.
  */
 public final class S3Util implements AutoCloseable {
 
     private final S3Client s3;
 
     public S3Util() {
-        String endpoint = env("AFL_S3_ENDPOINT", "http://afl-minio:9000");
-        String region = env("AFL_S3_REGION", "us-east-1");
-        String access = env("AFL_S3_ACCESS_KEY", "minioadmin");
-        String secret = env("AFL_S3_SECRET_KEY", "minioadmin");
+        String endpoint = env("FW_S3_ENDPOINT", "http://afl-minio:9000");
+        String region = env("FW_S3_REGION", "us-east-1");
+        String access = env("FW_S3_ACCESS_KEY", "minioadmin");
+        String secret = env("FW_S3_SECRET_KEY", "minioadmin");
         this.s3 = S3Client.builder()
                 .endpointOverride(URI.create(endpoint))
                 .region(Region.of(region))

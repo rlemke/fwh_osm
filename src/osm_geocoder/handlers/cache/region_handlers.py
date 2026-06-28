@@ -23,7 +23,7 @@ from ..shared.region_resolver import (
 def _download_kwargs(params: dict[str, Any]) -> dict[str, Any]:
     """Map a ``cache_policy`` string to ``download_region`` keyword args.
 
-    - ``"auto"`` (default): defer to ``AFL_OSM_USE_CACHE_IF_PRESENT``.
+    - ``"auto"`` (default): defer to ``FW_OSM_USE_CACHE_IF_PRESENT``.
     - ``"prefer_cache"``: use a cached PBF as-is, skip Geofabrik revalidation.
     - ``"refresh"``: force a fresh download (ignores the cache).
     - ``"revalidate"`` / ``"strict"``: always revalidate against Geofabrik.

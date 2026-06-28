@@ -189,8 +189,8 @@ run_step "html"          "${SCRIPT_DIR}/render-html-maps.sh"      "${JOBS_ARGS[@
 echo
 if [ ${#FAILED_STEPS[@]} -eq 0 ]; then
     printf '%sHTML pipeline complete.%s\n' "$GREEN" "$RESET"
-    printf 'Output: %s$AFL_CACHE_ROOT/osm/html/<region>-latest/index.html%s\n' "$BOLD" "$RESET"
-    printf 'Serve:  python -m http.server --directory "$AFL_CACHE_ROOT/osm" 8000\n'
+    printf 'Output: %s$FW_CACHE_ROOT/osm/html/<region>-latest/index.html%s\n' "$BOLD" "$RESET"
+    printf 'Serve:  python -m http.server --directory "$FW_CACHE_ROOT/osm" 8000\n'
     exit 0
 else
     printf '%s%d stage(s) failed:%s %s\n' \

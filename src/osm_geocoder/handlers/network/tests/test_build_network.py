@@ -2,7 +2,7 @@
 
 Deterministic synthetic geometry (no PBF, no network): a few hand-placed
 LineStrings whose topology we know exactly, plus an end-to-end cache write to a
-tmp AFL_DATA_ROOT.
+tmp FW_DATA_ROOT.
 """
 
 from __future__ import annotations
@@ -95,7 +95,7 @@ def test_ref_name_recovered_onto_noded_segments():
     assert refs == {"I 5", "I 80"}
 
 
-# --- the cache write (end-to-end, tmp AFL_DATA_ROOT) ---------------------------
+# --- the cache write (end-to-end, tmp FW_DATA_ROOT) ---------------------------
 
 
 def _write_input(tmp_path: Path) -> str:
@@ -109,7 +109,7 @@ def _write_input(tmp_path: Path) -> str:
 
 
 def test_build_network_writes_directory_artifact_and_sidecar(tmp_path, monkeypatch):
-    monkeypatch.setenv("AFL_DATA_ROOT", str(tmp_path / "data"))
+    monkeypatch.setenv("FW_DATA_ROOT", str(tmp_path / "data"))
     src = _write_input(tmp_path)
 
     res = ops.build_network(src, snap_tolerance_m=25.0)
@@ -141,7 +141,7 @@ def test_build_network_writes_directory_artifact_and_sidecar(tmp_path, monkeypat
 
 
 def test_build_network_is_idempotent_cache_hit(tmp_path, monkeypatch):
-    monkeypatch.setenv("AFL_DATA_ROOT", str(tmp_path / "data"))
+    monkeypatch.setenv("FW_DATA_ROOT", str(tmp_path / "data"))
     src = _write_input(tmp_path)
 
     first = ops.build_network(src, snap_tolerance_m=25.0)
@@ -158,7 +158,7 @@ def test_build_network_is_idempotent_cache_hit(tmp_path, monkeypatch):
 
 
 def test_distinct_tolerances_do_not_collide(tmp_path, monkeypatch):
-    monkeypatch.setenv("AFL_DATA_ROOT", str(tmp_path / "data"))
+    monkeypatch.setenv("FW_DATA_ROOT", str(tmp_path / "data"))
     src = _write_input(tmp_path)
 
     a = ops.build_network(src, snap_tolerance_m=25.0)
@@ -171,7 +171,7 @@ def test_no_isolated_nodes_and_consistent_component_count(tmp_path, monkeypatch)
     """The isolated-node fix: nodes.geojson, graph.json and the sidecar agree."""
     import networkx as nx
 
-    monkeypatch.setenv("AFL_DATA_ROOT", str(tmp_path / "data"))
+    monkeypatch.setenv("FW_DATA_ROOT", str(tmp_path / "data"))
     src = _write_input(tmp_path)
     res = ops.build_network(src, snap_tolerance_m=25.0)
     net = Path(res.network_path)
@@ -260,7 +260,7 @@ def test_node_id_ref_filter():
 
 
 def test_build_network_autodetects_node_id_mode(tmp_path, monkeypatch):
-    monkeypatch.setenv("AFL_DATA_ROOT", str(tmp_path / "data"))
+    monkeypatch.setenv("FW_DATA_ROOT", str(tmp_path / "data"))
     feats = [
         _wline([[0, 0], [1, 0]], node_ids=[100, 200], ref="A1"),
         _wline([[1, 0], [2, 0]], node_ids=[200, 300], ref="A1"),
@@ -281,7 +281,7 @@ def test_build_network_autodetects_node_id_mode(tmp_path, monkeypatch):
 def test_node_id_and_coord_snap_builds_do_not_collide(tmp_path, monkeypatch):
     # Same source content can yield both a @nodeid and a @tol<N> artifact without
     # clobbering each other (different cache dirs).
-    monkeypatch.setenv("AFL_DATA_ROOT", str(tmp_path / "data"))
+    monkeypatch.setenv("FW_DATA_ROOT", str(tmp_path / "data"))
     with_ids = tmp_path / "with_ids.geojson"
     with_ids.write_text(json.dumps({"type": "FeatureCollection", "features": [
         _wline([[0, 0], [1, 0]], node_ids=[1, 2], ref="A1")]}))

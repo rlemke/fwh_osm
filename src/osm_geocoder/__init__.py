@@ -27,8 +27,8 @@ from .handlers import register_all_registry_handlers
 # fire during blocking PostgreSQL UPSERT calls, so the timeout must
 # accommodate the longest possible single-batch DB write.
 _RUNNER_ENV = {
-    "AFL_TASK_EXECUTION_TIMEOUT_MS": "14400000",  # 4 hours
-    "AFL_STUCK_TIMEOUT_MS": "14400000",
+    "FW_TASK_EXECUTION_TIMEOUT_MS": "14400000",  # 4 hours
+    "FW_STUCK_TIMEOUT_MS": "14400000",
 }
 
 # Integration-test FFL fixtures live at the repo root (outside src/) so they

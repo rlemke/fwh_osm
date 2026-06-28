@@ -33,12 +33,12 @@ CONTINENTS=(
 # Colour helpers — no-ops when stdout isn't a terminal so log-
 # redirect runs stay grep-friendly.
 if [ -t 1 ]; then
-    __AFL_BOLD=$'\033[1m'
-    __AFL_GREEN=$'\033[32m'
-    __AFL_RED=$'\033[31m'
-    __AFL_RESET=$'\033[0m'
+    __FW_BOLD=$'\033[1m'
+    __FW_GREEN=$'\033[32m'
+    __FW_RED=$'\033[31m'
+    __FW_RESET=$'\033[0m'
 else
-    __AFL_BOLD="" __AFL_GREEN="" __AFL_RED="" __AFL_RESET=""
+    __FW_BOLD="" __FW_GREEN="" __FW_RED="" __FW_RESET=""
 fi
 
 run_per_continent() {
@@ -48,7 +48,7 @@ run_per_continent() {
     local tool="$1"; shift
     if [ -z "${tool:-}" ] || [ ! -x "$tool" ]; then
         printf '%serror%s: run_per_continent: tool %q not executable\n' \
-            "$__AFL_RED" "$__AFL_RESET" "$tool" >&2
+            "$__FW_RED" "$__FW_RESET" "$tool" >&2
         return 2
     fi
 
@@ -65,22 +65,22 @@ run_per_continent() {
     for continent in "${CONTINENTS[@]}"; do
         idx=$((idx + 1))
         printf '\n%s=== [%d/%d] %s %s ===%s\n' \
-            "$__AFL_BOLD" "$idx" "$total" \
-            "$tool_name" "$continent" "$__AFL_RESET"
+            "$__FW_BOLD" "$idx" "$total" \
+            "$tool_name" "$continent" "$__FW_RESET"
         if "$tool" --all-under "$continent" --include-parents "$@"; then
             printf '%s[ok]%s %s %s\n' \
-                "$__AFL_GREEN" "$__AFL_RESET" "$tool_name" "$continent"
+                "$__FW_GREEN" "$__FW_RESET" "$tool_name" "$continent"
         else
             local rc=$?
             printf '%s[fail]%s %s %s (exit %d) — moving on\n' \
-                "$__AFL_RED" "$__AFL_RESET" "$tool_name" "$continent" "$rc"
+                "$__FW_RED" "$__FW_RESET" "$tool_name" "$continent" "$rc"
             failed+=("$continent")
         fi
     done
 
     local elapsed=$(( $(date +%s) - start_epoch ))
     echo
-    printf '%s=== %s summary ===%s\n' "$__AFL_BOLD" "$tool_name" "$__AFL_RESET"
+    printf '%s=== %s summary ===%s\n' "$__FW_BOLD" "$tool_name" "$__FW_RESET"
     printf 'continents: %d ok, %d failed (%s)  ·  elapsed: %ds\n' \
         "$((total - ${#failed[@]}))" \
         "${#failed[@]}" \

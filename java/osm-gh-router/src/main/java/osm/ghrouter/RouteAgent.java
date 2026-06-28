@@ -17,13 +17,13 @@ import java.net.InetAddress;
 public final class RouteAgent {
 
     public static void main(String[] args) throws Exception {
-        String mongo = env("AFL_MONGODB_URL", "mongodb://afl-mongodb:27017");
-        String database = env("AFL_MONGODB_DATABASE", "facetwork");
+        String mongo = env("FW_MONGODB_URL", "mongodb://afl-mongodb:27017");
+        String database = env("FW_MONGODB_DATABASE", "facetwork");
         // RouteBatch tasks are tagged with their top-level namespace ("osm"),
         // so we must poll that list to claim them.
-        String taskList = env("AFL_TASK_LIST", "osm");
-        String serverGroup = env("AFL_SERVER_GROUP", "runner");
-        String serverName = env("AFL_FLEET_HOST", hostname());
+        String taskList = env("FW_TASK_LIST", "osm");
+        String serverGroup = env("FW_SERVER_GROUP", "runner");
+        String serverName = env("FW_FLEET_HOST", hostname());
 
         AgentPollerConfig config = new AgentPollerConfig(
                 "osm-gh-router",   // serviceName

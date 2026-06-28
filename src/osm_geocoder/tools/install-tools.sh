@@ -163,9 +163,9 @@ if [ "$failed_count" -eq 0 ]; then
     echo "  $GREEN✓$RESET osrm-backend            — build-osrm-graph"
     echo
     echo "Useful environment variables:"
-    echo "  AFL_DATA_ROOT            data root (default /Volumes/afl_data)"
-    echo "  AFL_CACHE_ROOT           cache root (default \$AFL_DATA_ROOT/cache)"
-    echo "  AFL_STAGING_ROOT         staging root (default \$AFL_DATA_ROOT/staging)"
+    echo "  FW_DATA_ROOT            data root (default /Volumes/afl_data)"
+    echo "  FW_CACHE_ROOT           cache root (default \$FW_DATA_ROOT/cache)"
+    echo "  FW_STAGING_ROOT         staging root (default \$FW_DATA_ROOT/staging)"
     echo "  GRAPHHOPPER_JAR          jar path (currently $GRAPHHOPPER_JAR)"
     echo "  GRAPHHOPPER_XMX          JVM heap (default 4g)"
     echo

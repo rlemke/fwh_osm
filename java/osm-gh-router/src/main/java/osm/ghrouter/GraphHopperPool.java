@@ -30,7 +30,7 @@ public final class GraphHopperPool implements AutoCloseable {
 
     public GraphHopperPool(S3Util s3) {
         this.s3 = s3;
-        String scratch = S3Util.env("AFL_LOCAL_SCRATCH", System.getProperty("java.io.tmpdir"));
+        String scratch = S3Util.env("FW_LOCAL_SCRATCH", System.getProperty("java.io.tmpdir"));
         this.graphsRoot = Paths.get(scratch, "gh-graphs");
     }
 

@@ -91,9 +91,9 @@ def test_convert_region_localizes_s3_source_before_osmium(tmp_path, monkeypatch)
 
 def test_staging_path_for_object_store_is_local_scratch(tmp_path, monkeypatch):
     """On S3/MinIO the destination is an s3:// URI; osmium's output must stage on
-    LOCAL scratch (AFL_LOCAL_SCRATCH), never "adjacent to" the s3 dest (which
+    LOCAL scratch (FW_LOCAL_SCRATCH), never "adjacent to" the s3 dest (which
     would mangle to s3:/… on the container's internal disk and ENOSPC mongo)."""
-    monkeypatch.setenv("AFL_LOCAL_SCRATCH", str(tmp_path))
+    monkeypatch.setenv("FW_LOCAL_SCRATCH", str(tmp_path))
 
     class FakeS3:
         name = "s3"
@@ -137,9 +137,9 @@ def test_convert_region_size_gate_skips_oversized(monkeypatch):
 
 
 def test_convert_region_size_gate_env_fallback(monkeypatch):
-    """max_pbf_mb=0 falls back to AFL_OSM_MAX_PBF_MB."""
+    """max_pbf_mb=0 falls back to FW_OSM_MAX_PBF_MB."""
     monkeypatch.setattr(pd.sidecar, "read_sidecar",
                         lambda *a, **k: {"size_bytes": 3 * 1024**3, "source": {}})
-    monkeypatch.setenv("AFL_OSM_MAX_PBF_MB", "1024")
+    monkeypatch.setenv("FW_OSM_MAX_PBF_MB", "1024")
     res = pd.convert_region("north-america/us", storage=type("S", (), {"name": "s3"})())
     assert res.skipped is True

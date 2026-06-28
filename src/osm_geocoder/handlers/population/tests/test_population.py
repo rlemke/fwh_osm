@@ -40,10 +40,10 @@ def _isolate_output_base(tmp_path, monkeypatch):
     """Redirect the OSM output base to a tmp dir.
 
     Handlers that don't take an explicit output directory resolve it from
-    ``AFL_OUTPUT_BASE`` (default ``/Volumes/afl_data/output``). Point it at a
+    ``FW_OUTPUT_BASE`` (default ``/Volumes/afl_data/output``). Point it at a
     per-test tmp dir so the suite never touches the real data volume.
     """
-    monkeypatch.setenv("AFL_OUTPUT_BASE", str(tmp_path / "output"))
+    monkeypatch.setenv("FW_OUTPUT_BASE", str(tmp_path / "output"))
 
 
 class TestPlaceType:

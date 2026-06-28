@@ -12,7 +12,7 @@ Setup (one-time per region; needs Java + the graphhopper-web jar):
     java -jar graphhopper-web.jar server config.yml   # serves on :8989
 
 Environment:
-    AFL_GRAPHHOPPER_URL: GraphHopper server URL (default: http://localhost:8989)
+    FW_GRAPHHOPPER_URL: GraphHopper server URL (default: http://localhost:8989)
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 
 NAMESPACE = "osm.Routing.GraphHopper"
 
-GRAPHHOPPER_URL = os.environ.get("AFL_GRAPHHOPPER_URL", "http://localhost:8989")
+GRAPHHOPPER_URL = os.environ.get("FW_GRAPHHOPPER_URL", "http://localhost:8989")
 
 # Facetwork profile -> GraphHopper profile name (depends on server config; these
 # are the conventional defaults shipped with graphhopper-web).

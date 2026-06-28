@@ -6,10 +6,10 @@ import pytest
 
 from facetwork.parser import parse
 
-AFL_DIR = Path(__file__).resolve().parent.parent / "ffl"
+FW_DIR = Path(__file__).resolve().parent.parent / "ffl"
 
 # All routing FFL files that should compile
-AFL_FILES = sorted(AFL_DIR.glob("*.ffl"))
+FW_FILES = sorted(FW_DIR.glob("*.ffl"))
 
 # Dependency files needed for use statements
 DEPS_DIR = Path(__file__).resolve().parent.parent.parent
@@ -31,7 +31,7 @@ def _compile_with_deps(*afl_paths: Path):
     for v in VIZ_AFL:
         sources.append(_read(v))
     # Include routing types before other routing files
-    types_file = AFL_DIR / "routing_types.ffl"
+    types_file = FW_DIR / "routing_types.ffl"
     if types_file.exists():
         sources.append(_read(types_file))
     for p in afl_paths:
@@ -57,7 +57,7 @@ def _all_event_facet_names(program) -> list[str]:
     return names
 
 
-@pytest.mark.parametrize("afl_file", AFL_FILES, ids=lambda p: p.name)
+@pytest.mark.parametrize("afl_file", FW_FILES, ids=lambda p: p.name)
 def test_afl_compiles(afl_file: Path):
     """Each routing FFL file should compile without errors."""
     _compile_with_deps(afl_file)
@@ -65,12 +65,12 @@ def test_afl_compiles(afl_file: Path):
 
 def test_all_routing_afl_compile_together():
     """All routing FFL files should compile together without conflicts."""
-    _compile_with_deps(*AFL_FILES)
+    _compile_with_deps(*FW_FILES)
 
 
 def test_routing_types_defines_schemas():
     """routing_types.afl should define the expected schemas."""
-    program = _compile_with_deps(AFL_DIR / "routing_types.ffl")
+    program = _compile_with_deps(FW_DIR / "routing_types.ffl")
     schema_names = _all_schema_names(program)
     assert "Waypoint" in schema_names
     assert "RouteResult" in schema_names
@@ -81,7 +81,7 @@ def test_routing_types_defines_schemas():
 
 def test_api_adapter_defines_facets():
     """routing_api.afl should define Route, MultiStopRoute, Isochrone facets."""
-    program = _compile_with_deps(AFL_DIR / "routing_api.ffl")
+    program = _compile_with_deps(FW_DIR / "routing_api.ffl")
     facet_names = _all_event_facet_names(program)
     assert "Route" in facet_names
     assert "MultiStopRoute" in facet_names
@@ -90,7 +90,7 @@ def test_api_adapter_defines_facets():
 
 def test_osrm_adapter_defines_facets():
     """routing_osrm.afl should define Route, MultiStopRoute, Isochrone facets."""
-    program = _compile_with_deps(AFL_DIR / "routing_osrm.ffl")
+    program = _compile_with_deps(FW_DIR / "routing_osrm.ffl")
     facet_names = _all_event_facet_names(program)
     assert "Route" in facet_names
     assert "MultiStopRoute" in facet_names

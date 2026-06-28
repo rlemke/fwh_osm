@@ -1,7 +1,7 @@
 // Routing Adapter: Public API (OSRM demo / OpenRouteService)
 //
 // Zero-import routing via public HTTP APIs. No local graph build needed.
-// Uses OSRM demo server by default; set AFL_ORS_API_KEY for OpenRouteService.
+// Uses OSRM demo server by default; set FW_ORS_API_KEY for OpenRouteService.
 
 /** API routing adapter — routes via public HTTP APIs (OSRM demo or OpenRouteService). */
 namespace osm.Routing.API {

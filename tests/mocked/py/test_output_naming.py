@@ -3,7 +3,7 @@
 Covers the fix for derived leaf artifacts (filtered GeoJSON, rendered maps)
 overwriting each other when two different queries shared the same input stem.
 The name now encodes the discriminating parameters; an opt-in per-run directory
-isolates outputs by execution id when AFL_OUTPUT_PER_RUN is set.
+isolates outputs by execution id when FW_OUTPUT_PER_RUN is set.
 """
 
 from osm_geocoder.handlers.shared import _output
@@ -53,11 +53,11 @@ def test_derive_output_path_idempotent_for_same_query(monkeypatch, tmp_path):
 def test_per_run_dir_is_opt_in(monkeypatch, tmp_path):
     monkeypatch.setattr(_output, "resolve_output_dir", lambda c: str(tmp_path / c))
 
-    monkeypatch.delenv("AFL_OUTPUT_PER_RUN", raising=False)
+    monkeypatch.delenv("FW_OUTPUT_PER_RUN", raising=False)
     shared = derive_output_path("osm-filtered", "s", "filtered", "amenity", "cafe", run_id="WID1")
     assert "/runs/" not in shared  # opt-in OFF -> shared dir (cache-friendly default)
 
-    monkeypatch.setenv("AFL_OUTPUT_PER_RUN", "1")
+    monkeypatch.setenv("FW_OUTPUT_PER_RUN", "1")
     per_run = derive_output_path("osm-filtered", "s", "filtered", "amenity", "cafe", run_id="WID1")
     assert "/runs/WID1/" in per_run  # opt-in ON -> isolated under the execution id
 

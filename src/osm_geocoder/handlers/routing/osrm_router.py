@@ -21,7 +21,7 @@ Or via Docker:
         osrm-routed --algorithm mld /data/region.osrm
 
 Environment:
-    AFL_OSRM_URL: OSRM server URL (default: http://localhost:5000)
+    FW_OSRM_URL: OSRM server URL (default: http://localhost:5000)
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ log = logging.getLogger(__name__)
 
 NAMESPACE = "osm.Routing.OSRM"
 
-OSRM_URL = os.environ.get("AFL_OSRM_URL", "http://localhost:5000")
+OSRM_URL = os.environ.get("FW_OSRM_URL", "http://localhost:5000")
 
 # OSRM profile mapping
 _OSRM_PROFILES = {

@@ -224,7 +224,7 @@ def render_map_html(
     local_geojson = localize(geojson_path_str)
     if output_path is None:
         # The map name inherits the (already param-addressed) input GeoJSON stem,
-        # so distinct queries don't collide. When AFL_OUTPUT_PER_RUN is set and a
+        # so distinct queries don't collide. When FW_OUTPUT_PER_RUN is set and a
         # run_id is supplied, isolate the map under maps/runs/<run_id>/.
         from ..shared._output import _per_run_enabled
 

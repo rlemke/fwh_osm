@@ -177,7 +177,7 @@ def main() -> int:
         type=int,
         default=0,
         help="Skip regions whose cached PBF exceeds this size in MB (0 = no limit). "
-        "Falls back to the AFL_OSM_MAX_PBF_MB env var. Useful on memory-constrained "
+        "Falls back to the FW_OSM_MAX_PBF_MB env var. Useful on memory-constrained "
         "hosts where the largest extracts OOM or seek-thrash the osmium node index.",
     )
     args = parser.parse_args()

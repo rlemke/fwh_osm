@@ -2,7 +2,7 @@
 //
 // Routes via a locally running Valhalla instance (POST + JSON). Same result
 // schemas as the OSRM / API backends, so a workflow swaps engines by namespace.
-// Set AFL_VALHALLA_URL (default http://localhost:8002).
+// Set FW_VALHALLA_URL (default http://localhost:8002).
 
 /** Valhalla routing adapter — routes via a self-hosted Valhalla server. */
 namespace osm.Routing.Valhalla {

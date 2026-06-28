@@ -41,15 +41,15 @@ log = logging.getLogger(__name__)
 
 NAMESPACE = "osm.Source.Overture"
 
-_LOCAL_OUTPUT = os.environ.get("AFL_LOCAL_OUTPUT_DIR", "/tmp")
+_LOCAL_OUTPUT = os.environ.get("FW_LOCAL_OUTPUT_DIR", "/tmp")
 
 # Default Overture release; overridable per-source.
-DEFAULT_RELEASE = os.environ.get("AFL_OVERTURE_RELEASE", "2024-09-18.0")
+DEFAULT_RELEASE = os.environ.get("FW_OVERTURE_RELEASE", "2024-09-18.0")
 
 # Base location of Overture's GeoParquet (AWS S3 open-data bucket). The real
 # reader interpolates {release}/theme={theme}/type={type}/*.parquet under this.
 OVERTURE_S3_BASE = os.environ.get(
-    "AFL_OVERTURE_S3_BASE", "s3://overturemaps-us-west-2/release"
+    "FW_OVERTURE_S3_BASE", "s3://overturemaps-us-west-2/release"
 )
 
 

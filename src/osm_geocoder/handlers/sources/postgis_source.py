@@ -28,11 +28,11 @@ except ImportError:
 NAMESPACE = "osm.Source.PostGIS"
 
 DEFAULT_POSTGIS_URL = os.environ.get(
-    "AFL_POSTGIS_URL",
+    "FW_POSTGIS_URL",
     "postgresql://afl_osm:afl_osm_2024@afl-postgres:5432/osm",
 )
 
-_LOCAL_OUTPUT = os.environ.get("AFL_LOCAL_OUTPUT_DIR", "/tmp")
+_LOCAL_OUTPUT = os.environ.get("FW_LOCAL_OUTPUT_DIR", "/tmp")
 
 
 def _now() -> str:

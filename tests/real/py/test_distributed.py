@@ -21,7 +21,7 @@ Run:
 
 import pytest
 from helpers import (
-    EXAMPLE_AFL_FILES,
+    EXAMPLE_FW_FILES,
     store_flow,
     submit_workflow,
     wait_for_task,
@@ -198,8 +198,8 @@ class TestDistributed:
 
         # Read all FFL source files and concatenate into one string
         # (RunnerService parses compiled_sources[0].content as a single file)
-        primary_path = EXAMPLE_AFL_FILES["osmcityrouting.ffl"]
-        lib_paths = [EXAMPLE_AFL_FILES[f] for f in _CITY_ROUTING_LIBRARIES]
+        primary_path = EXAMPLE_FW_FILES["osmcityrouting.ffl"]
+        lib_paths = [EXAMPLE_FW_FILES[f] for f in _CITY_ROUTING_LIBRARIES]
 
         all_sources = []
         for p in [*lib_paths, primary_path]:

@@ -2,7 +2,7 @@
 //
 // Enumerates the PBF cache with ListCachedRegions (no network, no hardcoded
 // list), then fans out one full-region osmium export per region. The GeoJSON
-// is written to the configured storage backend — MinIO when AFL_STORAGE=s3 —
+// is written to the configured storage backend — MinIO when FW_STORAGE=s3 —
 // by osm.Source.PBF.ToGeoJson, which localizes the cached PBF first.
 //
 // Prerequisites: compile with osmtypes.afl, osmcache_download.afl,
@@ -34,7 +34,7 @@ namespace osm.convert {
      *  cache — so this needs no region list, never touches the network for
      *  enumeration, and naturally skips uncached extracts (e.g. planet). Each
      *  region's Download is therefore a cache hit; ToGeoJson then exports the
-     *  whole PBF to GeoJSON into the configured storage (MinIO on AFL_STORAGE=s3).
+     *  whole PBF to GeoJSON into the configured storage (MinIO on FW_STORAGE=s3).
      *
      *  Fans out one conversion per region across the runner fleet via foreach;
      *  the list-typed yield aggregates every output path into `outputs`.

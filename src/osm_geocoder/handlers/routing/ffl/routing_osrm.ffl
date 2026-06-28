@@ -3,7 +3,7 @@
 // Routes via a locally running OSRM instance. Requires OSRM to be set up
 // with a pre-processed PBF for the target region.
 //
-// Set AFL_OSRM_URL (default: http://localhost:5000) to point to your instance.
+// Set FW_OSRM_URL (default: http://localhost:5000) to point to your instance.
 
 /** OSRM local routing adapter — routes via a self-hosted OSRM server. */
 namespace osm.Routing.OSRM {

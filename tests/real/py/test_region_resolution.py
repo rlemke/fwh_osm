@@ -11,8 +11,8 @@ Run:
 """
 
 from helpers import (
-    EXAMPLE_AFL_FILES,
-    INTEGRATION_AFL_DIR,
+    EXAMPLE_FW_FILES,
+    INTEGRATION_FW_DIR,
     compile_afl_files,
     extract_workflow,
     run_to_completion,
@@ -52,9 +52,9 @@ def _resolve_region_handler(params: dict) -> dict:
 def _compile_region_test():
     """Compile the region test workflow with its dependencies."""
     return compile_afl_files(
-        INTEGRATION_AFL_DIR / "resolve_region_test.ffl",
-        EXAMPLE_AFL_FILES["osmtypes.ffl"],
-        EXAMPLE_AFL_FILES["osmregion.ffl"],
+        INTEGRATION_FW_DIR / "resolve_region_test.ffl",
+        EXAMPLE_FW_FILES["osmtypes.ffl"],
+        EXAMPLE_FW_FILES["osmregion.ffl"],
     )
 
 

@@ -10,7 +10,7 @@ Run:
 """
 
 from helpers import (
-    INTEGRATION_AFL_DIR,
+    INTEGRATION_FW_DIR,
     compile_afl_files,
     extract_workflow,
     run_to_completion,
@@ -29,7 +29,7 @@ class TestAddOneIntegration:
 
     def test_compile_addone_afl(self):
         """The addone.afl file compiles without errors."""
-        program = compile_afl_files(INTEGRATION_AFL_DIR / "addone.ffl")
+        program = compile_afl_files(INTEGRATION_FW_DIR / "addone.ffl")
         assert program["type"] == "Program"
 
         workflow = extract_workflow(program, "TestAddOne")
@@ -38,7 +38,7 @@ class TestAddOneIntegration:
 
     def test_addone_compiled_from_afl(self, mongo_store, evaluator, poller):
         """Compile from file, execute, assert result=2 for input=1."""
-        program = compile_afl_files(INTEGRATION_AFL_DIR / "addone.ffl")
+        program = compile_afl_files(INTEGRATION_FW_DIR / "addone.ffl")
         workflow = extract_workflow(program, "TestAddOne")
 
         poller.register("handlers.AddOne", addone_handler)
@@ -51,7 +51,7 @@ class TestAddOneIntegration:
 
     def test_addone_different_input(self, mongo_store, evaluator, poller):
         """AddOne(input=41) => output=42 via full pipeline."""
-        program = compile_afl_files(INTEGRATION_AFL_DIR / "addone.ffl")
+        program = compile_afl_files(INTEGRATION_FW_DIR / "addone.ffl")
         workflow = extract_workflow(program, "TestAddOne")
 
         poller.register("handlers.AddOne", addone_handler)
@@ -63,7 +63,7 @@ class TestAddOneIntegration:
 
     def test_addone_mongodb_round_trip(self, mongo_store, evaluator, poller):
         """Verify steps are persisted in MongoDB after execution."""
-        program = compile_afl_files(INTEGRATION_AFL_DIR / "addone.ffl")
+        program = compile_afl_files(INTEGRATION_FW_DIR / "addone.ffl")
         workflow = extract_workflow(program, "TestAddOne")
 
         poller.register("handlers.AddOne", addone_handler)

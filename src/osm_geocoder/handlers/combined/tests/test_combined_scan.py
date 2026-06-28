@@ -19,12 +19,12 @@ def _isolate_output_base(tmp_path, monkeypatch):
     """Redirect the OSM output base to a tmp dir.
 
     The GeoJSON stream writer stages its atomic temp file under
-    ``get_temp_dir()`` (``AFL_OUTPUT_BASE/tmp``, default
+    ``get_temp_dir()`` (``FW_OUTPUT_BASE/tmp``, default
     ``/Volumes/afl_data/output/tmp``). Point the base at a per-test tmp dir so
     the suite never touches the real data volume even though finalize() is
     given an explicit output directory.
     """
-    monkeypatch.setenv("AFL_OUTPUT_BASE", str(tmp_path / "output"))
+    monkeypatch.setenv("FW_OUTPUT_BASE", str(tmp_path / "output"))
 
 
 # ── TagInterest tests ────────────────────────────────────────────────
@@ -636,7 +636,7 @@ class TestScanCacheGuard:
         from .. import combined_handlers as ch
 
         # Current output backend is S3, but the cached output is a local path
-        # (e.g. cached before AFL_STORAGE=s3) → re-scan.
+        # (e.g. cached before FW_STORAGE=s3) → re-scan.
         monkeypatch.setattr(ch, "resolve_output_dir", lambda c: "s3://bucket/osm-combined")
         rv = {"results": json.dumps(
             {"amenities": {"output_path": str(tmp_path / "x.geojson")}})}

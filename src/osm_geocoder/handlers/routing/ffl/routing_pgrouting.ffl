@@ -3,7 +3,7 @@
 // Routes via SQL functions over a routable osm2pgrouting topology, rather than
 // an HTTP server. Same result schemas as the OSRM / Valhalla / GraphHopper / API
 // backends, so a workflow swaps to a DB-backed engine by namespace alone.
-// Set AFL_POSTGIS_URL and AFL_PGROUTING_PREFIX (default tables ways /
+// Set FW_POSTGIS_URL and FW_PGROUTING_PREFIX (default tables ways /
 // ways_vertices_pgr). Points are snapped to the nearest network vertex.
 
 /** pgRouting adapter — routes via PostGIS + the pgrouting extension. */

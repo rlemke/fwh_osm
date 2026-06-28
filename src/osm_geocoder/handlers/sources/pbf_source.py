@@ -38,7 +38,7 @@ def _require_osmium(facet: str) -> None:
 
 NAMESPACE = "osm.Source.PBF"
 
-_LOCAL_OUTPUT = os.environ.get("AFL_LOCAL_OUTPUT_DIR", "/tmp")
+_LOCAL_OUTPUT = os.environ.get("FW_LOCAL_OUTPUT_DIR", "/tmp")
 
 
 def _file_size(path: str) -> int:
@@ -619,7 +619,7 @@ def _to_geojson(payload: dict) -> dict:
 
     Unlike the category extractors (subsets), this exports *every* feature via
     ``osmium export`` and writes to the configured storage backend — MinIO when
-    ``AFL_STORAGE=s3`` — under the ``geojson`` cache type. The underlying
+    ``FW_STORAGE=s3`` — under the ``geojson`` cache type. The underlying
     ``convert_region`` localizes the cached PBF from the object store before
     osmium and finalizes the output back to it. Idempotent: skips osmium when
     the region is already converted (source SHA matches).
@@ -634,7 +634,7 @@ def _to_geojson(payload: dict) -> dict:
     step_log = payload.get("_step_log")
 
     # The size gate lives in the shared library (convert_region honours both the
-    # max_pbf_mb arg and the AFL_OSM_MAX_PBF_MB env fallback, and skips BEFORE
+    # max_pbf_mb arg and the FW_OSM_MAX_PBF_MB env fallback, and skips BEFORE
     # localizing). Pass the FFL param through; the handler only translates the
     # ConvertResult into the facet's return dict.
     if step_log:

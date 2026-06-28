@@ -1,17 +1,17 @@
 """API routing adapter — routes via public OSRM demo or OpenRouteService.
 
 Zero-import routing: no local graph build needed. Uses the OSRM public
-demo server by default. Set AFL_ORS_API_KEY to use OpenRouteService instead
+demo server by default. Set FW_ORS_API_KEY to use OpenRouteService instead
 (higher rate limits, isochrone support).
 
 OSRM demo is rate-limited and for non-commercial use only. For production
 batch workloads, use the OSRM local adapter or set up your own instance.
 
 Environment:
-    AFL_ROUTING_API_URL: OSRM-compatible routing endpoint
+    FW_ROUTING_API_URL: OSRM-compatible routing endpoint
         (default: https://router.project-osrm.org)
-    AFL_ORS_API_KEY: OpenRouteService API key (enables ORS backend)
-    AFL_ORS_API_URL: ORS endpoint (default: https://api.openrouteservice.org)
+    FW_ORS_API_KEY: OpenRouteService API key (enables ORS backend)
+    FW_ORS_API_URL: ORS endpoint (default: https://api.openrouteservice.org)
 """
 
 from __future__ import annotations
@@ -31,17 +31,17 @@ NAMESPACE = "osm.Routing.API"
 
 # OSRM demo (default — no key needed)
 OSRM_API_URL = os.environ.get(
-    "AFL_ROUTING_API_URL", "https://router.project-osrm.org"
+    "FW_ROUTING_API_URL", "https://router.project-osrm.org"
 )
 
 # OpenRouteService (optional — needs API key)
-ORS_API_KEY = os.environ.get("AFL_ORS_API_KEY", "")
+ORS_API_KEY = os.environ.get("FW_ORS_API_KEY", "")
 ORS_API_URL = os.environ.get(
-    "AFL_ORS_API_URL", "https://api.openrouteservice.org"
+    "FW_ORS_API_URL", "https://api.openrouteservice.org"
 )
 
 # Rate limiting: minimum seconds between API calls
-_RATE_LIMIT_SECONDS = float(os.environ.get("AFL_ROUTING_RATE_LIMIT", "1.0"))
+_RATE_LIMIT_SECONDS = float(os.environ.get("FW_ROUTING_RATE_LIMIT", "1.0"))
 _last_request_time = 0.0
 
 # OSRM profile mapping (OSRM uses specific profile names in URL path)

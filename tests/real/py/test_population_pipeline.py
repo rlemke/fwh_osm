@@ -14,8 +14,8 @@ Run:
 
 import pytest
 from helpers import (
-    EXAMPLE_AFL_FILES,
-    INTEGRATION_AFL_DIR,
+    EXAMPLE_FW_FILES,
+    INTEGRATION_FW_DIR,
     compile_afl_files,
     extract_workflow,
     run_to_completion,
@@ -47,11 +47,11 @@ except ImportError:
 def _compile_population_pipeline():
     """Compile the population pipeline workflow with dependencies."""
     return compile_afl_files(
-        INTEGRATION_AFL_DIR / "population_pipeline.ffl",
-        EXAMPLE_AFL_FILES["osmtypes.ffl"],
-        EXAMPLE_AFL_FILES["osmregion.ffl"],
-        EXAMPLE_AFL_FILES["osmcache_download.ffl"],
-        EXAMPLE_AFL_FILES["osmfilters_population.ffl"],
+        INTEGRATION_FW_DIR / "population_pipeline.ffl",
+        EXAMPLE_FW_FILES["osmtypes.ffl"],
+        EXAMPLE_FW_FILES["osmregion.ffl"],
+        EXAMPLE_FW_FILES["osmcache_download.ffl"],
+        EXAMPLE_FW_FILES["osmfilters_population.ffl"],
     )
 
 

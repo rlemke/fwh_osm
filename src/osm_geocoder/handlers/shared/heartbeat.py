@@ -58,12 +58,12 @@ _SIZE_THRESHOLD = 100 * 1024 * 1024
 
 def _resolve_mongo_config() -> tuple[str, str]:
     """Resolve MongoDB URI and database name from environment."""
-    db_name = os.environ.get("AFL_MONGODB_DATABASE", "facetwork")
-    uri = os.environ.get("AFL_MONGODB_URL", "")
+    db_name = os.environ.get("FW_MONGODB_DATABASE", "facetwork")
+    uri = os.environ.get("FW_MONGODB_URL", "")
     if not uri:
         # Legacy fallback
-        host = os.environ.get("AFL_MONGO_HOST", "afl-mongodb")
-        port = os.environ.get("AFL_MONGO_PORT", "27017")
+        host = os.environ.get("FW_MONGO_HOST", "afl-mongodb")
+        port = os.environ.get("FW_MONGO_PORT", "27017")
         uri = f"mongodb://{host}:{port}"
     return uri, db_name
 
@@ -101,7 +101,7 @@ def json_load_with_heartbeat(
     """Load JSON, copying large network files locally first.
 
     For files on network mounts (``/Volumes/...``) larger than 100 MB,
-    the file is first copied to ``AFL_OUTPUT_BASE/cache/osm-local/`` using ``cp``
+    the file is first copied to ``FW_OUTPUT_BASE/cache/osm-local/`` using ``cp``
     (a separate process immune to GIL stalls), with a heartbeat
     subprocess pinging MongoDB during the copy.  The local copy is then
     loaded with ``json.load()`` at local-disk speed.

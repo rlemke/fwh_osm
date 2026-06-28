@@ -7,7 +7,7 @@
     the (multi-GB) re-download is skipped and the cache is returned as current.
 
 All offline: ``requests.get`` / ``urlopen`` are stubbed; the download gate is a
-no-op because AFL_MONGODB_URL is unset under the test env.
+no-op because FW_MONGODB_URL is unset under the test env.
 """
 
 import hashlib
@@ -23,7 +23,7 @@ pd = pytest.importorskip("osm_geocoder.tools._osm_tools.pbf_download")
 def _fast_and_ungated(monkeypatch):
     # No real sleeping; gate disabled so the network fetch isn't blocked.
     monkeypatch.setattr(pd.time, "sleep", lambda *_: None)
-    monkeypatch.delenv("AFL_MONGODB_URL", raising=False)
+    monkeypatch.delenv("FW_MONGODB_URL", raising=False)
     pd.download_gate._collection_cache = None
     yield
     pd.download_gate._collection_cache = None
@@ -141,7 +141,7 @@ def test_revalidate_304_skips_download(monkeypatch):
             "downloaded_at": "2026-05-01T00:00:00Z",
         },
     }
-    monkeypatch.setenv("AFL_OSM_USE_CACHE_IF_PRESENT", "")  # not pinned-cache mode
+    monkeypatch.setenv("FW_OSM_USE_CACHE_IF_PRESENT", "")  # not pinned-cache mode
     monkeypatch.setattr(pd, "is_region_cached", lambda region, *, storage=None: True)
     monkeypatch.setattr(pd, "sidecar_entry_for", lambda region, *, storage=None: side)
     monkeypatch.setattr(pd, "_region_lock", lambda region: __import__("contextlib").nullcontext())

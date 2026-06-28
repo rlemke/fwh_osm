@@ -100,11 +100,11 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
 
 
 def main() -> None:
-    # Resolve the default directory to AFL_CACHE_ROOT/osm so existing URLs
+    # Resolve the default directory to FW_CACHE_ROOT/osm so existing URLs
     # like /html/ continue to resolve.
-    default_data = os.environ.get("AFL_DATA_ROOT", "/Volumes/afl_data")
+    default_data = os.environ.get("FW_DATA_ROOT", "/Volumes/afl_data")
     default_cache = os.environ.get(
-        "AFL_CACHE_ROOT", os.path.join(default_data, "cache")
+        "FW_CACHE_ROOT", os.path.join(default_data, "cache")
     )
     default_dir = os.path.join(default_cache, "osm")
 
