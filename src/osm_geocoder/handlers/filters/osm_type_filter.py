@@ -18,6 +18,7 @@ from facetwork.runtime.storage import get_storage_backend, localize
 from ..shared._output import (
     derive_output_path,
     ensure_dir,
+    finalize_output_file,
     open_output,
     resolve_output_dir,
     uri_stem,
@@ -440,7 +441,6 @@ def filter_geojson_by_osm_type(
     # Stream features to avoid loading multi-GB files into memory.
     # Write to local temp file to avoid VirtioFS write stalls.
     import os
-    import shutil
     import tempfile
 
     from facetwork.runtime.storage import localize
@@ -476,8 +476,7 @@ def filter_geojson_by_osm_type(
 
                 writer.write_feature(feature)
 
-        ensure_dir(output_path_str)
-        shutil.move(tmp_path, output_path_str)
+        finalize_output_file(tmp_path, output_path_str)
     except Exception:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
@@ -524,7 +523,6 @@ def filter_geojson_by_tag_prefix(
         OSMFilteredFeatures with the output path and matched/original counts.
     """
     import os
-    import shutil
     import tempfile
 
     from facetwork.config import get_temp_dir
@@ -558,8 +556,7 @@ def filter_geojson_by_tag_prefix(
                 value = feature.get("properties", {}).get(tag_key)
                 if isinstance(value, str) and value.startswith(value_prefix):
                     writer.write_feature(feature)
-        ensure_dir(output_path_str)
-        shutil.move(tmp_path, output_path_str)
+        finalize_output_file(tmp_path, output_path_str)
     except Exception:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
@@ -592,7 +589,6 @@ def _filter_geojson_by_predicate(
     collision-safe-naming contract as :func:`filter_geojson_by_tag_prefix`.
     """
     import os
-    import shutil
     import tempfile
 
     from facetwork.config import get_temp_dir
@@ -625,8 +621,7 @@ def _filter_geojson_by_predicate(
                 value = feature.get("properties", {}).get(tag_key)
                 if isinstance(value, str) and predicate(value):
                     writer.write_feature(feature)
-        ensure_dir(output_path_str)
-        shutil.move(tmp_path, output_path_str)
+        finalize_output_file(tmp_path, output_path_str)
     except Exception:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
@@ -666,8 +661,14 @@ def filter_geojson_by_tag_contains(
 
     label = f"{tag_key} contains {substring!r}" + ("" if case_sensitive else " (ci)")
     return _filter_geojson_by_predicate(
-        input_path, tag_key, _contains, label,
-        f"contains-{substring}", output_path, heartbeat, run_id,
+        input_path,
+        tag_key,
+        _contains,
+        label,
+        f"contains-{substring}",
+        output_path,
+        heartbeat,
+        run_id,
     )
 
 
@@ -690,8 +691,14 @@ def filter_geojson_by_tag_regex(
 
     compiled = re.compile(pattern)
     return _filter_geojson_by_predicate(
-        input_path, tag_key, lambda v: compiled.search(v) is not None,
-        f"{tag_key} matches /{pattern}/", f"regex-{pattern}", output_path, heartbeat, run_id,
+        input_path,
+        tag_key,
+        lambda v: compiled.search(v) is not None,
+        f"{tag_key} matches /{pattern}/",
+        f"regex-{pattern}",
+        output_path,
+        heartbeat,
+        run_id,
     )
 
 

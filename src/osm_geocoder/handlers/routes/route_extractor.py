@@ -18,7 +18,7 @@ from pathlib import Path
 
 from facetwork.runtime.storage import get_storage_backend
 
-from ..shared._output import uri_stem
+from ..shared._output import finalize_output_file, uri_stem
 
 _storage = get_storage_backend()
 
@@ -239,12 +239,10 @@ def filter_routes_by_type(
     # Stream features one at a time to avoid loading multi-GB files into memory.
     # Write to a local temp file first, then move to the final path — this avoids
     # VirtioFS write stalls that block the GIL and kill server heartbeats.
-    import shutil
     import tempfile
 
     from facetwork.runtime.storage import localize
 
-    from ..shared._output import ensure_dir
     from ..shared.geojson_writer import GeoJSONStreamWriter, iter_geojson_features
 
     local_path = localize(input_path)
@@ -279,8 +277,7 @@ def filter_routes_by_type(
                 writer.write_feature(feature)
 
         # Move the completed output to the final path
-        ensure_dir(output_path)
-        shutil.move(tmp_path, output_path)
+        finalize_output_file(tmp_path, output_path)
     except Exception:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)

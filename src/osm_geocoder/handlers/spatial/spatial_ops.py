@@ -26,14 +26,13 @@ from __future__ import annotations
 import logging
 import math
 import os
-import shutil
 import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
-from ..shared._output import derive_output_path, ensure_dir, uri_stem
+from ..shared._output import derive_output_path, ensure_dir, finalize_output_file, uri_stem
 from ..shared.geojson_writer import GeoJSONStreamWriter, iter_geojson_features
 
 log = logging.getLogger(__name__)
@@ -141,9 +140,7 @@ def _local_metric_transformer(lon: float, lat: float):
     extents these primitives operate on, off-center error stays small (well
     under a percent within a few hundred km). Coordinates come out in meters.
     """
-    aeqd = CRS.from_proj4(
-        f"+proj=aeqd +lat_0={lat} +lon_0={lon} +datum=WGS84 +units=m +no_defs"
-    )
+    aeqd = CRS.from_proj4(f"+proj=aeqd +lat_0={lat} +lon_0={lon} +datum=WGS84 +units=m +no_defs")
     wgs84 = CRS.from_epsg(4326)
     return Transformer.from_crs(wgs84, aeqd, always_xy=True).transform
 
@@ -219,9 +216,7 @@ def _relate(
     ``nearest_ref_name`` when the nearest reference carries a ``name``).
     """
     if not HAS_SHAPELY or not HAS_PYPROJ:
-        raise RuntimeError(
-            "shapely>=2.0 and pyproj>=3.0 are required for osm.Spatial operations"
-        )
+        raise RuntimeError("shapely>=2.0 and pyproj>=3.0 are required for osm.Spatial operations")
 
     unit_enum = Unit.from_string(unit)
     max_m = to_meters(distance, unit_enum) if distance and distance > 0 else None
@@ -240,9 +235,7 @@ def _relate(
     output_path = str(output_path)
     ensure_dir(output_path)
 
-    tree, _geoms, names, transformer, reference_count = _load_reference(
-        reference_path, heartbeat
-    )
+    tree, _geoms, names, transformer, reference_count = _load_reference(reference_path, heartbeat)
 
     from facetwork.config import get_temp_dir
     from facetwork.runtime.storage import localize
@@ -256,9 +249,7 @@ def _relate(
         with GeoJSONStreamWriter(tmp_path) as writer:
             for feature in iter_geojson_features(local_subject, heartbeat):
                 original_count += 1
-                keep, dist_m, ref_name = _evaluate(
-                    feature, tree, names, transformer, max_m, mode
-                )
+                keep, dist_m, ref_name = _evaluate(feature, tree, names, transformer, max_m, mode)
                 if not keep:
                     continue
                 if dist_m is not None:
@@ -269,8 +260,7 @@ def _relate(
                         props["nearest_ref_name"] = ref_name
                 writer.write_feature(feature)
 
-        ensure_dir(output_path)
-        shutil.move(tmp_path, output_path)
+        finalize_output_file(tmp_path, output_path)
         feature_count = writer.feature_count
     except Exception:
         if os.path.exists(tmp_path):
@@ -338,8 +328,14 @@ def within_distance(
 ) -> SpatialResult:
     """Keep subject features within ``distance`` of any reference feature."""
     return _relate(
-        subject_path, reference_path, distance, unit, _Mode.WITHIN,
-        output_path, heartbeat, run_id,
+        subject_path,
+        reference_path,
+        distance,
+        unit,
+        _Mode.WITHIN,
+        output_path,
+        heartbeat,
+        run_id,
     )
 
 
@@ -354,8 +350,14 @@ def beyond_distance(
 ) -> SpatialResult:
     """Keep subject features beyond ``distance`` from every reference feature."""
     return _relate(
-        subject_path, reference_path, distance, unit, _Mode.BEYOND,
-        output_path, heartbeat, run_id,
+        subject_path,
+        reference_path,
+        distance,
+        unit,
+        _Mode.BEYOND,
+        output_path,
+        heartbeat,
+        run_id,
     )
 
 
@@ -374,8 +376,14 @@ def nearest(
     are kept but left un-annotated.
     """
     return _relate(
-        subject_path, reference_path, distance, unit, _Mode.NEAREST,
-        output_path, heartbeat, run_id,
+        subject_path,
+        reference_path,
+        distance,
+        unit,
+        _Mode.NEAREST,
+        output_path,
+        heartbeat,
+        run_id,
     )
 
 
@@ -442,8 +450,13 @@ def spatial_join(
     subject_path = str(subject_path)
     if output_path is None:
         output_path = derive_output_path(
-            "osm-spatial", uri_stem(subject_path), "join",
-            uri_stem(str(reference_path)), predicate, ext="geojson", run_id=run_id or None,
+            "osm-spatial",
+            uri_stem(subject_path),
+            "join",
+            uri_stem(str(reference_path)),
+            predicate,
+            ext="geojson",
+            run_id=run_id or None,
         )
     output_path = str(output_path)
     ensure_dir(output_path)
@@ -478,8 +491,7 @@ def spatial_join(
                     for k, v in ref_props[matches[0]].items():
                         props[f"{prefix}{k}"] = v
                 writer.write_feature(feature)
-        ensure_dir(output_path)
-        shutil.move(tmp_path, output_path)
+        finalize_output_file(tmp_path, output_path)
         feature_count = writer.feature_count
     except Exception:
         if os.path.exists(tmp_path):
@@ -546,8 +558,12 @@ def buffer(
     input_path = str(input_path)
     if output_path is None:
         output_path = derive_output_path(
-            "osm-spatial", uri_stem(input_path), "buffer",
-            f"{distance}{unit_enum.value}", ext="geojson", run_id=run_id or None,
+            "osm-spatial",
+            uri_stem(input_path),
+            "buffer",
+            f"{distance}{unit_enum.value}",
+            ext="geojson",
+            run_id=run_id or None,
         )
     output_path = str(output_path)
     ensure_dir(output_path)
@@ -562,8 +578,13 @@ def buffer(
         with GeoJSONStreamWriter(output_path) as writer:
             pass
         return SpatialResult(
-            output_path=output_path, feature_count=0, original_count=0, reference_count=0,
-            operation="buffer", distance=distance, unit=unit_enum.value,
+            output_path=output_path,
+            feature_count=0,
+            original_count=0,
+            reference_count=0,
+            operation="buffer",
+            distance=distance,
+            unit=unit_enum.value,
             extraction_date=datetime.now(UTC).isoformat(),
         )
 
@@ -594,8 +615,7 @@ def buffer(
                     continue
                 feature["geometry"] = mapping(buffered)
                 writer.write_feature(feature)
-        ensure_dir(output_path)
-        shutil.move(tmp_path, output_path)
+        finalize_output_file(tmp_path, output_path)
         feature_count = writer.feature_count
     except Exception:
         if os.path.exists(tmp_path):
@@ -660,8 +680,12 @@ def intersect(
     subject_path = str(subject_path)
     if output_path is None:
         output_path = derive_output_path(
-            "osm-spatial", uri_stem(subject_path), "intersect",
-            uri_stem(str(clip_path)), ext="geojson", run_id=run_id or None,
+            "osm-spatial",
+            uri_stem(subject_path),
+            "intersect",
+            uri_stem(str(clip_path)),
+            ext="geojson",
+            run_id=run_id or None,
         )
     output_path = str(output_path)
     ensure_dir(output_path)
@@ -698,8 +722,7 @@ def intersect(
                 # Empty clip mask -> nothing intersects; still count the subject.
                 for _ in iter_geojson_features(local_subject, heartbeat):
                     original_count += 1
-        ensure_dir(output_path)
-        shutil.move(tmp_path, output_path)
+        finalize_output_file(tmp_path, output_path)
         feature_count = writer.feature_count
     except Exception:
         if os.path.exists(tmp_path):
@@ -738,9 +761,12 @@ def union(
     input_path = str(input_path)
     if output_path is None:
         output_path = derive_output_path(
-            "osm-spatial", uri_stem(input_path), "union",
+            "osm-spatial",
+            uri_stem(input_path),
+            "union",
             uri_stem(str(other_path)) if other_path else None,
-            ext="geojson", run_id=run_id or None,
+            ext="geojson",
+            run_id=run_id or None,
         )
     output_path = str(output_path)
     ensure_dir(output_path)
@@ -763,14 +789,17 @@ def union(
             if geoms:
                 merged = unary_union(geoms)
                 if not merged.is_empty:
-                    writer.write_feature({
-                        "type": "Feature",
-                        "properties": {"operation": "union",
-                                       "merged_count": original_count + reference_count},
-                        "geometry": mapping(merged),
-                    })
-        ensure_dir(output_path)
-        shutil.move(tmp_path, output_path)
+                    writer.write_feature(
+                        {
+                            "type": "Feature",
+                            "properties": {
+                                "operation": "union",
+                                "merged_count": original_count + reference_count,
+                            },
+                            "geometry": mapping(merged),
+                        }
+                    )
+        finalize_output_file(tmp_path, output_path)
         feature_count = writer.feature_count
     except Exception:
         if os.path.exists(tmp_path):
@@ -811,8 +840,11 @@ def centroid(
     input_path = str(input_path)
     if output_path is None:
         output_path = derive_output_path(
-            "osm-spatial", uri_stem(input_path), "centroid",
-            ext="geojson", run_id=run_id or None,
+            "osm-spatial",
+            uri_stem(input_path),
+            "centroid",
+            ext="geojson",
+            run_id=run_id or None,
         )
     output_path = str(output_path)
     ensure_dir(output_path)
@@ -840,8 +872,7 @@ def centroid(
                     continue
                 feature["geometry"] = mapping(c)
                 writer.write_feature(feature)
-        ensure_dir(output_path)
-        shutil.move(tmp_path, output_path)
+        finalize_output_file(tmp_path, output_path)
         feature_count = writer.feature_count
     except Exception:
         if os.path.exists(tmp_path):
@@ -884,8 +915,12 @@ def simplify(
     input_path = str(input_path)
     if output_path is None:
         output_path = derive_output_path(
-            "osm-spatial", uri_stem(input_path), "simplify",
-            f"{tolerance}{unit_enum.value}", ext="geojson", run_id=run_id or None,
+            "osm-spatial",
+            uri_stem(input_path),
+            "simplify",
+            f"{tolerance}{unit_enum.value}",
+            ext="geojson",
+            run_id=run_id or None,
         )
     output_path = str(output_path)
     ensure_dir(output_path)
@@ -899,8 +934,13 @@ def simplify(
         with GeoJSONStreamWriter(output_path):
             pass
         return SpatialResult(
-            output_path=output_path, feature_count=0, original_count=0, reference_count=0,
-            operation="simplify", distance=tolerance, unit=unit_enum.value,
+            output_path=output_path,
+            feature_count=0,
+            original_count=0,
+            reference_count=0,
+            operation="simplify",
+            distance=tolerance,
+            unit=unit_enum.value,
             extraction_date=datetime.now(UTC).isoformat(),
         )
 
@@ -923,7 +963,9 @@ def simplify(
                     continue
                 try:
                     projected = shapely_transform(fwd, shape(geom_json))
-                    reduced = shapely_transform(inv, projected.simplify(tol_m, preserve_topology=True))
+                    reduced = shapely_transform(
+                        inv, projected.simplify(tol_m, preserve_topology=True)
+                    )
                 except Exception as exc:
                     log.warning("spatial: simplify failed, skipping: %s", exc)
                     continue
@@ -931,8 +973,7 @@ def simplify(
                     continue
                 feature["geometry"] = mapping(reduced)
                 writer.write_feature(feature)
-        ensure_dir(output_path)
-        shutil.move(tmp_path, output_path)
+        finalize_output_file(tmp_path, output_path)
         feature_count = writer.feature_count
     except Exception:
         if os.path.exists(tmp_path):

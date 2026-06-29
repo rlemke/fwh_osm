@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from osm_geocoder.handlers.filters.osm_type_filter import (
     HAS_OSMIUM,
     OSMElement,
@@ -439,7 +440,10 @@ class TestHandlerRegistration:
 
     def test_register_filter_handlers(self):
         """Test that all filter handlers are registered."""
-        from osm_geocoder.handlers.filters.filter_handlers import NAMESPACE, register_filter_handlers
+        from osm_geocoder.handlers.filters.filter_handlers import (
+            NAMESPACE,
+            register_filter_handlers,
+        )
 
         mock_poller = MagicMock()
         register_filter_handlers(mock_poller)
@@ -753,7 +757,9 @@ class TestOSMTypeFilterHandlers:
 
     def test_geojson_osm_type_handler_empty_path(self):
         """Test GeoJSON handler with empty input path."""
-        from osm_geocoder.handlers.filters.filter_handlers import _make_geojson_osm_type_filter_handler
+        from osm_geocoder.handlers.filters.filter_handlers import (
+            _make_geojson_osm_type_filter_handler,
+        )
 
         handler = _make_geojson_osm_type_filter_handler("FilterGeoJSONByOSMType")
 
@@ -811,10 +817,16 @@ class TestFilterGeoJSONByTagPrefix:
     def test_feature_missing_tag_is_dropped(self, tmp_path):
         src = tmp_path / "mixed.geojson"
         feats = [
-            {"type": "Feature", "properties": {"ref": "I 5"},
-             "geometry": {"type": "Point", "coordinates": [0, 0]}},
-            {"type": "Feature", "properties": {"name": "unref'd"},
-             "geometry": {"type": "Point", "coordinates": [1, 1]}},
+            {
+                "type": "Feature",
+                "properties": {"ref": "I 5"},
+                "geometry": {"type": "Point", "coordinates": [0, 0]},
+            },
+            {
+                "type": "Feature",
+                "properties": {"name": "unref'd"},
+                "geometry": {"type": "Point", "coordinates": [1, 1]},
+            },
         ]
         src.write_text(json.dumps({"type": "FeatureCollection", "features": feats}))
         out = tmp_path / "out.geojson"

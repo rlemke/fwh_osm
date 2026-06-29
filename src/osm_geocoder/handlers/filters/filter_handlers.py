@@ -708,8 +708,12 @@ def _make_geojson_tag_contains_filter_handler(facet_name: str):
             return {"result": _empty_osm_result(f"{tag_key} contains {substring!r}")}
 
         result = filter_geojson_by_tag_contains(
-            input_path, tag_key=tag_key, substring=substring, case_sensitive=case_sensitive,
-            heartbeat=payload.get("_task_heartbeat"), task_uuid=payload.get("_task_uuid", ""),
+            input_path,
+            tag_key=tag_key,
+            substring=substring,
+            case_sensitive=case_sensitive,
+            heartbeat=payload.get("_task_heartbeat"),
+            task_uuid=payload.get("_task_uuid", ""),
             run_id=payload.get("_workflow_id", ""),
         )
         if step_log:
@@ -747,8 +751,11 @@ def _make_geojson_tag_regex_filter_handler(facet_name: str):
             return {"result": _empty_osm_result(f"{tag_key} matches /{pattern}/")}
 
         result = filter_geojson_by_tag_regex(
-            input_path, tag_key=tag_key, pattern=pattern,
-            heartbeat=payload.get("_task_heartbeat"), task_uuid=payload.get("_task_uuid", ""),
+            input_path,
+            tag_key=tag_key,
+            pattern=pattern,
+            heartbeat=payload.get("_task_heartbeat"),
+            task_uuid=payload.get("_task_uuid", ""),
             run_id=payload.get("_workflow_id", ""),
         )
         if step_log:
@@ -828,9 +835,7 @@ def _make_byscript_filter_handler(facet_name: str):
         out_path = f"{base}_filtered_{h}.{ext or 'geojson'}"
         if step_log:
             step_log(f"{qualified}: filtering {input_path} by script")
-        res = geojson_filter.filter_geojson(
-            input_path, script, out_path, storage=get_storage()
-        )
+        res = geojson_filter.filter_geojson(input_path, script, out_path, storage=get_storage())
         if step_log:
             step_log(
                 f"{qualified}: kept {res.kept}/{res.total} features"

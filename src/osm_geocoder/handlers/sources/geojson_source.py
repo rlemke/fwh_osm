@@ -13,7 +13,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ..shared._output import uri_stem
+from ..shared._output import finalize_output_file, uri_stem
 from ..shared.output_cache import cached_result, save_result_meta
 
 log = logging.getLogger(__name__)
@@ -55,10 +55,14 @@ def _filter_and_write(
 
     Returns feature count.
     """
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    # Stream to a LOCAL temp, then finalize to (possibly s3://) output_path —
+    # open(output_path) can't write an s3:// URI.
+    import tempfile
 
+    fd, tmp = tempfile.mkstemp(suffix=".geojson")
+    os.close(fd)
     count = 0
-    with open(output_path, "w") as f:
+    with open(tmp, "w") as f:
         f.write('{"type":"FeatureCollection","features":[\n')
         for feature in _iter_features(input_path):
             if heartbeat:
@@ -69,6 +73,7 @@ def _filter_and_write(
                 json.dump(feature, f)
                 count += 1
         f.write("\n]}\n")
+    finalize_output_file(tmp, output_path)
 
     return count
 

@@ -17,7 +17,7 @@ from pathlib import Path
 
 from facetwork.runtime.storage import get_storage_backend
 
-from ..shared._output import open_output, uri_stem
+from ..shared._output import finalize_output_file, open_output, uri_stem
 
 _storage = get_storage_backend()
 
@@ -153,7 +153,6 @@ def extract_parks(
     total area in km² is summed across kept features.
     """
     import os
-    import shutil
     import tempfile
 
     import osmium
@@ -191,17 +190,13 @@ def extract_parks(
             if not matches_park_type(tags, ptype, protect_set):
                 return
             try:
-                geom = shapely_mapping(
-                    shapely_wkb.loads(wkbfab.create_multipolygon(a), hex=True)
-                )
+                geom = shapely_mapping(shapely_wkb.loads(wkbfab.create_multipolygon(a), hex=True))
             except Exception:
                 return  # incomplete geometry — skip
             props = dict(tags)
             props["osm_id"] = a.orig_id()
             props["park_class"] = classify_park(tags)
-            self.writer.write_feature(
-                {"type": "Feature", "properties": props, "geometry": geom}
-            )
+            self.writer.write_feature({"type": "Feature", "properties": props, "geometry": geom})
             self.kept += 1
             self.area_km2 += calculate_area_km2(geom)
             if heartbeat and self.kept % 1000 == 0:
@@ -213,8 +208,7 @@ def extract_parks(
         with GeoJSONStreamWriter(tmp_path) as writer:
             handler = _ParkHandler(writer)
             handler.apply_file(local_pbf, locations=True, idx="flex_mem")
-        ensure_dir(output_path_str)
-        shutil.move(tmp_path, output_path_str)
+        finalize_output_file(tmp_path, output_path_str)
     except Exception:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)

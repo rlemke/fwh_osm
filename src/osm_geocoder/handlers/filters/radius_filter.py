@@ -19,7 +19,7 @@ from typing import Any
 
 from facetwork.runtime.storage import get_storage_backend
 
-from ..shared._output import uri_stem
+from ..shared._output import finalize_output_file, uri_stem
 
 log = logging.getLogger(__name__)
 
@@ -322,12 +322,10 @@ def filter_geojson(
     # Stream features to avoid loading multi-GB files into memory.
     # Write to a local temp file to avoid VirtioFS write stalls.
     import os
-    import shutil
     import tempfile
 
     from facetwork.runtime.storage import localize
 
-    from ..shared._output import ensure_dir
     from ..shared.geojson_writer import GeoJSONStreamWriter, iter_geojson_features
 
     local_path = localize(input_path)
@@ -372,8 +370,7 @@ def filter_geojson(
                     dropped += 1
                     continue
 
-        ensure_dir(output_path)
-        shutil.move(tmp_path, output_path)
+        finalize_output_file(tmp_path, output_path)
     except Exception:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)

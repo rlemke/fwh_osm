@@ -114,9 +114,7 @@ def _extract_country(props: dict) -> str:
     return ""
 
 
-def _annotate(
-    feature: dict, tier: Tier, population: int
-) -> dict | None:
+def _annotate(feature: dict, tier: Tier, population: int) -> dict | None:
     """Return a new Feature with zoom/tier/bbox/name/country fields filled in."""
     geom = feature.get("geometry") or {}
     coords = geom.get("coordinates")
@@ -241,8 +239,8 @@ def tier_cities(
 
 @dataclass
 class SplitResult:
-    output_paths: dict[int, str]   # zoom → file path
-    counts: dict[int, int]         # zoom → feature count
+    output_paths: dict[int, str]  # zoom → file path
+    counts: dict[int, int]  # zoom → feature count
     format: str = "GeoJSON"
     extraction_date: str = ""
 
@@ -263,7 +261,9 @@ def split_by_tier(
     paths).
     """
     input_path = str(input_path)
-    output_dir = Path(output_dir)
+    # NOT Path(output_dir): pathlib collapses the "s3://" double slash to "s3:/",
+    # so the storage backend parses an empty bucket. Keep it a string and join.
+    output_dir = str(output_dir).rstrip("/")
 
     s = get_storage()
     data = json.loads(s.read_text(input_path))
@@ -284,7 +284,7 @@ def split_by_tier(
     paths: dict[int, str] = {}
     counts: dict[int, int] = {}
     for zoom, features in buckets.items():
-        path = str(output_dir / f"{basename}_z{zoom}.geojson")
+        path = f"{output_dir}/{basename}_z{zoom}.geojson"
         s.write_text_atomic(
             path,
             json.dumps({"type": "FeatureCollection", "features": features}),

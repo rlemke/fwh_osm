@@ -33,8 +33,8 @@ import logging
 import os
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
-from pathlib import Path
 
+from ..shared._output import finalize_output_file
 from ..shared.output_cache import cached_result, save_result_meta
 
 log = logging.getLogger(__name__)
@@ -48,9 +48,7 @@ DEFAULT_RELEASE = os.environ.get("FW_OVERTURE_RELEASE", "2024-09-18.0")
 
 # Base location of Overture's GeoParquet (AWS S3 open-data bucket). The real
 # reader interpolates {release}/theme={theme}/type={type}/*.parquet under this.
-OVERTURE_S3_BASE = os.environ.get(
-    "FW_OVERTURE_S3_BASE", "s3://overturemaps-us-west-2/release"
-)
+OVERTURE_S3_BASE = os.environ.get("FW_OVERTURE_S3_BASE", "s3://overturemaps-us-west-2/release")
 
 
 class OvertureDependencyError(RuntimeError):
@@ -100,6 +98,7 @@ def _output_path(category: str, subcategory: str, region: str) -> str:
 # ---------------------------------------------------------------------------
 # Swappable reader — the ONLY part that touches pyarrow/duckdb + the network.
 # ---------------------------------------------------------------------------
+
 
 def _has_reader_dep() -> bool:
     try:
@@ -213,6 +212,7 @@ def _overture_row_properties(row: dict) -> dict:  # pragma: no cover - real path
 # Shared staging: write mapped GeoJSON features to a FeatureCollection on disk.
 # ---------------------------------------------------------------------------
 
+
 def _stage_features(
     records: Iterable[dict],
     output_path: str,
@@ -226,10 +226,13 @@ def _stage_features(
     unified property dict (e.g. with ``amenity``/``building``/``highway`` keys),
     or ``None`` to drop the feature. Returns the number of features written.
     """
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    # Stream to a LOCAL temp, then finalize to (possibly s3://) output_path.
+    import tempfile
 
+    fd, tmp = tempfile.mkstemp(suffix=".geojson")
+    os.close(fd)
     count = 0
-    with open(output_path, "w") as f:
+    with open(tmp, "w") as f:
         f.write('{"type":"FeatureCollection","features":[\n')
         for rec in records:
             if heartbeat:
@@ -247,6 +250,7 @@ def _stage_features(
             json.dump(feature, f)
             count += 1
         f.write("\n]}\n")
+    finalize_output_file(tmp, output_path)
     return count
 
 
@@ -370,9 +374,7 @@ def _extract_buildings(payload: dict) -> dict:
     if step_log:
         step_log(f"Overture.ExtractBuildings: reading {building_type} for {region}")
 
-    allowed = (
-        set(_BUILDING_TYPE_TAGS.get(building_type, [])) if building_type != "all" else None
-    )
+    allowed = set(_BUILDING_TYPE_TAGS.get(building_type, [])) if building_type != "all" else None
 
     def map_props(props: dict) -> dict | None:
         building = _building_value(props)
@@ -413,8 +415,14 @@ _ROAD_CLASS_TAGS = {
     "secondary": ["secondary", "secondary_link"],
     "tertiary": ["tertiary", "tertiary_link"],
     "residential": ["residential", "living_street"],
-    "major": ["motorway", "motorway_link", "primary", "primary_link", "secondary",
-              "secondary_link"],
+    "major": [
+        "motorway",
+        "motorway_link",
+        "primary",
+        "primary_link",
+        "secondary",
+        "secondary_link",
+    ],
 }
 
 # Overture transportation `class` -> OSM highway value.
@@ -491,6 +499,7 @@ def _extract_roads(payload: dict) -> dict:
 # Parks  (Overture `base` theme / `land_use` + `land` types -> leisure/boundary)
 # ---------------------------------------------------------------------------
 
+
 def _park_props(props: dict, park_type: str) -> dict | None:
     subtype = props.get("subtype") or props.get("class") or ""
     out = dict(props)
@@ -503,8 +512,14 @@ def _park_props(props: dict, park_type: str) -> dict | None:
             return None
         out["leisure"] = "nature_reserve"
     else:
-        if subtype not in ("park", "national_park", "nature_reserve", "protected",
-                           "recreation_ground", "forest"):
+        if subtype not in (
+            "park",
+            "national_park",
+            "nature_reserve",
+            "protected",
+            "recreation_ground",
+            "forest",
+        ):
             return None
         out["leisure"] = "park"
     return out
@@ -530,7 +545,9 @@ def _extract_parks(payload: dict) -> dict:
     records = _read_overture_records(source, "base", "land_use", _bbox(source))
     out = _output_path("parks", park_type, region)
     count = _stage_features(
-        records, out, lambda p: _park_props(p, park_type),
+        records,
+        out,
+        lambda p: _park_props(p, park_type),
         heartbeat=payload.get("_task_heartbeat"),
     )
 
@@ -755,6 +772,7 @@ def _extract_routes(payload: dict) -> dict:
 # ---------------------------------------------------------------------------
 # POIs  (Overture `places` theme -> OSMCache pointing at the staged GeoJSON)
 # ---------------------------------------------------------------------------
+
 
 def _extract_pois(payload: dict) -> dict:
     source = _source_from_payload(payload)

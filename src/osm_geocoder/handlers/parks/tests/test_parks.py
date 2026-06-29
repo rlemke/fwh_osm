@@ -6,6 +6,7 @@ import tempfile
 from unittest.mock import MagicMock
 
 import pytest
+
 from osm_geocoder.handlers.parks.park_extractor import (
     HAS_OSMIUM,
     HAS_SHAPELY,
