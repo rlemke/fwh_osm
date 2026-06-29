@@ -30,11 +30,12 @@ namespace osm.Cities.fanout {
      *  list-typed yield-merge aggregates all paths into `place_paths`. */
     facet ExtractPlacesAcrossSubregions(
         region_names: [String],
-        min_population: Long = 10000
+        min_population: Long = 10000,
+        cache_policy: String = "prefer_cache"
     ) => (place_paths: [String]) andThen {
         resolved = osm.Region.ResolveRegions(names = $.region_names, expand = "subregions")
     } andThen foreach r in resolved.regions {
-        cache = osm.cache.Download(region = $.r)
+        cache = osm.cache.Download(region = $.r, cache_policy = $.cache_policy)
         places = osm.Population.AllPopulatedPlaces(
             cache = cache.cache,
             min_population = $.min_population
@@ -61,7 +62,15 @@ namespace osm.Cities.fanout {
         center_lon: Double = -100.0,
         center_lat: Double = 45.0,
         view_zoom: Double = 3.0,
-        title: String = "North America cities by zoom (fan-out)"
+        title: String = "North America cities by zoom (fan-out)",
+        // PBF cache handling for the per-subregion downloads:
+        //   "prefer_cache" (default) - use the cached PBF as-is, even if out of
+        //       date (no Geofabrik revalidation; fastest, fully offline).
+        //   "revalidate"             - revalidate against Geofabrik and re-pull
+        //       only subregions whose PBF is out of date.
+        //   "refresh"                - force a fresh download of every subregion.
+        //   "auto"                   - defer to FW_OSM_USE_CACHE_IF_PRESENT.
+        cache_policy: String = "prefer_cache"
     ) => (
         map_path: String,
         total_count: Long,
@@ -72,7 +81,8 @@ namespace osm.Cities.fanout {
     ) andThen {
         ext = ExtractPlacesAcrossSubregions(
             region_names = $.region_names,
-            min_population = $.min_pop_d
+            min_population = $.min_pop_d,
+            cache_policy = $.cache_policy
         )
         merged = osm.Transform.MergeLayers(inputs = ext.place_paths)
         tiered = osm.Cities.TierCitiesByPopulation(
