@@ -440,9 +440,21 @@ def build_from_geojson(
     src = Path(input_path)
     if not src.is_file():
         raise BuildError(f"input GeoJSON not found: {input_path}")
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    want_pmtiles = out.suffix == ".pmtiles"
+    want_pmtiles = output_path.endswith(".pmtiles")
+    # When the durable output is on the object store / HDFS, tippecanoe + the
+    # pmtiles CLI can only write a LOCAL file. Stage the artifact locally and
+    # finalize it onto the backend after the build; otherwise Path(output_path)
+    # collapses ``s3://`` → ``s3:/`` and the tiles land in a bogus local dir,
+    # unreadable by the downstream RenderTiledMap on any runner.
+    remote = output_path.startswith(("s3://", "hdfs://"))
+    if remote:
+        fd_o, staging_out = tempfile.mkstemp(suffix=".pmtiles" if want_pmtiles else ".mbtiles")
+        os.close(fd_o)
+        Path(staging_out).unlink(missing_ok=True)
+        out = Path(staging_out)
+    else:
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
 
     fd, tmp_mbtiles = tempfile.mkstemp(suffix=".mbtiles")
     os.close(fd)
@@ -478,10 +490,19 @@ def build_from_geojson(
         if want_pmtiles:
             Path(tmp_mbtiles).unlink(missing_ok=True)
 
+    size_bytes = out.stat().st_size
+    if remote:
+        # Upload the staged artifact to the durable backend, then drop the local
+        # staging copy (finalize_from_local unlinks it).
+        get_storage().finalize_from_local(str(out), output_path)
+        final_path = output_path
+    else:
+        final_path = str(out)
+
     return GeoJsonTileResult(
-        output_path=str(out),
+        output_path=final_path,
         format="pmtiles" if want_pmtiles else "mbtiles",
-        size_bytes=out.stat().st_size,
+        size_bytes=size_bytes,
         min_zoom=min_zoom,
         max_zoom=max_zoom,
         layer=layer_name,

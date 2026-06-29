@@ -388,7 +388,7 @@ class TestHandlerRegistration:
 
     def test_facet_count(self):
         """Verify expected number of visualization facets."""
-        assert len(VISUALIZATION_FACETS) == 6  # +RenderTiledMap (MapLibre+PMTiles viewer)
+        assert len(VISUALIZATION_FACETS) == 7  # RenderMap/RenderMapAt/RenderStyledMap/PreviewMap/RenderTiledMap (+ heatmap helpers)
 
 
 class TestRenderTiledMap:
