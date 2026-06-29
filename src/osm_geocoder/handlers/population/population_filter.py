@@ -13,7 +13,13 @@ from pathlib import Path
 
 from facetwork.runtime.storage import get_storage_backend
 
-from ..shared._output import ensure_dir, open_output, resolve_output_dir, uri_stem
+from ..shared._output import (
+    ensure_dir,
+    finalize_output_file,
+    open_output,
+    resolve_output_dir,
+    uri_stem,
+)
 
 _storage = get_storage_backend()
 
@@ -315,8 +321,9 @@ def extract_places_with_population(
             # overhead that dominates runtime on full-region PBFs (e.g.
             # California: ~25 min vs ~2 min). Skip it.
             handler.apply_file(local_pbf)
-        ensure_dir(output_path_str)
-        shutil.move(tmp_path, output_path_str)
+        # storage-aware: local dst -> move; remote (s3://, hdfs://) -> stream
+        # the temp through the backend. shutil.move alone fails on an s3:// dst.
+        finalize_output_file(tmp_path, output_path_str)
     except Exception:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)

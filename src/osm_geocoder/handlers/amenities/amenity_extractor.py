@@ -13,7 +13,7 @@ from pathlib import Path
 
 from facetwork.runtime.storage import get_storage_backend
 
-from ..shared._output import open_output, uri_stem
+from ..shared._output import finalize_output_file, open_output, uri_stem
 
 _storage = get_storage_backend()
 
@@ -232,9 +232,7 @@ def extract_amenities(
             props = dict(tags)
             props["osm_id"] = osm_id
             props["category"] = cls
-            self.writer.write_feature(
-                {"type": "Feature", "properties": props, "geometry": geom}
-            )
+            self.writer.write_feature({"type": "Feature", "properties": props, "geometry": geom})
             self.kept += 1
             atype = tags.get("amenity") or tags.get("shop") or tags.get("tourism")
             if atype:
@@ -269,8 +267,8 @@ def extract_amenities(
         with GeoJSONStreamWriter(tmp_path) as writer:
             handler = _AmenityHandler(writer)
             handler.apply_file(local_pbf, locations=True, idx="flex_mem")
-        ensure_dir(output_path_str)
-        shutil.move(tmp_path, output_path_str)
+        # storage-aware finalize (s3:///hdfs:// safe); shutil.move fails on remote.
+        finalize_output_file(tmp_path, output_path_str)
     except Exception:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
@@ -278,9 +276,7 @@ def extract_amenities(
 
     label = f"osm.amenities.ExtractAmenities[{uri_stem(pbf_path)}:{cat.value}]"
     if handler.dropped > 0:
-        log.warning(
-            "%s: dropped %d feature(s) with invalid geometry", label, handler.dropped
-        )
+        log.warning("%s: dropped %d feature(s) with invalid geometry", label, handler.dropped)
 
     return AmenityFeatures(
         output_path=output_path_str,

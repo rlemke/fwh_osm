@@ -173,7 +173,12 @@ def extract_buildings(
     from shapely import wkb as shapely_wkb
     from shapely.geometry import mapping as shapely_mapping
 
-    from ..shared._output import ensure_dir, resolve_output_dir, uri_stem
+    from ..shared._output import (
+        ensure_dir,
+        finalize_output_file,
+        resolve_output_dir,
+        uri_stem,
+    )
     from ..shared.geojson_writer import GeoJSONStreamWriter
 
     pbf_path = str(pbf_path)
@@ -205,18 +210,14 @@ def extract_buildings(
             if building_type != "all" and bt != building_type:
                 return
             try:
-                geom = shapely_mapping(
-                    shapely_wkb.loads(wkbfab.create_multipolygon(a), hex=True)
-                )
+                geom = shapely_mapping(shapely_wkb.loads(wkbfab.create_multipolygon(a), hex=True))
             except Exception:
                 self.dropped_geometry += 1
                 return  # incomplete geometry — skip
             props = dict(tags)
             props["osm_id"] = a.orig_id()
             props["building_type"] = bt
-            self.writer.write_feature(
-                {"type": "Feature", "properties": props, "geometry": geom}
-            )
+            self.writer.write_feature({"type": "Feature", "properties": props, "geometry": geom})
             self.kept += 1
             area = calculate_building_area(geom)
             if area <= 0.0:
@@ -233,8 +234,8 @@ def extract_buildings(
         with GeoJSONStreamWriter(tmp_path) as writer:
             handler = _BuildingHandler(writer)
             handler.apply_file(local_pbf, locations=True, idx="flex_mem")
-        ensure_dir(output_path_str)
-        shutil.move(tmp_path, output_path_str)
+        # storage-aware finalize (s3:///hdfs:// safe); shutil.move fails on remote.
+        finalize_output_file(tmp_path, output_path_str)
     except Exception:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)

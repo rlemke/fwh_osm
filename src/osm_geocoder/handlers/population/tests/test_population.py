@@ -39,10 +39,16 @@ requires_osmium = pytest.mark.skipif(not HAS_OSMIUM, reason="pyosmium not instal
 def _isolate_output_base(tmp_path, monkeypatch):
     """Redirect the OSM output base to a tmp dir.
 
-    Handlers that don't take an explicit output directory resolve it from
-    ``FW_OUTPUT_BASE`` (default ``/Volumes/afl_data/output``). Point it at a
-    per-test tmp dir so the suite never touches the real data volume.
+    Handlers resolve their durable output base from FW_DATA_ROOT (when it is a
+    remote s3://, hdfs:// store) or FW_OSM_OUTPUT_BASE, falling back to
+    FW_OUTPUT_BASE (default ``/Volumes/afl_data/output``). Clear the remote
+    overrides and point FW_OUTPUT_BASE at a per-test tmp dir so the suite writes
+    locally and never touches the real store — even when run on a fleet host
+    whose env has FW_DATA_ROOT=s3://… (otherwise the extractor writes to s3 and
+    the test's local os.unlink fails).
     """
+    for var in ("FW_DATA_ROOT", "AFL_DATA_ROOT", "FW_OSM_OUTPUT_BASE", "AFL_OSM_OUTPUT_BASE"):
+        monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("FW_OUTPUT_BASE", str(tmp_path / "output"))
 
 
