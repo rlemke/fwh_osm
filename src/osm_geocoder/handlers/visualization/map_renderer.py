@@ -14,9 +14,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from facetwork.config import get_temp_dir
-from facetwork.runtime.storage import localize
+from facetwork.runtime.storage import get_storage_backend, localize
 
-from ..shared._output import finalize_output_file, resolve_local_output_dir, uri_stem
+from ..shared._output import (
+    finalize_output_file,
+    resolve_local_output_dir,
+    resolve_output_dir,
+    uri_stem,
+)
 
 
 def _save_map_html(folium_map, output_path: str) -> None:
@@ -700,6 +705,14 @@ def render_tiled_map(
 
     theme, bg_source, bg_layer = _BASEMAPS.get(basemap, _BASEMAPS["dark"])
 
+    # PMTiles archives may live on the object store (s3://) / HDFS when storage is
+    # remote — BuildVectorTiles writes there so any runner can read them. Localize
+    # each to a real local file first: the viewer dir is assembled with local
+    # symlinks/copies and the index.html is built against on-disk archives.
+    tile_paths = [
+        localize(str(p)) if str(p).startswith(("s3://", "hdfs://")) else str(p)
+        for p in tile_paths
+    ]
     tile_paths = [Path(p) for p in tile_paths]
     if not tile_paths:
         raise ValueError("render_tiled_map: no tile paths provided")
@@ -813,8 +826,29 @@ def render_tiled_map(
     index = out_dir / "index.html"
     index.write_text(html)
 
+    output_path = str(index)
+
+    # When durable storage is remote (s3://, hdfs://), publish the whole rendered
+    # viewer dir — index.html plus every PMTiles archive — to the object store so
+    # downstream steps and the publish workflow (which may run on a different
+    # runner) can read it. The HTML references each archive by basename relative
+    # to its own location, so co-locating them in one remote dir keeps the viewer
+    # working when served from the object store or GitHub Pages.
+    durable_base = resolve_output_dir("maps")
+    if durable_base.startswith(("s3://", "hdfs://")):
+        remote_dir = f"{durable_base.rstrip('/')}/tiled/{out_dir.name}"
+        backend = get_storage_backend(remote_dir)
+        backend.makedirs(remote_dir)
+        for f in sorted(out_dir.iterdir()):
+            if not f.is_file():
+                continue
+            dst = f"{remote_dir}/{f.name}"
+            with open(f, "rb") as src, backend.open(dst, "wb") as out:
+                shutil.copyfileobj(src, out, 1024 * 1024)
+        output_path = f"{remote_dir}/index.html"
+
     return MapResult(
-        output_path=str(index),
+        output_path=output_path,
         format="html-tiled",
         feature_count=0,
         bounds="",
