@@ -590,12 +590,19 @@ _TILED_HTML_TEMPLATE = """<!DOCTYPE html>
 #legend .row{display:flex;align-items:center;gap:7px}
 #legend .sw{width:13px;height:13px;border-radius:3px;border:1px solid rgba(255,255,255,.35);flex:none}
 #err{position:absolute;bottom:10px;left:10px;right:10px;z-index:2;background:#fee;color:#900;padding:8px;
-     border:1px solid #c66;border-radius:4px;font-family:monospace;font-size:12px;display:none;white-space:pre-wrap}</style>
+     border:1px solid #c66;border-radius:4px;font-family:monospace;font-size:12px;display:none;white-space:pre-wrap}
+.infobtn{margin-top:6px;padding:5px 9px;font-size:12px;cursor:pointer;background:#fff8e1;border:1px solid #f6c343;border-radius:4px;color:#5d4b00}
+.infobtn:hover{background:#fff2c4}
+.modal{position:absolute;inset:0;z-index:5;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center}
+.modalcard{background:#fff;max-width:460px;margin:16px;padding:18px 20px 20px;border-radius:10px;box-shadow:0 4px 24px rgba(0,0,0,.4);position:relative;font:13px/1.5 system-ui,sans-serif;max-height:80vh;overflow:auto;color:#222}
+.modalcard h2{margin:0 0 8px;font-size:16px} .modalbody{color:#333} .modalbody b{color:#111}
+.modalclose{position:absolute;top:6px;right:10px;border:none;background:none;font-size:24px;line-height:1;cursor:pointer;color:#999}.modalclose:hover{color:#444}</style>
 </head><body>
-<div id='title'><h3>__TITLE__</h3><small>vector tiles · zoom-tiled (only the current viewport is fetched) · <a href='https://protomaps.com/' target='_blank'>PMTiles</a> + <a href='https://maplibre.org/' target='_blank'>MapLibre</a></small></div>
+<div id='title'><h3>__TITLE__</h3><small>vector tiles · zoom-tiled (only the current viewport is fetched) · <a href='https://protomaps.com/' target='_blank'>PMTiles</a> + <a href='https://maplibre.org/' target='_blank'>MapLibre</a></small><br><button id='infobtn' class='infobtn'>&#8505;&#65039; About this data</button></div>
 <div id='legend'>__LEGEND__</div>
 <div id='map'></div>
 <div id='err'></div>
+<div id='infomodal' class='modal'><div class='modalcard'><button id='infoclose' class='modalclose'>&times;</button><h2>About this data</h2><div class='modalbody'>__ABOUT__</div></div></div>
 <script>
 const eb=document.getElementById('err');
 function showErr(m){eb.style.display='block';eb.textContent+=m+"\\n"}
@@ -619,6 +626,13 @@ const map=new maplibregl.Map({
 map.on('error',e=>showErr('map error: '+(e.error&&e.error.message||JSON.stringify(e))));
 map.addControl(new maplibregl.NavigationControl());
 map.addControl(new maplibregl.ScaleControl());
+// "About this data" popup: shown on load, reopened via the ℹ️ button, dismissed
+// by × or a backdrop click.
+(function(){var im=document.getElementById('infomodal');if(!im)return;
+ var ib=document.getElementById('infobtn'),ic=document.getElementById('infoclose');
+ if(ib)ib.onclick=function(){im.style.display='flex';};
+ if(ic)ic.onclick=function(){im.style.display='none';};
+ im.onclick=function(e){if(e.target===im)im.style.display='none';};})();
 </script>
 </body></html>
 """
@@ -671,6 +685,7 @@ def render_tiled_map(
     center_lat: float = 20.0,
     zoom: float = 2.0,
     basemap: str = "dark",
+    about: str = "",
 ) -> MapResult:
     """Render a MapLibre + PMTiles viewer page for a set of vector-tile layers.
 
@@ -811,8 +826,23 @@ def render_tiled_map(
     )
     legend = f"<b>Layers</b>{legend_rows}" if sources else ""
 
+    # "About this data" popup body — reuse the title + layer set + provenance (no
+    # per-map prose needed; callers may override via `about`).
+    if about:
+        about_html = about
+    else:
+        layer_list = ", ".join(_pretty(s["layer"]) for s in sources) or "the selected layers"
+        about_html = (
+            f"<b>{title}</b><br>Populated places from <a href='https://www.openstreetmap.org/'>OpenStreetMap</a>, "
+            f"tiered by population and served as <b>zoom-tiled PMTiles vector tiles</b>: only the tiles "
+            f"intersecting the current viewport are fetched, and smaller places fade in as you zoom in. "
+            f"Layers: {layer_list}. Built by an FFL workflow on "
+            f"<a href='https://github.com/rlemke/facetwork'>Facetwork</a> "
+            f"(<a href='https://github.com/rlemke/fwh_osm'>fwh_osm</a>).")
+
     html = (_TILED_HTML_TEMPLATE
             .replace("__TITLE__", title)
+            .replace("__ABOUT__", about_html)
             .replace("__PRE_REGISTER__", pre_register)
             .replace("__BG_SOURCE__", bg_source)
             .replace("__BG_LAYER__", bg_layer)
