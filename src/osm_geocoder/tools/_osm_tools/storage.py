@@ -163,34 +163,57 @@ class Storage(abc.ABC):
 class LocalStorage(Storage):
     name = "local"
 
+    @staticmethod
+    def _reject_remote(path: str) -> None:
+        """Refuse a remote URI. LocalStorage uses plain ``os.*`` calls, so an
+        ``s3://…``/``hdfs://…`` path silently collapses to a local directory
+        (``os.makedirs("s3://afl-cache/x")`` -> ``./s3:/afl-cache/x`` on disk —
+        which is exactly how a stub file once got committed). A remote path
+        reaching LocalStorage is always a backend-selection bug, so fail loudly.
+        Also catches the already-collapsed single-slash form (``s3:/…``).
+        """
+        if path and (path.startswith("s3:") or path.startswith("hdfs:")):
+            raise ValueError(
+                f"LocalStorage received a remote URI {path!r}; resolve it via the "
+                "s3/hdfs backend (get_storage) — a remote path must never hit the local FS."
+            )
+
     @property
     def supports_locking(self) -> bool:
         return True
 
     def exists(self, path: str) -> bool:
+        self._reject_remote(path)
         return os.path.exists(path)
 
     def size(self, path: str) -> int:
+        self._reject_remote(path)
         return os.path.getsize(path)
 
     def mkdir_p(self, path: str) -> None:
+        self._reject_remote(path)
         if path:
             os.makedirs(path, exist_ok=True)
 
     def unlink(self, path: str) -> None:
+        self._reject_remote(path)
         try:
             os.unlink(path)
         except FileNotFoundError:
             pass
 
     def rename(self, src: str, dst: str) -> None:
+        self._reject_remote(src)
+        self._reject_remote(dst)
         os.replace(src, dst)
 
     def read_text(self, path: str) -> str:
+        self._reject_remote(path)
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
 
     def write_text_atomic(self, path: str, text: str) -> None:
+        self._reject_remote(path)
         parent = os.path.dirname(path) or "."
         self.mkdir_p(parent)
         fd, tmp = tempfile.mkstemp(dir=parent, prefix=".tmp.", suffix=".swap")

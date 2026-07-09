@@ -41,3 +41,7 @@ afl-test.log
 *.swp
 *~
 .DS_Store
+
+# never commit a mangled remote-URI-as-local-path (see LocalStorage._reject_remote)
+s3:/
+hdfs:/
