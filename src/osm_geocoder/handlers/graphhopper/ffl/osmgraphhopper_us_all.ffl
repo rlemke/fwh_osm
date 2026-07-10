@@ -35,10 +35,10 @@ namespace osm.GraphHopper.UnitedStates {
         recreate: Boolean = false,
         cache_policy: String = "prefer_cache"
     ) => (graphs: [GraphHopperCache]) andThen {
-        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = "subregions")
-    } andThen foreach r in resolved.regions {
-        dl = osm.cache.Download(region = $.r, cache_policy = $.cache_policy)
-        gh = osm.ops.GraphHopper.BuildGraph(cache = dl.cache, profile = $.profile, recreate = $.recreate)
-        yield BuildAllStateGraphs(graphs = [gh.graph])
+        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = "subregions") andThen foreach r in resolved.regions {
+            dl = osm.cache.Download(region = $.r, cache_policy = $.cache_policy)
+            gh = osm.ops.GraphHopper.BuildGraph(cache = dl.cache, profile = $.profile, recreate = $.recreate)
+            yield BuildAllStateGraphs(graphs = [gh.graph])
+        }
     }
 }

@@ -69,12 +69,15 @@ namespace osm.heatmap {
         filter_script: String = "props.get('amenity') == 'charging_station' and ('tesla' in str(props.get('operator','')).lower() or 'tesla' in str(props.get('brand','')).lower() or 'tesla' in str(props.get('network','')).lower() or any(k.startswith('socket:tesla') for k in props))",
         cache_policy: String = "prefer_cache"
     ) => (filtered_paths: [String]) andThen {
-        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = "subregions")
-    } andThen foreach r in resolved.regions {
-        dl   = osm.cache.Download(region = $.r, cache_policy = $.cache_policy)
-        pts  = osm.Source.PBF.ExtractCategory(cache = dl.cache, category = $.category)
-        filt = osm.Filters.ByScript(input_path = pts.output_path, script = $.filter_script)
-        yield SubregionChargers(filtered_paths = [filt.output_path])
+        // The per-leaf fan-out is `resolved`'s STEP BODY, so `resolved.regions`
+        // names its containing step (in scope) rather than a sibling block —
+        // required by REF_CROSS_BLOCK_STEP. Same fan-out, legal scoping.
+        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = "subregions") andThen foreach r in resolved.regions {
+            dl   = osm.cache.Download(region = $.r, cache_policy = $.cache_policy)
+            pts  = osm.Source.PBF.ExtractCategory(cache = dl.cache, category = $.category)
+            filt = osm.Filters.ByScript(input_path = pts.output_path, script = $.filter_script)
+            yield SubregionChargers(filtered_paths = [filt.output_path])
+        }
     }
 
     /** PREFERRED entry point for any continent or large country. Continent-scale

@@ -44,10 +44,10 @@ namespace osm.convert {
      *  (continents, big countries) OOM or seek-thrash the osmium node index.
      *  Skipped regions yield an empty path. */
     workflow ConvertAllRegionsToGeoJson(max_pbf_mb: Long = 0) => (outputs: [String]) andThen {
-        cached = osm.cache.ListCachedRegions()
-    } andThen foreach r in cached.regions {
-        dl = osm.cache.Download(region = $.r)
-        gj = osm.Source.PBF.ToGeoJson(cache = dl.cache, max_pbf_mb = $.max_pbf_mb)
-        yield ConvertAllRegionsToGeoJson(outputs = [gj.output_path])
+        cached = osm.cache.ListCachedRegions() andThen foreach r in cached.regions {
+            dl = osm.cache.Download(region = $.r)
+            gj = osm.Source.PBF.ToGeoJson(cache = dl.cache, max_pbf_mb = $.max_pbf_mb)
+            yield ConvertAllRegionsToGeoJson(outputs = [gj.output_path])
+        }
     }
 }

@@ -68,29 +68,28 @@ namespace osm.examples {
     ) andThen {
         // Resolve all names in one batched call.  This is a single event
         // step regardless of how many names you pass — the parallelism
-        // comes after, in the foreach below.
+        // comes after, in the foreach STEP BODY below (a step body, not a
+        // sibling block, so `resolved.regions` is in scope — REF_CROSS_BLOCK_STEP).
         resolved = osm.Region.ResolveRegions(
             names = $.region_names,
             prefer_continent = $.prefer_continent,
             strict = $.strict,
             expand = $.expand
-        )
+        ) andThen foreach r in resolved.regions {
+            // One Download event facet per region, fanned out by the runtime
+            // — N regions become N parallel runtime steps.
+            cache = osm.cache.Download(region = $.r)
 
-        // Scalar yield: `diagnostics` is set once.  If the foreach below
-        // had also yielded `diagnostics = ...`, the last-iteration value
-        // would win — fine for scalars, but `diagnostics` is naturally a
-        // single value so we set it here.
+            // List-typed yield: wrapping the single OSMCache in a 1-element
+            // list makes `caches` a collection.  The runtime aggregates each
+            // iteration's contribution with the prior accumulated list (see
+            // capture.py:_merge_yield_value), so the parent step's final
+            // `caches` is the full [N-element] set.
+            yield DownloadAcrossRegions(caches = [cache.cache])
+        }
+
+        // Scalar yield: `diagnostics` is set once.  `resolved` is a step in
+        // THIS block, so `resolved.diagnostics` is a same-block reference.
         yield DownloadAcrossRegions(diagnostics = resolved.diagnostics)
-    } andThen foreach r in resolved.regions {
-        // One Download event facet per region, fanned out by the runtime
-        // — N regions become N parallel runtime steps.
-        cache = osm.cache.Download(region = $.r)
-
-        // List-typed yield: wrapping the single OSMCache in a 1-element
-        // list makes `caches` a collection.  The runtime aggregates each
-        // iteration's contribution with the prior accumulated list (see
-        // capture.py:_merge_yield_value), so the parent step's final
-        // `caches` is the full [N-element] set.
-        yield DownloadAcrossRegions(caches = [cache.cache])
     }
 }

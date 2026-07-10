@@ -23,10 +23,10 @@ namespace osm.cache {
         is the "update all caches" entry point — the inverse of the everyday
         prefer-cache fast path. */
     workflow RefreshAllCaches() => (refreshed_paths: [String]) andThen {
-        cached = osm.cache.ListCachedRegions()
-    } andThen foreach r in cached.regions {
-        dl = osm.cache.Download(region = $.r, cache_policy = "refresh")
-        yield RefreshAllCaches(refreshed_paths = [dl.cache.path])
+        cached = osm.cache.ListCachedRegions() andThen foreach r in cached.regions {
+            dl = osm.cache.Download(region = $.r, cache_policy = "refresh")
+            yield RefreshAllCaches(refreshed_paths = [dl.cache.path])
+        }
     }
 
     /** Force-refresh the PBF cache for an explicit list of regions. Resolves
@@ -40,9 +40,9 @@ namespace osm.cache {
         region_names: [String] = ["north-america"],
         expand: String = "subregions"
     ) => (refreshed_paths: [String]) andThen {
-        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = $.expand)
-    } andThen foreach r in resolved.regions {
-        dl = osm.cache.Download(region = $.r, cache_policy = "refresh")
-        yield RefreshRegionCaches(refreshed_paths = [dl.cache.path])
+        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = $.expand) andThen foreach r in resolved.regions {
+            dl = osm.cache.Download(region = $.r, cache_policy = "refresh")
+            yield RefreshRegionCaches(refreshed_paths = [dl.cache.path])
+        }
     }
 }
