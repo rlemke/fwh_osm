@@ -26,8 +26,8 @@ namespace osm.GraphHopper.UnitedStates {
         state_names: [String] = ["California", "Texas"],
         cache_policy: String = "prefer_cache"
     ) => (maps: [MapResult]) andThen {
-        resolved = osm.Region.ResolveRegions(names = $.state_names) andThen foreach r in resolved.regions {
-            dl = osm.cache.Download(region = $.r, cache_policy = $.cache_policy)
+        resolved = osm.Region.ResolveRegions(names = $.state_names) andThen foreach r in $.regions {
+            dl = osm.cache.Download(region = $.r, cache_policy = $$.cache_policy)
             roads = osm.Source.PBF.ExtractRoads(cache = dl.cache, road_class = "motorway")
             map = osm.viz.RenderMap(
                 geojson_path = roads.result.output_path,

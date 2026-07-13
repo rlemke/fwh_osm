@@ -72,10 +72,10 @@ namespace osm.heatmap {
         // The per-leaf fan-out is `resolved`'s STEP BODY, so `resolved.regions`
         // names its containing step (in scope) rather than a sibling block —
         // required by REF_CROSS_BLOCK_STEP. Same fan-out, legal scoping.
-        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = "subregions") andThen foreach r in resolved.regions {
-            dl   = osm.cache.Download(region = $.r, cache_policy = $.cache_policy)
-            pts  = osm.Source.PBF.ExtractCategory(cache = dl.cache, category = $.category)
-            filt = osm.Filters.ByScript(input_path = pts.output_path, script = $.filter_script)
+        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = "subregions") andThen foreach r in $.regions {
+            dl   = osm.cache.Download(region = $.r, cache_policy = $$.cache_policy)
+            pts  = osm.Source.PBF.ExtractCategory(cache = dl.cache, category = $$.category)
+            filt = osm.Filters.ByScript(input_path = pts.output_path, script = $$.filter_script)
             yield SubregionChargers(filtered_paths = [filt.output_path])
         }
     }

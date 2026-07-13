@@ -34,12 +34,12 @@ namespace osm.Cities.routes {
         min_population: Long = 10000,
         road_class: String = "major"
     ) => (road_paths: [String], city_paths: [String]) andThen {
-        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = "subregions") andThen foreach r in resolved.regions {
+        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = "subregions") andThen foreach r in $.regions {
             cache = osm.cache.Download(region = $.r)
-            roads = osm.Source.PBF.ExtractRoads(cache = cache.cache, road_class = $.road_class)
+            roads = osm.Source.PBF.ExtractRoads(cache = cache.cache, road_class = $$.road_class)
             places = osm.Population.AllPopulatedPlaces(
                 cache = cache.cache,
-                min_population = $.min_population
+                min_population = $$.min_population
             )
             yield ExtractRoadsAndCitiesAcrossSubregions(
                 road_paths = [roads.result.output_path],

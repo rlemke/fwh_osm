@@ -75,7 +75,7 @@ namespace osm.examples {
             prefer_continent = $.prefer_continent,
             strict = $.strict,
             expand = $.expand
-        ) andThen foreach r in resolved.regions {
+        ) andThen foreach r in $.regions {
             // One Download event facet per region, fanned out by the runtime
             // — N regions become N parallel runtime steps.
             cache = osm.cache.Download(region = $.r)

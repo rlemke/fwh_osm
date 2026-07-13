@@ -48,8 +48,8 @@ namespace osm.cache {
         download internally. The list-typed yield-merge collects the updated
         paths. */
     workflow UpdateAllCaches(max_diff_mb: Long = 512) => (updated: [String]) andThen {
-        cached = osm.cache.ListCachedRegions() andThen foreach r in cached.regions {
-            upd = osm.cache.UpdateRegion(region = $.r, max_diff_mb = $.max_diff_mb)
+        cached = osm.cache.ListCachedRegions() andThen foreach r in $.regions {
+            upd = osm.cache.UpdateRegion(region = $.r, max_diff_mb = $$.max_diff_mb)
             yield UpdateAllCaches(updated = [upd.cache.path])
         }
     }
@@ -62,8 +62,8 @@ namespace osm.cache {
         expand: String = "subregions",
         max_diff_mb: Long = 512
     ) => (updated: [String]) andThen {
-        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = $.expand) andThen foreach r in resolved.regions {
-            upd = osm.cache.UpdateRegion(region = $.r, max_diff_mb = $.max_diff_mb)
+        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = $.expand) andThen foreach r in $.regions {
+            upd = osm.cache.UpdateRegion(region = $.r, max_diff_mb = $$.max_diff_mb)
             yield UpdateRegionCaches(updated = [upd.cache.path])
         }
     }

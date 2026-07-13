@@ -33,11 +33,11 @@ namespace osm.Cities.fanout {
         min_population: Long = 10000,
         cache_policy: String = "prefer_cache"
     ) => (place_paths: [String]) andThen {
-        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = "subregions") andThen foreach r in resolved.regions {
-            cache = osm.cache.Download(region = $.r, cache_policy = $.cache_policy)
+        resolved = osm.Region.ResolveRegions(names = $.region_names, expand = "subregions") andThen foreach r in $.regions {
+            cache = osm.cache.Download(region = $.r, cache_policy = $$.cache_policy)
             places = osm.Population.AllPopulatedPlaces(
                 cache = cache.cache,
-                min_population = $.min_population
+                min_population = $$.min_population
             )
             yield ExtractPlacesAcrossSubregions(place_paths = [places.result.output_path])
         }
