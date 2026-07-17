@@ -16,6 +16,7 @@ from .cities.cities_handlers import register_cities_handlers
 from .clip.clip_handlers import register_clip_handlers
 from .combined.combined_handlers import register_combined_handlers
 from .db.import_handlers import register_import_handlers
+from .emergency.emergency_handlers import register_emergency_handlers
 from .filters.filter_handlers import register_filter_handlers
 from .filters.osmose_handlers import register_osmose_handlers
 from .filters.validation_handlers import register_validation_handlers
@@ -55,6 +56,7 @@ __all__ = [
     "register_cities_handlers",
     "register_clip_handlers",
     "register_elevation_handlers",
+    "register_emergency_handlers",
     "register_filter_handlers",
     "register_geocoding_handlers",
     "register_graphhopper_handlers",
@@ -93,6 +95,7 @@ def register_all_handlers(poller) -> None:
     register_cities_handlers(poller)
     register_clip_handlers(poller)
     register_elevation_handlers(poller)
+    register_emergency_handlers(poller)
     register_filter_handlers(poller)
     register_geocoding_handlers(poller)
     register_graphhopper_handlers(poller)
@@ -135,6 +138,7 @@ def register_all_registry_handlers(runner) -> None:
     from .change.change_handlers import register_handlers as reg_change
     from .cities.cities_handlers import register_handlers as reg_cities
     from .clip.clip_handlers import register_handlers as reg_clip
+    from .emergency.emergency_handlers import register_handlers as reg_emergency
     from .filters.filter_handlers import register_handlers as reg_filter
     from .filters.osmose_handlers import register_handlers as reg_osmose
     from .filters.validation_handlers import register_handlers as reg_validation
@@ -161,6 +165,7 @@ def register_all_registry_handlers(runner) -> None:
     reg_cities(runner)
     reg_clip(runner)
     reg_elevation(runner)
+    reg_emergency(runner)
     reg_filter(runner)
     reg_geocoding(runner)
     reg_graphhopper(runner)

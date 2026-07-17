@@ -1,0 +1,211 @@
+// osm.emergency — Continental Emergency-Access Atlas.
+//
+// Design contract: facetwork docs/architecture/emergency-access-atlas.md.
+// Four nested fan-out/fan-in levels, each fan-in carried by a child facet's
+// return (the canonical relative-scoping composition):
+//
+//   ContinentalEmergencyAtlas
+//     -> AnalyzeRegions   (foreach region: ResolveRegion + Download + body)
+//        -> AnalyzeRegionFromCache (roads->network, population->cities,
+//                                   healthcare/emergency->category layers)
+//           -> AnalyzeCities  (foreach city)
+//              -> AnalyzeCity -> AnalyzeCityCategories (foreach category)
+//                 -> AnalyzeCityCategory
+//                    -> NearestCandidates (pure: haversine k-nearest + buckets)
+//                    -> RouteCandidates   (foreach pair: osm.Network.ApproxRoute)
+//                    -> CategoryMetrics   (pure fan-in)
+//
+// Honest-scope rules baked in (see design doc §4/§5): city metrics route on
+// the "major" road tier (motorway..secondary — the freeway artifact is the
+// wrong scale intra-urban); facilities come from the cached PBF extracts
+// (healthcare + emergency categories), never Overpass; shelters are "mapped
+// shelters"; 10/25/50 km buckets are straight-line (crow-flies) counts while
+// nearest/median are network distances — both labeled as such in the output.
+
+/** Emergency-access pure primitives: city selection, candidate pairing,
+  * metric fan-ins, readiness scoring, ranking, and the atlas renderer. */
+namespace osm.emergency {
+    use osm.types
+
+    /** Top-N most-populous places from a population GeoJSON layer ->
+      * Json list of {name, lat, lon, population}. Places without a
+      * population tag are excluded (disclosed: OSM population is patchy). */
+    event facet TopCities(input_path: String, max_cities: Long = 10, min_population: Long = 25000) => (cities: Json, city_count: Long, untagged_count: Long) with Effect(kind = "pure") with Cost(tier = "cheap")
+
+    /** Assemble the per-category facility layer set -> Json [{name, path}].
+      * Categories with an empty path are dropped. */
+    event facet BuildCategorySet(hospitals_path: String, fire_path: String, police_path: String, shelters_path: String) => (categories: Json) with Effect(kind = "pure") with Cost(tier = "cheap")
+
+    /** k-nearest facilities to (from_lat, from_lon) by straight-line distance
+      * -> route pairs for ApproxRoute, plus crow-flies bucket counts within
+      * 10/25/50 km over ALL facilities and the total facility count. */
+    event facet NearestCandidates(facilities_path: String, from_lat: Double, from_lon: Double, k: Long = 5) => (pairs: Json, facility_count: Long, bucket_counts: Json) with Effect(kind = "pure") with Cost(tier = "cheap")
+
+    /** Fan-in for one city x category: network route distances + bucket
+      * counts -> a metrics JSON blob (nearest/median network km, buckets,
+      * facilities per 100k when the city has a population). */
+    event facet CategoryMetrics(category: String, network_distances: [Double], bucket_counts: Json, facility_count: Long, city: Json) => (metrics_json: String) with Effect(kind = "pure") with Cost(tier = "cheap")
+
+    /** Fan-in for one city: bundle the per-category metrics with the city. */
+    event facet CityReadiness(city: Json, category_metrics: [String]) => (metrics_json: String) with Effect(kind = "pure") with Cost(tier = "cheap")
+
+    /** Fan-in for one region: score cities (equal category weights by
+      * default — weights is a JSON object like {"hospitals": 0.4, ...}),
+      * population-weight the region score, and write the city-point GeoJSON
+      * layer (score + breakdown in properties). */
+    event facet RegionReadiness(region: String, city_metrics: [String], weights: String = "") => (score: Double, metrics_json: String, layer_path: String) with Effect(kind = "pure") with Cost(tier = "cheap")
+
+    /** Continental fan-in: sort regions by readiness score. */
+    event facet RankRegions(region_metrics: [String]) => (rankings: Json, region_count: Long) with Effect(kind = "pure") with Cost(tier = "cheap")
+
+    /** Render the atlas: merged city layer -> MapLibre HTML (points colored
+      * by readiness, popup shows the full per-category breakdown) with the
+      * region rankings table and the methodology/About disclosure. */
+    event facet RenderAtlas(layer_path: String, rankings: Json, title: String = "Emergency-access atlas") => (html_path: String) with Effect(kind = "pure") with Cost(tier = "moderate")
+}
+
+/** Emergency-access composition — the nested fan-out/fan-in pipeline. */
+namespace osm.emergency.flows {
+    use osm.types
+    use osm.emergency
+    use osm.Region
+    use osm.cache
+
+    /** Leaf tier: one ApproxRoute task per (city -> facility) pair over the
+      * region's major-road network. Pairs come from NearestCandidates. */
+    facet RouteCandidates(network_path: String, pairs: Json) => (distances: [Double]) andThen foreach p in $.pairs {
+        r = osm.Network.ApproxRoute(
+            network_path = $.network_path,
+            from_lat = $.p.from_lat, from_lon = $.p.from_lon,
+            to_lat = $.p.to_lat, to_lon = $.p.to_lon
+        )
+        yield RouteCandidates(distances = [r.result.distance_km])
+    }
+
+    /** One city x one category: nearest-k candidates -> routed distances ->
+      * category metrics. */
+    facet AnalyzeCityCategory(network_path: String, facilities_path: String, category: String, city: Json, k: Long = 5) => (metrics_json: String) andThen {
+        cand = NearestCandidates(
+            facilities_path = $.facilities_path,
+            from_lat = $.city.lat, from_lon = $.city.lon, k = $.k
+        )
+        routed = RouteCandidates(network_path = $.network_path, pairs = cand.pairs)
+        m = CategoryMetrics(
+            category = $.category,
+            network_distances = routed.distances,
+            bucket_counts = cand.bucket_counts,
+            facility_count = cand.facility_count,
+            city = $.city
+        )
+        yield AnalyzeCityCategory(metrics_json = m.metrics_json)
+    }
+
+    /** One city over every category layer. */
+    facet AnalyzeCityCategories(network_path: String, categories: Json, city: Json, k: Long = 5) => (metrics: [String]) andThen foreach cat in $.categories {
+        one = AnalyzeCityCategory(
+            network_path = $.network_path,
+            facilities_path = $.cat.path,
+            category = $.cat.name,
+            city = $.city, k = $.k
+        )
+        yield AnalyzeCityCategories(metrics = [one.metrics_json])
+    }
+
+    /** One city: per-category metrics -> bundled city readiness blob. */
+    facet AnalyzeCity(network_path: String, categories: Json, city: Json, k: Long = 5) => (metrics_json: String) andThen {
+        percat = AnalyzeCityCategories(
+            network_path = $.network_path, categories = $.categories,
+            city = $.city, k = $.k
+        )
+        combined = CityReadiness(city = $.city, category_metrics = percat.metrics)
+        yield AnalyzeCity(metrics_json = combined.metrics_json)
+    }
+
+    /** Region body: cities fan-out. */
+    facet AnalyzeCities(network_path: String, categories: Json, cities: Json, k: Long = 5) => (metrics: [String]) andThen foreach city in $.cities {
+        one = AnalyzeCity(
+            network_path = $.network_path, categories = $.categories,
+            city = $.city, k = $.k
+        )
+        yield AnalyzeCities(metrics = [one.metrics_json])
+    }
+
+    /** One region from its cache: build the major-road network, pick the
+      * top cities, extract + split the facility layers, fan out the cities,
+      * and fan in the regional readiness. */
+    facet AnalyzeRegionFromCache(cache: OSMCache, region_name: String, max_cities: Long = 10, k: Long = 5, min_city_population: Long = 25000, weights: String = "") => (layer_path: String, metrics_json: String, score: Double) andThen {
+        roads = osm.Source.PBF.ExtractRoads(cache = $.cache, road_class = "major")
+        net = osm.Network.BuildNetwork(edges_path = roads.result.output_path, ref_filter = "")
+        pop = osm.Source.PBF.ExtractCategory(cache = $.cache, category = "population")
+        cities = TopCities(input_path = pop.output_path, max_cities = $.max_cities, min_population = $.min_city_population)
+        // Facility source: the warm "amenities" scan category (all amenity=*),
+        // filtered per facility type. The newer healthcare/emergency
+        // CategoryDefs are NOT in CombinedScan's plugin registry — requesting
+        // them returns a silent empty (registry gap, to be fixed upstream).
+        // Shelters (emergency=* only, no amenity tag) are therefore dropped
+        // from the pilot — they were the disclosed-thin category anyway.
+        amen = osm.Source.PBF.ExtractCategory(cache = $.cache, category = "amenities")
+        hospitals = osm.Filters.FilterGeoJSONByOSMType(input_path = amen.output_path, osm_type = "*", tag_key = "amenity", tag_value = "hospital")
+        fire = osm.Filters.FilterGeoJSONByOSMType(input_path = amen.output_path, osm_type = "*", tag_key = "amenity", tag_value = "fire_station")
+        police = osm.Filters.FilterGeoJSONByOSMType(input_path = amen.output_path, osm_type = "*", tag_key = "amenity", tag_value = "police")
+        cats = BuildCategorySet(
+            hospitals_path = hospitals.result.output_path,
+            fire_path = fire.result.output_path,
+            police_path = police.result.output_path,
+            shelters_path = ""
+        )
+        percity = AnalyzeCities(
+            network_path = net.result.network_path,
+            categories = cats.categories, cities = cities.cities, k = $.k
+        )
+        readiness = RegionReadiness(region = $.region_name, city_metrics = percity.metrics, weights = $.weights)
+        yield AnalyzeRegionFromCache(
+            layer_path = readiness.layer_path,
+            metrics_json = readiness.metrics_json,
+            score = readiness.score
+        )
+    }
+
+    /** One region end-to-end: resolve -> download (auto-cache) -> body. */
+    facet AnalyzeRegion(name: String, max_cities: Long = 10, k: Long = 5, min_city_population: Long = 25000, weights: String = "") => (layer_path: String, metrics_json: String, score: Double) andThen {
+        reg = osm.Region.ResolveRegion(name = $.name)
+        cache = osm.cache.Download(region = reg.region)
+        body = AnalyzeRegionFromCache(
+            cache = cache.cache, region_name = $.name,
+            max_cities = $.max_cities, k = $.k,
+            min_city_population = $.min_city_population, weights = $.weights
+        )
+        yield AnalyzeRegion(
+            layer_path = body.layer_path,
+            metrics_json = body.metrics_json,
+            score = body.score
+        )
+    }
+
+    /** Region fan-out. NOTE (design doc §6): run continent-scale invocations
+      * with bounded region concurrency — the download/extract tier is the
+      * disk-heavy one. The 5-region pilot needs no throttle. */
+    workflow AnalyzeRegions(region_names: [String], max_cities: Long = 10, k: Long = 5, min_city_population: Long = 25000, weights: String = "") => (layers: [String], metrics: [String]) andThen foreach name in $.region_names {
+        one = AnalyzeRegion(
+            name = $.name, max_cities = $.max_cities, k = $.k,
+            min_city_population = $.min_city_population, weights = $.weights
+        )
+        yield AnalyzeRegions(layers = [one.layer_path], metrics = [one.metrics_json])
+    }
+
+    /** The atlas: regions -> merge city layers -> rank -> render. */
+    workflow ContinentalEmergencyAtlas(region_names: [String], max_cities: Long = 10, k: Long = 5, min_city_population: Long = 25000, weights: String = "", title: String = "Emergency-access atlas") => (map_html: String, rankings: Json, region_count: Long) andThen {
+        regions = AnalyzeRegions(
+            region_names = $.region_names, max_cities = $.max_cities, k = $.k,
+            min_city_population = $.min_city_population, weights = $.weights
+        )
+        merged = osm.Transform.MergeLayers(inputs = regions.layers)
+        ranked = RankRegions(region_metrics = regions.metrics)
+        map = RenderAtlas(layer_path = merged.result.output_path, rankings = ranked.rankings, title = $.title)
+        yield ContinentalEmergencyAtlas(
+            map_html = map.html_path,
+            rankings = ranked.rankings,
+            region_count = ranked.region_count
+        )
+    }
+}
