@@ -28,14 +28,30 @@ def read_json(monkeypatch):
 
 def test_top_cities_sorts_filters_and_counts_untagged(read_json):
     read_json["pop"] = _fc([
-        _pt(4.9, 52.4, name="Amsterdam", population="821752"),
-        _pt(4.5, 51.9, name="Rotterdam", population=623652),
-        _pt(5.1, 52.1, name="NoPop"),
-        _pt(4.3, 52.1, name="Tiny", population=100),
+        _pt(4.9, 52.4, name="Amsterdam", population="821752", place="city"),
+        _pt(4.5, 51.9, name="Rotterdam", population=623652, place="city"),
+        _pt(5.1, 52.1, name="NoPop", place="town"),
+        _pt(4.3, 52.1, name="Tiny", population=100, place="town"),
     ])
     r = ops.top_cities("pop", max_cities=10, min_population=25000)
     assert [c["name"] for c in r["cities"]] == ["Amsterdam", "Rotterdam"]
     assert r["city_count"] == 2 and r["untagged_count"] == 1
+
+
+def test_top_cities_excludes_admin_places_and_dedupes(read_json):
+    read_json["pop"] = _fc([
+        # admin place node with the whole state's population — must NOT rank
+        _pt(-83.4, 32.6, name="Georgia", population=10711908, place="state"),
+        _pt(-84.39, 33.75, name="Atlanta", population=498715, place="city"),
+        # duplicate node for the same city ~2 km away, lower population
+        _pt(-84.41, 33.76, name="Atlanta (dup)", population=400000, place="city"),
+        _pt(-81.1, 32.08, name="Savannah", population=147780, place="city"),
+        # missing place prop -> excluded as non-settlement
+        _pt(-83.63, 32.84, name="Macon", population=157346),
+    ])
+    r = ops.top_cities("pop", max_cities=10, min_population=25000)
+    assert [c["name"] for c in r["cities"]] == ["Atlanta", "Savannah"]
+    assert r["excluded_non_city"] == 2  # the state node + place-less Macon
 
 
 def test_build_category_set_drops_empty_paths_and_zero_feature_layers(read_json):

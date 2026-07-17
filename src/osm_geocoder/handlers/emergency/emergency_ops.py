@@ -95,13 +95,29 @@ def _prop(props: dict, key: str):
 # ---------------------------------------------------------------------------
 
 
+# Only real settlements rank as cities. OSM population layers also carry
+# ADMIN place nodes (place=state/province/county, e.g. a node named "Georgia"
+# holding the whole state's population) — without this filter such a node
+# outranks every actual city and poisons the readiness ranking (found live in
+# the US atlas run).
+CITY_PLACE_TYPES = frozenset({"city", "town"})
+# Some cities have duplicate place nodes at different granularities (e.g.
+# Lëtzebuerg + Luxembourg) — keep only the most populous node within this
+# radius of an already-kept city.
+CITY_DEDUPE_KM = 5.0
+
+
 def top_cities(input_path: str, max_cities: int, min_population: int) -> dict:
     fc = _read_json(input_path)
-    tagged, untagged = [], 0
+    tagged, untagged, excluded_admin = [], 0, 0
     for ft in fc.get("features") or []:
         props = ft.get("properties") or {}
         c = _centroid(ft.get("geometry"))
         if not c:
+            continue
+        place = str(_prop(props, "place") or "").lower()
+        if place not in CITY_PLACE_TYPES:
+            excluded_admin += 1
             continue
         raw_pop = _prop(props, "population")
         try:
@@ -114,8 +130,22 @@ def top_cities(input_path: str, max_cities: int, min_population: int) -> dict:
         name = _prop(props, "name") or "(unnamed)"
         tagged.append({"name": str(name), "lat": c[1], "lon": c[0], "population": pop})
     tagged.sort(key=lambda x: -x["population"])
-    cities = tagged[:max_cities]
-    return {"cities": cities, "city_count": len(cities), "untagged_count": untagged}
+    cities: list[dict] = []
+    for cand in tagged:
+        if any(
+            _haversine_km(cand["lat"], cand["lon"], k["lat"], k["lon"]) <= CITY_DEDUPE_KM
+            for k in cities
+        ):
+            continue  # duplicate place node for an already-kept city
+        cities.append(cand)
+        if len(cities) >= max_cities:
+            break
+    return {
+        "cities": cities,
+        "city_count": len(cities),
+        "untagged_count": untagged,
+        "excluded_non_city": excluded_admin,
+    }
 
 
 def build_category_set(hospitals_path: str, fire_path: str, police_path: str,

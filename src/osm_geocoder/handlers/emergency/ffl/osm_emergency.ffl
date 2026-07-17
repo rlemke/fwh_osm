@@ -27,10 +27,12 @@
 namespace osm.emergency {
     use osm.types
 
-    /** Top-N most-populous places from a population GeoJSON layer ->
-      * Json list of {name, lat, lon, population}. Places without a
-      * population tag are excluded (disclosed: OSM population is patchy). */
-    event facet TopCities(input_path: String, max_cities: Long = 10, min_population: Long = 25000) => (cities: Json, city_count: Long, untagged_count: Long) with Effect(kind = "pure") with Cost(tier = "cheap")
+    /** Top-N most-populous SETTLEMENTS (place=city|town only — admin place
+      * nodes like a state's own node are excluded, and duplicate place nodes
+      * within 5 km dedupe to the most populous) -> Json list of {name, lat,
+      * lon, population}. Places without a population tag are excluded
+      * (disclosed: OSM population is patchy). */
+    event facet TopCities(input_path: String, max_cities: Long = 10, min_population: Long = 25000) => (cities: Json, city_count: Long, untagged_count: Long, excluded_non_city: Long) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Assemble the per-category facility layer set -> Json [{name, path}].
       * Categories with an empty path are dropped. */
