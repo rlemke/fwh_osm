@@ -657,6 +657,12 @@ def build_network(
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
+    if graph.node_count == 0:
+        # Valid but unroutable: the source extract has no usable LineStrings
+        # (region has no major-tier roads in OSM). The empty artifact is still
+        # published — ApproxRoute over it returns valid unreachable results.
+        log.warning("BuildNetwork: 0-node network from %s (unroutable region — "
+                    "empty artifact published as a valid result)", edges_path)
     log.info("BuildNetwork[%s]: %s -> %d nodes / %d edges (%d components) at %s",
              "node_id" if use_node_ids else "coord_snap", rel, graph.node_count,
              graph.edge_count, graph.connected_components, cache_dir)
@@ -868,7 +874,25 @@ def approx_route(
     _require_deps()
     net = _load_network(network_path, heartbeat)
     if net.g.number_of_nodes() == 0:
-        raise ValueError(f"ApproxRoute: empty network at {network_path}")
+        # A validly-BUILT empty network (the artifact and its sidecar exist —
+        # _load_network already failed loudly on a missing/corrupt artifact).
+        # This is a world-fact, not a pipeline error: the region has no
+        # major-tier roads in OSM (e.g. Haiti). Return a valid unreachable
+        # result — distance_km = -1.0 sentinel, gap = straight-line A→B — so
+        # fan-outs score the region honestly instead of erroring.
+        gap_km = _haversine_m(from_lon, from_lat, to_lon, to_lat) / 1000.0
+        log.info("ApproxRoute: empty (unroutable) network at %s — valid unreachable result",
+                 network_path)
+        return ApproxRouteResult(
+            route_path="",
+            distance_km=-1.0,
+            reached_lat=from_lat,
+            reached_lon=from_lon,
+            gap_to_b_km=round(gap_km, 3),
+            reached_b=False,
+            node_hops=0,
+            extraction_date=_now(),
+        )
 
     a = _snap(net, from_lon, from_lat)
     b = _snap(net, to_lon, to_lat)

@@ -93,3 +93,17 @@ def test_network_is_loaded_once_and_memoized(tmp_path, monkeypatch):
     assert len(keys_after_first) == 1
     ops.approx_route(net, from_lat=0.0, from_lon=0.0, to_lat=1.0, to_lon=0.0)
     assert set(ops._GRAPH_CACHE) == keys_after_first   # reused, not reloaded
+
+
+def test_empty_network_is_valid_unreachable_not_error(tmp_path, monkeypatch):
+    """A validly-built EMPTY network (region with no major-tier roads, e.g.
+    Haiti) yields a valid unreachable result — distance_km = -1.0 sentinel,
+    gap = straight-line A->B — instead of raising. Corrupt/missing artifacts
+    still fail loudly inside _load_network (sidecar validation)."""
+    net = _build(tmp_path, monkeypatch, [])   # zero features -> 0-node graph
+    r = ops.approx_route(net, from_lat=0.0, from_lon=0.0, to_lat=1.0, to_lon=0.0)
+    assert r.reached_b is False
+    assert r.distance_km == -1.0
+    assert r.node_hops == 0
+    assert 110.0 <= r.gap_to_b_km <= 112.0    # ~1 degree of latitude, crow-flies
+    assert r.route_path == ""

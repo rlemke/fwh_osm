@@ -164,3 +164,20 @@ def test_render_atlas_smoke(monkeypatch, tmp_path, read_json):
     assert r["html_path"].endswith("atlas/index.html")
     assert "Test atlas" in html and "maplibre-gl" in html and "Amsterdam" in html
     assert "thinly mapped" in html  # shelter honesty disclosure present
+
+
+def test_category_metrics_unroutable_sentinel():
+    """ApproxRoute's -1.0 unroutable sentinel is excluded from nearest/median
+    and flagged as network_unroutable when NO pair routed (Haiti case)."""
+    r = ops.category_metrics("hospitals", [-1.0, -1.0, -1.0], {"10": 2}, 3,
+                             {"name": "PortAuPrince", "population": 1000000})
+    m = json.loads(r["metrics_json"])
+    assert m["nearest_network_km"] is None
+    assert m["median_network_km"] is None
+    assert m["network_unroutable"] is True
+    assert m["facility_count"] == 3            # crow-flies data still honest
+    # mixed: one real distance -> not unroutable, sentinel excluded from stats
+    r2 = ops.category_metrics("hospitals", [-1.0, 12.0], {}, 2, {})
+    m2 = json.loads(r2["metrics_json"])
+    assert m2["nearest_network_km"] == 12.0
+    assert "network_unroutable" not in m2

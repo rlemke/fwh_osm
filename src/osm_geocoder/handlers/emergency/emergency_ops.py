@@ -204,19 +204,29 @@ def nearest_candidates(facilities_path: str, from_lat: float, from_lon: float,
 
 def category_metrics(category: str, network_distances: list, bucket_counts: dict,
                      facility_count: int, city: dict) -> dict:
-    ds = sorted(float(d) for d in (network_distances or []) if d is not None)
+    # distance_km = -1.0 is ApproxRoute's valid "unroutable network" sentinel
+    # (region has no major-tier roads in OSM) — excluded from nearest/median.
+    raw = [float(d) for d in (network_distances or []) if d is not None]
+    ds = sorted(d for d in raw if d >= 0)
+    unroutable = bool(raw) and not ds
     nearest = ds[0] if ds else None
     median = ds[len(ds) // 2] if ds else None
     pop = int(city.get("population") or 0)
     per_100k = round(100000.0 * facility_count / pop, 2) if pop > 0 else None
-    return {"metrics_json": json.dumps({
+    blob = {
         "category": category,
         "facility_count": int(facility_count),
         "nearest_network_km": round(nearest, 2) if nearest is not None else None,
         "median_network_km": round(median, 2) if median is not None else None,
         "crowflies_within_km": bucket_counts or {},
         "per_100k": per_100k,
-    })}
+    }
+    if unroutable:
+        # Facilities were paired but none is reachable over the (empty)
+        # major-road network — disclosed so the popup can say WHY nearest
+        # is missing. The network component scores 0 either way.
+        blob["network_unroutable"] = True
+    return {"metrics_json": json.dumps(blob)}
 
 
 def _component(nearest_km) -> float:
