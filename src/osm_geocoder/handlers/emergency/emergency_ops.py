@@ -276,10 +276,35 @@ def region_readiness(region: str, city_metrics: list[str], weights: str) -> dict
     }
 
 
+def region_failure(region: str, error: str) -> dict:
+    """Build the excluded-region marker blob for a region whose analysis
+    failed (the AnalyzeRegion catch path). The reason is classified into a
+    short, honest label; the raw error is kept (truncated) for the popup/
+    debugging."""
+    err = str(error or "")
+    low = err.lower()
+    if "empty network" in low:
+        reason = "no routable major-road network in OSM"
+    elif "no cities" in low or "city_metrics" in low or "empty" in low:
+        reason = "no qualifying cities (population-tagged place=city|town)"
+    else:
+        reason = "analysis failed"
+    return {"metrics_json": json.dumps({
+        "region": region, "failed": True,
+        "reason": reason, "error": err[:300],
+    })}
+
+
 def rank_regions(region_metrics: list[str]) -> dict:
-    rows = []
+    rows, excluded = [], []
     for blob in region_metrics or []:
         rm = json.loads(blob)
+        if rm.get("failed"):
+            excluded.append({
+                "region": rm.get("region"), "failed": True,
+                "reason": rm.get("reason") or "analysis failed",
+            })
+            continue
         best = max(rm.get("cities") or [], key=lambda c: c["score"], default=None)
         rows.append({
             "region": rm.get("region"), "score": rm.get("score"),
@@ -289,7 +314,9 @@ def rank_regions(region_metrics: list[str]) -> dict:
     rows.sort(key=lambda r: -(r["score"] or 0))
     for i, r in enumerate(rows, 1):
         r["rank"] = i
-    return {"rankings": rows, "region_count": len(rows)}
+    # region_count counts RANKED regions only; excluded rows ride along at
+    # the end of the rankings list, marked failed:true, for disclosure.
+    return {"rankings": rows + excluded, "region_count": len(rows)}
 
 
 _ABOUT = (
@@ -333,8 +360,17 @@ def render_atlas(layer_path: str, rankings: list, title: str) -> dict:
     rank_js = json.dumps(rankings or [])
     ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     rows = "".join(
-        f"<tr><td class='r'>{r.get('rank')}</td><td>{escape(str(r.get('region')))}</td>"
-        f"<td class='r'>{r.get('score')}</td><td>{escape(str(r.get('best_city') or ''))}</td></tr>"
+        (
+            f"<tr style='opacity:.55'><td class='r'>&ndash;</td>"
+            f"<td>{escape(str(r.get('region')))}</td>"
+            f"<td class='r'>excluded</td>"
+            f"<td>{escape(str(r.get('reason') or 'analysis failed'))}</td></tr>"
+        )
+        if r.get("failed")
+        else (
+            f"<tr><td class='r'>{r.get('rank')}</td><td>{escape(str(r.get('region')))}</td>"
+            f"<td class='r'>{r.get('score')}</td><td>{escape(str(r.get('best_city') or ''))}</td></tr>"
+        )
         for r in (rankings or [])
     )
     html = f"""<!doctype html>

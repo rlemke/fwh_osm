@@ -115,6 +115,45 @@ def test_rank_regions_orders_and_counts():
     assert r["rankings"][0]["rank"] == 1 and r["region_count"] == 2
 
 
+def test_region_failure_classifies_reason():
+    r = ops.region_failure("Haiti", "ApproxRoute: empty network at s3://x/haiti@tol25")
+    blob = json.loads(r["metrics_json"])
+    assert blob == {"region": "Haiti", "failed": True,
+                    "reason": "no routable major-road network in OSM",
+                    "error": "ApproxRoute: empty network at s3://x/haiti@tol25"}
+    generic = json.loads(ops.region_failure("X", "boom")["metrics_json"])
+    assert generic["reason"] == "analysis failed"
+
+
+def test_rank_regions_excludes_failed_regions():
+    mk = lambda region, score: json.dumps({  # noqa: E731
+        "region": region, "score": score,
+        "cities": [{"city": {"name": region + "-city"}, "score": score}]})
+    failed = ops.region_failure("Haiti", "ApproxRoute: empty network")["metrics_json"]
+    r = ops.rank_regions([mk("B", 40.0), failed, mk("A", 90.0)])
+    # ranked rows first (sorted), failed rows appended, count = ranked only
+    assert [x["region"] for x in r["rankings"]] == ["A", "B", "Haiti"]
+    assert r["region_count"] == 2
+    assert r["rankings"][-1]["failed"] is True
+    assert "rank" not in r["rankings"][-1]
+
+
+def test_render_atlas_excluded_row(monkeypatch, tmp_path, read_json):
+    monkeypatch.setattr(ops, "resolve_output_dir", lambda c: str(tmp_path / c))
+    read_json["layer"] = _fc([_pt(4.9, 52.4, name="Amsterdam", region="NL",
+                                  population=821752, score=77.5, breakdown="{}")])
+    r = ops.render_atlas("layer", [
+        {"rank": 1, "region": "NL", "score": 77.5, "best_city": "Amsterdam"},
+        {"region": "Haiti", "failed": True,
+         "reason": "no routable major-road network in OSM"},
+    ], "Test atlas")
+    html = (tmp_path / "emergency" / "atlas" / "index.html").read_text()
+    assert r["html_path"].endswith("atlas/index.html")
+    assert "excluded" in html
+    assert "no routable major-road network in OSM" in html
+    assert "Haiti" in html
+
+
 def test_render_atlas_smoke(monkeypatch, tmp_path, read_json):
     monkeypatch.setattr(ops, "resolve_output_dir", lambda c: str(tmp_path / c))
     read_json["layer"] = _fc([_pt(4.9, 52.4, name="Amsterdam", region="NL",

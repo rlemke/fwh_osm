@@ -57,7 +57,15 @@ namespace osm.emergency {
       * layer (score + breakdown in properties). */
     event facet RegionReadiness(region: String, city_metrics: [String], weights: String = "") => (score: Double, metrics_json: String, layer_path: String) with Effect(kind = "pure") with Cost(tier = "cheap")
 
-    /** Continental fan-in: sort regions by readiness score. */
+    /** Failed-region marker: build the excluded-region metrics blob so a
+      * region whose analysis failed (no routable major-road network, no
+      * qualifying cities) degrades to an honest "excluded" rankings row
+      * instead of failing the whole atlas (finding #7 from the world run). */
+    event facet RegionFailure(region: String, error: String) => (metrics_json: String) with Effect(kind = "pure") with Cost(tier = "cheap")
+
+    /** Continental fan-in: sort regions by readiness score. Failed-region
+      * blobs (from RegionFailure) are excluded from ranking and appended as
+      * disclosed "excluded" rows. */
     event facet RankRegions(region_metrics: [String]) => (rankings: Json, region_count: Long) with Effect(kind = "pure") with Cost(tier = "cheap")
 
     /** Render the atlas: merged city layer -> MapLibre HTML (points colored
@@ -168,7 +176,11 @@ namespace osm.emergency.flows {
         )
     }
 
-    /** One region end-to-end: resolve -> download (auto-cache) -> body. */
+    /** One region end-to-end: resolve -> download (auto-cache) -> body.
+      * A region whose analysis fails at any depth (empty routable network,
+      * zero qualifying cities, extract failure) degrades to a RegionFailure
+      * marker — the atlas completes with the region disclosed as excluded
+      * rather than the whole run hard-failing on one bad region. */
     facet AnalyzeRegion(name: String, max_cities: Long = 10, k: Long = 5, min_city_population: Long = 25000, weights: String = "") => (layer_path: String, metrics_json: String, score: Double) andThen {
         reg = osm.Region.ResolveRegion(name = $.name)
         cache = osm.cache.Download(region = reg.region)
@@ -181,6 +193,13 @@ namespace osm.emergency.flows {
             layer_path = body.layer_path,
             metrics_json = body.metrics_json,
             score = body.score
+        )
+    } catch {
+        failed = RegionFailure(region = $.name, error = $.error)
+        yield AnalyzeRegion(
+            layer_path = "",
+            metrics_json = failed.metrics_json,
+            score = 0.0
         )
     }
 

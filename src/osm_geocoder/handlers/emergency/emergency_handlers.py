@@ -47,6 +47,10 @@ def _h_region_readiness(p: dict) -> dict:
                                 p.get("weights") or "")
 
 
+def _h_region_failure(p: dict) -> dict:
+    return ops.region_failure(p.get("region") or "", p.get("error") or "")
+
+
 def _h_rank_regions(p: dict) -> dict:
     return ops.rank_regions(p.get("region_metrics") or [])
 
@@ -63,6 +67,7 @@ _DISPATCH: dict[str, callable] = {
     f"{NAMESPACE}.CategoryMetrics": _h_category_metrics,
     f"{NAMESPACE}.CityReadiness": _h_city_readiness,
     f"{NAMESPACE}.RegionReadiness": _h_region_readiness,
+    f"{NAMESPACE}.RegionFailure": _h_region_failure,
     f"{NAMESPACE}.RankRegions": _h_rank_regions,
     f"{NAMESPACE}.RenderAtlas": _h_render_atlas,
 }
