@@ -18,6 +18,43 @@ def _pt(lon, lat, **props):
             "properties": props}
 
 
+
+
+# ---------------------------------------------------------------------------
+# Pure logic tier: the implementations live as inline scripts in
+# osm_emergency.ffl (script-environments.md). These tests execute THE
+# ACTUAL FFL SCRIPT CODE through the runtime's sandboxed ScriptExecutor —
+# one source of truth, real coverage.
+# ---------------------------------------------------------------------------
+import pathlib
+
+_FFL = pathlib.Path(__file__).resolve().parents[1] / "ffl" / "osm_emergency.ffl"
+
+
+def _script(facet_name: str) -> str:
+    import json as _json
+
+    from facetwork import parse as _parse
+    from facetwork.emitter import JSONEmitter as _Emitter
+
+    program = _json.loads(_Emitter(include_locations=False).emit(_parse(_FFL.read_text())))
+    ns = next(d for d in program["declarations"] if d.get("name") == "osm.emergency")
+    decl = next(d for d in ns["declarations"] if d.get("name") == facet_name)
+    return decl["pre_script"]["code"]
+
+
+def _run_script(facet_name: str, params: dict) -> dict:
+    from facetwork.runtime.script_executor import ScriptExecutor
+
+    r = ScriptExecutor().execute(_script(facet_name), params)
+    assert r.success, r.error
+    return r.result
+
+
+def _cat_blob(name, nearest):
+    return json.dumps({"category": name, "nearest_network_km": nearest})
+
+
 @pytest.fixture()
 def read_json(monkeypatch):
     """Route _read_json to an in-memory dict keyed by path."""
@@ -76,25 +113,32 @@ def test_nearest_candidates_pairs_and_buckets(read_json):
     assert r["bucket_counts"] == {"10": 1, "25": 2, "50": 2}
 
 
-def test_category_metrics_and_component():
-    m = json.loads(ops.category_metrics(
-        "hospitals", [12.0, 3.5, 8.0], {"10": 2}, 7,
-        {"name": "X", "population": 350000})["metrics_json"])
+def test_category_metrics_script():
+    m = json.loads(_run_script("CategoryMetrics", {
+        "category": "hospitals", "network_distances": [12.0, 3.5, 8.0],
+        "bucket_counts": {"10": 2}, "facility_count": 7,
+        "city": {"name": "X", "population": 350000}})["metrics_json"])
     assert m["nearest_network_km"] == 3.5 and m["median_network_km"] == 8.0
     assert m["per_100k"] == 2.0
-    assert ops._component(0) == 100.0
-    assert ops._component(25) == 50.0
-    assert ops._component(None) == 0.0 and ops._component(80) == 0.0
+
+
+def test_city_readiness_script_components():
+    cr = json.loads(_run_script("CityReadiness", {
+        "city": {"name": "A"},
+        "category_metrics": [_cat_blob("hospitals", 0.0), _cat_blob("fire", 25.0),
+                             _cat_blob("police", None), _cat_blob("shelters", 80.0)],
+    })["metrics_json"])
+    comps = {k: v["component"] for k, v in cr["categories"].items()}
+    assert comps == {"hospitals": 100.0, "fire": 50.0, "police": 0.0, "shelters": 0.0}
 
 
 def test_city_and_region_readiness_scoring(monkeypatch, tmp_path):
     monkeypatch.setattr(ops, "resolve_output_dir", lambda c: str(tmp_path / c))
-    cat = lambda name, nearest: ops.category_metrics(  # noqa: E731
-        name, [nearest], {}, 1, {"name": "X"})["metrics_json"]
-    city_blob = ops.city_readiness(
-        {"name": "A", "lat": 52.0, "lon": 4.9, "population": 100000},
-        [cat("hospitals", 0.0), cat("fire", 25.0), cat("police", 25.0), cat("shelters", 50.0)],
-    )["metrics_json"]
+    city_blob = _run_script("CityReadiness", {
+        "city": {"name": "A", "lat": 52.0, "lon": 4.9, "population": 100000},
+        "category_metrics": [_cat_blob("hospitals", 0.0), _cat_blob("fire", 25.0),
+                             _cat_blob("police", 25.0), _cat_blob("shelters", 50.0)],
+    })["metrics_json"]
     # components: 100, 50, 50, 0 -> equal weights -> 50
     r = ops.region_readiness("Testland", [city_blob], "")
     assert r["score"] == 50.0
@@ -106,31 +150,33 @@ def test_city_and_region_readiness_scoring(monkeypatch, tmp_path):
     assert r2["score"] == 100.0
 
 
-def test_rank_regions_orders_and_counts():
+def test_rank_regions_script_orders_and_counts():
     mk = lambda region, score: json.dumps({  # noqa: E731
         "region": region, "score": score,
         "cities": [{"city": {"name": region + "-city"}, "score": score}]})
-    r = ops.rank_regions([mk("B", 40.0), mk("A", 90.0)])
+    r = _run_script("RankRegions", {"region_metrics": [mk("B", 40.0), mk("A", 90.0)]})
     assert [x["region"] for x in r["rankings"]] == ["A", "B"]
     assert r["rankings"][0]["rank"] == 1 and r["region_count"] == 2
 
 
-def test_region_failure_classifies_reason():
-    r = ops.region_failure("Haiti", "ApproxRoute: empty network at s3://x/haiti@tol25")
+def test_region_failure_script_classifies_reason():
+    r = _run_script("RegionFailure",
+                    {"region": "Haiti", "error": "ApproxRoute: empty network at s3://x/haiti@tol25"})
     blob = json.loads(r["metrics_json"])
     assert blob == {"region": "Haiti", "failed": True,
                     "reason": "no routable major-road network in OSM",
                     "error": "ApproxRoute: empty network at s3://x/haiti@tol25"}
-    generic = json.loads(ops.region_failure("X", "boom")["metrics_json"])
+    generic = json.loads(_run_script("RegionFailure", {"region": "X", "error": "boom"})["metrics_json"])
     assert generic["reason"] == "analysis failed"
 
 
-def test_rank_regions_excludes_failed_regions():
+def test_rank_regions_script_excludes_failed_regions():
     mk = lambda region, score: json.dumps({  # noqa: E731
         "region": region, "score": score,
         "cities": [{"city": {"name": region + "-city"}, "score": score}]})
-    failed = ops.region_failure("Haiti", "ApproxRoute: empty network")["metrics_json"]
-    r = ops.rank_regions([mk("B", 40.0), failed, mk("A", 90.0)])
+    failed = _run_script("RegionFailure",
+                         {"region": "Haiti", "error": "ApproxRoute: empty network"})["metrics_json"]
+    r = _run_script("RankRegions", {"region_metrics": [mk("B", 40.0), failed, mk("A", 90.0)]})
     # ranked rows first (sorted), failed rows appended, count = ranked only
     assert [x["region"] for x in r["rankings"]] == ["A", "B", "Haiti"]
     assert r["region_count"] == 2
@@ -166,18 +212,19 @@ def test_render_atlas_smoke(monkeypatch, tmp_path, read_json):
     assert "thinly mapped" in html  # shelter honesty disclosure present
 
 
-def test_category_metrics_unroutable_sentinel():
+def test_category_metrics_script_unroutable_sentinel():
     """ApproxRoute's -1.0 unroutable sentinel is excluded from nearest/median
     and flagged as network_unroutable when NO pair routed (Haiti case)."""
-    r = ops.category_metrics("hospitals", [-1.0, -1.0, -1.0], {"10": 2}, 3,
-                             {"name": "PortAuPrince", "population": 1000000})
-    m = json.loads(r["metrics_json"])
+    m = json.loads(_run_script("CategoryMetrics", {
+        "category": "hospitals", "network_distances": [-1.0, -1.0, -1.0],
+        "bucket_counts": {"10": 2}, "facility_count": 3,
+        "city": {"name": "PortAuPrince", "population": 1000000}})["metrics_json"])
     assert m["nearest_network_km"] is None
     assert m["median_network_km"] is None
     assert m["network_unroutable"] is True
     assert m["facility_count"] == 3            # crow-flies data still honest
-    # mixed: one real distance -> not unroutable, sentinel excluded from stats
-    r2 = ops.category_metrics("hospitals", [-1.0, 12.0], {}, 2, {})
-    m2 = json.loads(r2["metrics_json"])
+    m2 = json.loads(_run_script("CategoryMetrics", {
+        "category": "hospitals", "network_distances": [-1.0, 12.0],
+        "bucket_counts": {}, "facility_count": 2, "city": {}})["metrics_json"])
     assert m2["nearest_network_km"] == 12.0
     assert "network_unroutable" not in m2

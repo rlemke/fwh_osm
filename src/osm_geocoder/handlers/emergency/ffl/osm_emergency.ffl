@@ -45,11 +45,52 @@ namespace osm.emergency {
 
     /** Fan-in for one city x category: network route distances + bucket
       * counts -> a metrics JSON blob (nearest/median network km, buckets,
-      * facilities per 100k when the city has a population). */
-    event facet CategoryMetrics(category: String, network_distances: [Double], bucket_counts: Json, facility_count: Long, city: Json) => (metrics_json: String) with Effect(kind = "pure") with Cost(tier = "cheap")
+      * facilities per 100k when the city has a population). Pure logic tier:
+      * an inline script — no handler, no task, no deployment to change it.
+      * distance_km = -1.0 is ApproxRoute's valid unroutable sentinel. */
+    facet CategoryMetrics(category: String, network_distances: [Double], bucket_counts: Json, facility_count: Long, city: Json) => (metrics_json: String) with Effect(kind = "pure") with Cost(tier = "cheap")
+        script {
+import json
+raw = [float(d) for d in (params.get('network_distances') or []) if d is not None]
+ds = sorted(d for d in raw if d >= 0)
+unroutable = bool(raw) and not ds
+nearest = ds[0] if ds else None
+median = ds[len(ds) // 2] if ds else None
+city = params.get('city') or {}
+pop = int(city.get('population') or 0)
+fc = int(params.get('facility_count') or 0)
+per_100k = round(100000.0 * fc / pop, 2) if pop > 0 else None
+blob = {
+    'category': params.get('category'),
+    'facility_count': fc,
+    'nearest_network_km': round(nearest, 2) if nearest is not None else None,
+    'median_network_km': round(median, 2) if median is not None else None,
+    'crowflies_within_km': params.get('bucket_counts') or {},
+    'per_100k': per_100k,
+}
+if unroutable:
+    blob['network_unroutable'] = True
+result['metrics_json'] = json.dumps(blob)
+        }
 
-    /** Fan-in for one city: bundle the per-category metrics with the city. */
-    event facet CityReadiness(city: Json, category_metrics: [String]) => (metrics_json: String) with Effect(kind = "pure") with Cost(tier = "cheap")
+    /** Fan-in for one city: bundle the per-category metrics with the city,
+      * scoring each category's component (100 x (1 - nearest/50), clamped;
+      * no facilities -> 0). Pure logic tier: inline script. */
+    facet CityReadiness(city: Json, category_metrics: [String]) => (metrics_json: String) with Effect(kind = "pure") with Cost(tier = "cheap")
+        script {
+import json
+cats = {}
+for blob in (params.get('category_metrics') or []):
+    m = json.loads(blob)
+    nearest = m.get('nearest_network_km')
+    if nearest is None:
+        comp = 0.0
+    else:
+        comp = max(0.0, min(100.0, 100.0 * (1.0 - (float(nearest) - 0.0) / (50.0 - 0.0))))
+    m['component'] = round(comp, 1)
+    cats[m['category']] = m
+result['metrics_json'] = json.dumps({'city': params.get('city') or {}, 'categories': cats})
+        }
 
     /** Fan-in for one region: score cities (equal category weights by
       * default — weights is a JSON object like {"hospitals": 0.4, ...}),
@@ -60,13 +101,50 @@ namespace osm.emergency {
     /** Failed-region marker: build the excluded-region metrics blob so a
       * region whose analysis failed (no routable major-road network, no
       * qualifying cities) degrades to an honest "excluded" rankings row
-      * instead of failing the whole atlas (finding #7 from the world run). */
-    event facet RegionFailure(region: String, error: String) => (metrics_json: String) with Effect(kind = "pure") with Cost(tier = "cheap")
+      * instead of failing the whole atlas (finding #7 from the world run).
+      * Pure logic tier: inline script — runs task-free even in the catch. */
+    facet RegionFailure(region: String, error: String) => (metrics_json: String) with Effect(kind = "pure") with Cost(tier = "cheap")
+        script {
+import json
+err = str(params.get('error') or '')
+low = err.lower()
+if 'empty network' in low:
+    reason = 'no routable major-road network in OSM'
+elif 'no cities' in low or 'city_metrics' in low or 'empty' in low:
+    reason = 'no qualifying cities (population-tagged place=city|town)'
+else:
+    reason = 'analysis failed'
+result['metrics_json'] = json.dumps({
+    'region': params.get('region'), 'failed': True,
+    'reason': reason, 'error': err[:300],
+})
+        }
 
     /** Continental fan-in: sort regions by readiness score. Failed-region
-      * blobs (from RegionFailure) are excluded from ranking and appended as
-      * disclosed "excluded" rows. */
-    event facet RankRegions(region_metrics: [String]) => (rankings: Json, region_count: Long) with Effect(kind = "pure") with Cost(tier = "cheap")
+      * blobs (from RegionFailure) are excluded from ranking (region_count
+      * counts ranked regions only) and appended as disclosed "excluded"
+      * rows. Pure logic tier: inline script. */
+    facet RankRegions(region_metrics: [String]) => (rankings: Json, region_count: Long) with Effect(kind = "pure") with Cost(tier = "cheap")
+        script {
+import json
+rows, excluded = [], []
+for blob in (params.get('region_metrics') or []):
+    rm = json.loads(blob)
+    if rm.get('failed'):
+        excluded.append({'region': rm.get('region'), 'failed': True,
+                         'reason': rm.get('reason') or 'analysis failed'})
+        continue
+    cities = rm.get('cities') or []
+    best = max(cities, key=lambda c: c['score']) if cities else None
+    rows.append({'region': rm.get('region'), 'score': rm.get('score'),
+                 'city_count': len(cities),
+                 'best_city': (best or {}).get('city', {}).get('name')})
+rows.sort(key=lambda r: -(r['score'] or 0))
+for i, r in enumerate(rows, 1):
+    r['rank'] = i
+result['rankings'] = rows + excluded
+result['region_count'] = len(rows)
+        }
 
     /** Render the atlas: merged city layer -> MapLibre HTML (points colored
       * by readiness, popup shows the full per-category breakdown) with the

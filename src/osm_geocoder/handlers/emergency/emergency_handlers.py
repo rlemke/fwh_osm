@@ -1,5 +1,10 @@
 """Event-facet handlers for the ``osm.emergency`` namespace.
 
+The pure logic tier (CategoryMetrics, CityReadiness, RankRegions,
+RegionFailure) lives as inline scripts in osm_emergency.ffl — no handlers,
+no tasks (script-environments.md). Handlers here are the capability tier:
+facets that read/write files or feed the renderer.
+
 Thin dispatch over :mod:`emergency_ops` — follows the transform/filters
 handler pattern (per-facet functions, RegistryRunner ``handle`` dispatch +
 poller helper). All facets are pure/cheap except RenderAtlas (moderate).
@@ -32,27 +37,9 @@ def _h_nearest_candidates(p: dict) -> dict:
                                   float(p["from_lon"]), int(p.get("k") or 5))
 
 
-def _h_category_metrics(p: dict) -> dict:
-    return ops.category_metrics(p.get("category") or "", p.get("network_distances") or [],
-                                p.get("bucket_counts") or {}, int(p.get("facility_count") or 0),
-                                p.get("city") or {})
-
-
-def _h_city_readiness(p: dict) -> dict:
-    return ops.city_readiness(p.get("city") or {}, p.get("category_metrics") or [])
-
-
 def _h_region_readiness(p: dict) -> dict:
     return ops.region_readiness(p.get("region") or "", p.get("city_metrics") or [],
                                 p.get("weights") or "")
-
-
-def _h_region_failure(p: dict) -> dict:
-    return ops.region_failure(p.get("region") or "", p.get("error") or "")
-
-
-def _h_rank_regions(p: dict) -> dict:
-    return ops.rank_regions(p.get("region_metrics") or [])
 
 
 def _h_render_atlas(p: dict) -> dict:
@@ -64,11 +51,7 @@ _DISPATCH: dict[str, callable] = {
     f"{NAMESPACE}.TopCities": _h_top_cities,
     f"{NAMESPACE}.BuildCategorySet": _h_build_category_set,
     f"{NAMESPACE}.NearestCandidates": _h_nearest_candidates,
-    f"{NAMESPACE}.CategoryMetrics": _h_category_metrics,
-    f"{NAMESPACE}.CityReadiness": _h_city_readiness,
     f"{NAMESPACE}.RegionReadiness": _h_region_readiness,
-    f"{NAMESPACE}.RegionFailure": _h_region_failure,
-    f"{NAMESPACE}.RankRegions": _h_rank_regions,
     f"{NAMESPACE}.RenderAtlas": _h_render_atlas,
 }
 

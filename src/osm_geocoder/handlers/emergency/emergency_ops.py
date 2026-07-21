@@ -202,47 +202,7 @@ def nearest_candidates(facilities_path: str, from_lat: float, from_lon: float,
     return {"pairs": pairs, "facility_count": len(dists), "bucket_counts": buckets}
 
 
-def category_metrics(category: str, network_distances: list, bucket_counts: dict,
-                     facility_count: int, city: dict) -> dict:
-    # distance_km = -1.0 is ApproxRoute's valid "unroutable network" sentinel
-    # (region has no major-tier roads in OSM) — excluded from nearest/median.
-    raw = [float(d) for d in (network_distances or []) if d is not None]
-    ds = sorted(d for d in raw if d >= 0)
-    unroutable = bool(raw) and not ds
-    nearest = ds[0] if ds else None
-    median = ds[len(ds) // 2] if ds else None
-    pop = int(city.get("population") or 0)
-    per_100k = round(100000.0 * facility_count / pop, 2) if pop > 0 else None
-    blob = {
-        "category": category,
-        "facility_count": int(facility_count),
-        "nearest_network_km": round(nearest, 2) if nearest is not None else None,
-        "median_network_km": round(median, 2) if median is not None else None,
-        "crowflies_within_km": bucket_counts or {},
-        "per_100k": per_100k,
-    }
-    if unroutable:
-        # Facilities were paired but none is reachable over the (empty)
-        # major-road network — disclosed so the popup can say WHY nearest
-        # is missing. The network component scores 0 either way.
-        blob["network_unroutable"] = True
-    return {"metrics_json": json.dumps(blob)}
 
-
-def _component(nearest_km) -> float:
-    if nearest_km is None:
-        return 0.0
-    span = NEAREST_ZERO_SCORE_KM - NEAREST_FULL_SCORE_KM
-    return max(0.0, min(100.0, 100.0 * (1.0 - (float(nearest_km) - NEAREST_FULL_SCORE_KM) / span)))
-
-
-def city_readiness(city: dict, category_metrics_list: list[str]) -> dict:
-    cats = {}
-    for blob in category_metrics_list or []:
-        m = json.loads(blob)
-        m["component"] = round(_component(m.get("nearest_network_km")), 1)
-        cats[m["category"]] = m
-    return {"metrics_json": json.dumps({"city": city, "categories": cats})}
 
 
 def region_readiness(region: str, city_metrics: list[str], weights: str) -> dict:
@@ -286,47 +246,6 @@ def region_readiness(region: str, city_metrics: list[str], weights: str) -> dict
     }
 
 
-def region_failure(region: str, error: str) -> dict:
-    """Build the excluded-region marker blob for a region whose analysis
-    failed (the AnalyzeRegion catch path). The reason is classified into a
-    short, honest label; the raw error is kept (truncated) for the popup/
-    debugging."""
-    err = str(error or "")
-    low = err.lower()
-    if "empty network" in low:
-        reason = "no routable major-road network in OSM"
-    elif "no cities" in low or "city_metrics" in low or "empty" in low:
-        reason = "no qualifying cities (population-tagged place=city|town)"
-    else:
-        reason = "analysis failed"
-    return {"metrics_json": json.dumps({
-        "region": region, "failed": True,
-        "reason": reason, "error": err[:300],
-    })}
-
-
-def rank_regions(region_metrics: list[str]) -> dict:
-    rows, excluded = [], []
-    for blob in region_metrics or []:
-        rm = json.loads(blob)
-        if rm.get("failed"):
-            excluded.append({
-                "region": rm.get("region"), "failed": True,
-                "reason": rm.get("reason") or "analysis failed",
-            })
-            continue
-        best = max(rm.get("cities") or [], key=lambda c: c["score"], default=None)
-        rows.append({
-            "region": rm.get("region"), "score": rm.get("score"),
-            "city_count": len(rm.get("cities") or []),
-            "best_city": (best or {}).get("city", {}).get("name"),
-        })
-    rows.sort(key=lambda r: -(r["score"] or 0))
-    for i, r in enumerate(rows, 1):
-        r["rank"] = i
-    # region_count counts RANKED regions only; excluded rows ride along at
-    # the end of the rankings list, marked failed:true, for disclosure.
-    return {"rankings": rows + excluded, "region_count": len(rows)}
 
 
 _ABOUT = (
