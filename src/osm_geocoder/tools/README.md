@@ -59,6 +59,7 @@ tools/
 │   ├── pbf_download.py              ← Geofabrik PBF download + path-mirroring cache (rate-limit-safe)
 │   ├── download_gate.py             ← Mongo-backed fleet-wide download semaphore (caps concurrent fetches)
 │   ├── pbf_update.py                ← apply Geofabrik replication diffs to a cached extract
+│   ├── planet_bootstrap.py          ← split a planet PBF into Geofabrik-style regional extracts (self-hosted, Strategy A)
 │   ├── pbf_clip.py                  ← custom-geometry clipping into pbf/clips/
 │   ├── pbf_geojson.py               ← osmium export to GeoJSONSeq
 │   ├── pbf_shapefile.py             ← ogr2ogr export to multi-layer shapefile
@@ -71,6 +72,7 @@ tools/
 │   └── elevation_download.py        ← Copernicus DEM via /vsicurl/ + gdalwarp
 │
 ├── download-pbf.sh        / download_pbf.py
+├── planet-bootstrap.sh    / planet_bootstrap.py   ← self-host: planet → regional split (Strategy A, Phase 1)
 ├── clip-pbf.sh            / clip_pbf.py
 ├── convert-pbf-geojson.sh / convert_pbf_geojson.py
 ├── convert-pbf-shapefile.sh / convert_pbf_shapefile.py
