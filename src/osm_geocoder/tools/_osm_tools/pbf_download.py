@@ -180,6 +180,70 @@ def _use_cache_if_present() -> bool:
     return os.environ.get("FW_OSM_USE_CACHE_IF_PRESENT", "").lower() in ("1", "true", "yes")
 
 
+# Per-process memo of OSM France extract coverage, keyed by Geofabrik region key.
+# A region is probed at most once (a single HEAD); a definitive 404 is cached as
+# "not covered", a 200 as "covered". Transient failures are NOT cached so a later
+# call re-probes.
+_OSMFR_COVERAGE: dict[str, bool] = {}
+
+
+def _osmfr_covers(region: str) -> bool:
+    """Does OSM France publish an extract for ``region``?  (HEAD, memoized.)
+
+    OSM France carries a French-centric SUBSET of Geofabrik's regions (it splits
+    the US into four macro-regions rather than 50 states, and omits many
+    countries entirely), so "configured for osmfr" cannot mean "osmfr has every
+    region". We probe with a cheap HEAD: a definitive 404 means not-covered
+    (memoized), any 2xx/3xx means covered. A transient error (429/503/5xx/network)
+    is treated as *covered* — we prefer to attempt OSM France and let the real
+    download's retry/backoff handle it, rather than silently defect to the
+    (possibly rate-limiting/banned) Geofabrik fallback — and is not memoized.
+    """
+    if region in _OSMFR_COVERAGE:
+        return _OSMFR_COVERAGE[region]
+    url = f"{OSMFR_BASE}/extracts/{_osmfr_region(region)}-latest.osm.pbf"
+    try:
+        with urllib.request.urlopen(_request(url, "HEAD"), timeout=15) as resp:
+            covered = 200 <= resp.getcode() < 400
+        _OSMFR_COVERAGE[region] = covered
+        return covered
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            _OSMFR_COVERAGE[region] = False
+            return False
+        return True  # transient (rate-limit/5xx): attempt osmfr, don't memoize
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return True  # network hiccup: prefer osmfr, don't memoize
+
+
+def resolve_extract_url(region: str) -> tuple[str, str]:
+    """Resolve the extract download URL for ``region`` → ``(url, provider)``.
+
+    Implements the **osmfr-with-Geofabrik-fallback** policy: when configured for
+    OSM France (``FW_OSM_EXTRACT_PROVIDER=osmfr``), download from OSM France for
+    regions it covers and fall back to Geofabrik for the rest. This is the
+    correct layer for the "updates skip Geofabrik" goal: OSM France extracts
+    embed THEIR OWN replication header, so an osmfr-sourced baseline's delta
+    updates follow OSM France automatically — whereas cross-applying osmfr diffs
+    onto a Geofabrik-clipped baseline would be unsound (different clip polygons +
+    incompatible sequence numbers). Choosing the provider at download time keeps
+    each baseline internally consistent (extract ↔ header ↔ diffs, one polygon).
+
+    With the default provider (or for a region OSM France lacks) this returns the
+    Geofabrik URL — identical to the historical behaviour.
+    """
+    rel = f"{region.strip().strip('/')}-latest.osm.pbf"
+    geofabrik_url = f"{GEOFABRIK_BASE}/{rel}"
+    if EXTRACT_PROVIDER != "osmfr":
+        return geofabrik_url, "geofabrik"
+    if _osmfr_covers(region):
+        return f"{OSMFR_BASE}/extracts/{_osmfr_region(region)}-latest.osm.pbf", "osmfr"
+    logger.info(
+        "OSM France publishes no extract for %s; falling back to Geofabrik.", region
+    )
+    return geofabrik_url, "geofabrik"
+
+
 def fetch_md5(url: str) -> str:
     """Fetch Geofabrik's ``.md5`` file for ``url``; return the hex digest.
 
@@ -221,7 +285,7 @@ def fetch_md5_or_none(url: str) -> str | None:
     proceed and anchor integrity on the locally-computed sha256 instead of
     treating the region as permanently un-cacheable.
     """
-    if EXTRACT_PROVIDER == "osmfr":
+    if url.startswith(OSMFR_BASE):
         return None  # OSM France publishes no .md5; anchor integrity on sha256
     try:
         return fetch_md5(url)
@@ -646,7 +710,11 @@ def download_region(
     use_cache_if_present: bool | None = None,
     on_progress: ProgressCallback | None = None,
 ) -> DownloadResult:
-    """Download a Geofabrik PBF for ``region`` into the OSM cache.
+    """Download a region's PBF into the OSM cache.
+
+    Source is chosen by :func:`resolve_extract_url`: Geofabrik by default, or —
+    under ``FW_OSM_EXTRACT_PROVIDER=osmfr`` — OSM France where it covers the
+    region, falling back to Geofabrik where it does not.
 
     Thread-safe: concurrent calls for the same region serialize on a
     per-region lock so only one download happens.
@@ -687,6 +755,11 @@ def download_region(
 
     with _region_lock(region):
         storage.mkdir_p(Storage.dirname(cache_file))
+
+        # Resolve the actual download URL under the osmfr-with-Geofabrik-fallback
+        # policy. Done here (not in the pinned-cache path above) so offline /
+        # use-cache-if-present callers never incur the coverage HEAD.
+        url, _eff_provider = resolve_extract_url(region)
 
         expected_md5 = fetch_md5_or_none(url)
         had_upstream_md5 = expected_md5 is not None
