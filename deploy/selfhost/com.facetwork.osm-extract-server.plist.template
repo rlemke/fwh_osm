@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.facetwork.osm-extract-server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON__</string>
+        <string>-m</string>
+        <string>http.server</string>
+        <string>--directory</string>
+        <string>__WWW__</string>
+        <string>--bind</string>
+        <string>0.0.0.0</string>
+        <string>__PORT__</string>
+    </array>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>__LOGDIR__/server.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOGDIR__/server.err.log</string>
+</dict>
+</plist>

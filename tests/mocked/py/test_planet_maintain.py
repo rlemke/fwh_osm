@@ -78,7 +78,7 @@ def test_maintain_reextracts_at_master_seq(tmp_path):
         r = by_key[key]
         assert r.sequence == MASTER_SEQ            # regions inherit the master's seq
         assert r.header_ok is True
-        assert r.replication_url == f"{BASE_URL}/replication/{key}"
+        assert r.replication_url == f"{BASE_URL}/{key}-updates"
         assert (out / f"{key}-latest.osm.pbf").exists()
         assert f"sequenceNumber={MASTER_SEQ}" in (out / f"{key}-updates" / "state.txt").read_text()
 

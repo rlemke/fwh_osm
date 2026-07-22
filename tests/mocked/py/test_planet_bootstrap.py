@@ -74,10 +74,10 @@ def test_bootstrap_splits_and_stamps_our_header(tmp_path):
         # each region inherits the source's baseline sequence
         assert r.sequence == SRC_SEQ
         assert r.header_ok is True
-        assert r.replication_url == f"{BASE_URL}/replication/{key}"
+        assert r.replication_url == f"{BASE_URL}/{key}-updates"
         # round-trip through the SAME reader the delta path uses
         h = get_replication_header(r.path)
-        assert h.url == f"{BASE_URL}/replication/{key}"
+        assert h.url == f"{BASE_URL}/{key}-updates"
         assert h.sequence == SRC_SEQ
         assert r.nodes >= 2  # two nodes fall in each half
 
@@ -109,4 +109,4 @@ def test_cli_smoke(tmp_path, capsys):
     ])
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["regions"][0]["replication_url"] == f"{BASE_URL}/replication/demo/west"
+    assert payload["regions"][0]["replication_url"] == f"{BASE_URL}/demo/west-updates"

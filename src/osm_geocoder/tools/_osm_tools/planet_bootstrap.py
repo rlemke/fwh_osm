@@ -155,7 +155,12 @@ def bootstrap(
         raw = out_dir / f"{safe}.osm.pbf"
         final = out_dir / f"{key}-latest.osm.pbf"
         final.parent.mkdir(parents=True, exist_ok=True)
-        repl_url = f"{base_url.rstrip('/')}/replication/{key}"
+        # Geofabrik convention: the extract's replication URL is its own
+        # `<region>-updates/` dir — the same path where we write state.txt below.
+        # This makes ONE base URL serve both extracts (`<base>/<region>-latest.osm.pbf`)
+        # and replication (`<base>/<region>-updates/`), so FW_GEOFABRIK_BASE_URL
+        # pointed at a single static server resolves download AND delta coherently.
+        repl_url = f"{base_url.rstrip('/')}/{key}-updates"
 
         hdr = [
             f"--output-header=osmosis_replication_base_url={repl_url}",
