@@ -162,10 +162,11 @@ def bootstrap(
         # pointed at a single static server resolves download AND delta coherently.
         repl_url = f"{base_url.rstrip('/')}/{key}-updates"
 
-        hdr = [
-            f"--output-header=osmosis_replication_base_url={repl_url}",
-            f"--output-header=osmosis_replication_sequence_number={seq}",
-        ]
+        # Some sources (e.g. the full planet dump) expose only a replication
+        # timestamp, no sequence — don't stamp the literal "None".
+        hdr = [f"--output-header=osmosis_replication_base_url={repl_url}"]
+        if seq is not None:
+            hdr.append(f"--output-header=osmosis_replication_sequence_number={seq}")
         if ts_iso:
             hdr.append(f"--output-header=osmosis_replication_timestamp={ts_iso}")
         _run(["osmium", "cat", str(raw), "-o", str(final), "--overwrite", *hdr])

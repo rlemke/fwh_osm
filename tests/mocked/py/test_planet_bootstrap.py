@@ -86,6 +86,33 @@ def test_bootstrap_splits_and_stamps_our_header(tmp_path):
     assert by_key["demo/east"].nodes == 2
 
 
+def test_source_without_sequence_omits_it(tmp_path):
+    """Planet-style source: only a replication timestamp, no sequence. The stamped
+    extract must NOT carry a literal 'None' sequence (the full planet dump does this)."""
+    from osmium.replication import get_replication_header
+
+    xml = tmp_path / "src.osm"
+    xml.write_text(SOURCE_XML)
+    src = tmp_path / "planet.osm.pbf"
+    subprocess.run(
+        ["osmium", "cat", str(xml), "-o", str(src), "--overwrite",
+         "--output-header=osmosis_replication_timestamp=2026-01-01T00:00:00Z"],
+        check=True,
+    )
+    assert get_replication_header(str(src)).sequence is None  # source has no seq
+
+    out = tmp_path / "out"
+    results = pb.bootstrap(source=str(src), out=str(out),
+                           regions=[{"key": "demo/x", "bbox": [0.0, 0.0, 1.0, 1.0]}],
+                           base_url=BASE_URL, strategy="simple")
+    r = results[0]
+    assert r.sequence is None and r.header_ok is True
+    h = get_replication_header(r.path)
+    assert h.sequence is None                         # not the string "None"
+    assert h.url == f"{BASE_URL}/demo/x-updates"
+    assert "sequenceNumber" not in (out / "demo/x-updates" / "state.txt").read_text()
+
+
 def test_bad_region_spec_raises(tmp_path):
     source = _make_source(tmp_path)
     with pytest.raises(pb.BootstrapError):
