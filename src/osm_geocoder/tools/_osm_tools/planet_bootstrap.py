@@ -189,3 +189,27 @@ def bootstrap(
         log(f"  {key}: {nodes} nodes / {ways} ways -> {repl_url}")
 
     return results
+
+
+def bootstrap_batched(*, source: str, out: str, regions: list[dict], base_url: str,
+                      strategy: str = "smart", batch_size: int = 0,
+                      on_log: Callable[[str], None] | None = None) -> list[RegionResult]:
+    """Like :func:`bootstrap` but splits ``regions`` into batches.
+
+    osmium holds a node-id set per region in one extract pass, so extracting
+    hundreds of regions at once can exhaust RAM. ``batch_size`` (0 = single pass)
+    bounds peak memory by processing that many regions per osmium pass, at the
+    cost of re-reading ``source`` once per batch. Returns the concatenated results.
+    """
+    log = on_log or (lambda _m: None)
+    if batch_size <= 0 or batch_size >= len(regions):
+        return bootstrap(source=source, out=out, regions=regions, base_url=base_url,
+                         strategy=strategy, on_log=on_log)
+    results: list[RegionResult] = []
+    nbatches = (len(regions) + batch_size - 1) // batch_size
+    for i in range(0, len(regions), batch_size):
+        batch = regions[i:i + batch_size]
+        log(f"batch {i // batch_size + 1}/{nbatches}: {len(batch)} regions")
+        results.extend(bootstrap(source=source, out=out, regions=batch, base_url=base_url,
+                                 strategy=strategy, on_log=on_log))
+    return results

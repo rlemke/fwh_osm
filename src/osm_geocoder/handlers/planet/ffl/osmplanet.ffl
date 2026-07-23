@@ -1,0 +1,75 @@
+// Self-hosted OSM extracts pipeline — build (and keep current) our own
+// "Geofabrik": download the planet, delta-update it from replication, download
+// osmfr boundary polygons, extract per-region PBFs, and publish them to the
+// object store (s3://osm-extracts) that the fleet's FW_GEOFABRIK_BASE_URL reads.
+//
+// Backed by the standalone tools download-planet / download-polygons /
+// planet-bootstrap (tools/_osm_tools/{planet_fetch,polygon_fetch,planet_bootstrap}).
+
+namespace osm.planet {
+
+    /** A boundary region: a Geofabrik-style key + the osmfr .poly that defines it. */
+    schema Region {
+        key: String,
+        poly: String
+    }
+
+    /** Download planet-latest.osm.pbf (resumable, md5-verified) to `dest`
+        (empty = the host's FW_PLANET_DIR default). The master the extracts are
+        derived from; sourced from planet.openstreetmap.org (Geofabrik is banned). */
+    event facet DownloadPlanet(dest: String = "", verify: Boolean = true) => (planet_path: String, size_mb: Double, was_cached: Boolean) with Effect(kind = "external") with Cost(tier = "expensive")
+
+    /** Bring the planet current by applying replication diffs (timestamp-driven,
+        since the planet dump carries no replication sequence). Degrades to a
+        no-op status when replication is unreachable rather than failing. */
+    event facet UpdatePlanet(planet_path: String, max_diff_mb: Long = 4096) => (planet_path: String, status: String, advanced: Boolean) with Effect(kind = "external") with Cost(tier = "expensive")
+
+    /** Download osmfr boundary polygons. `scope`: "continents", "countries"
+        (~199), or "all". Keys are normalised to Geofabrik style so the
+        pipeline's region requests resolve against the extracts. */
+    event facet DownloadPolygons(dest: String = "", scope: String = "all") => (poly_dir: String, region_count: Long, regions: [Region]) with Effect(kind = "external") with Cost(tier = "moderate")
+
+    /** Split the planet into per-region PBFs — one osmium pass per `batch_size`
+        regions to bound RAM (osmium holds a node-id set per region). Writes the
+        `<key>-latest.osm.pbf` + `<key>-updates/state.txt` tree under `out`. */
+    event facet ExtractRegions(
+        planet_path: String,
+        regions: [Region],
+        out: String = "",
+        base_url: String = "http://afl-minio:9000/osm-extracts",
+        strategy: String = "simple",
+        batch_size: Long = 25
+    ) => (region_count: Long, out: String) with Effect(kind = "io") with Cost(tier = "expensive")
+
+    /** Upload the extracted tree from `out` to the S3/MinIO `bucket`
+        (anonymous-read), so FW_GEOFABRIK_BASE_URL consumers can fetch them. */
+    event facet PublishExtracts(out: String = "", bucket: String = "osm-extracts") => (bucket: String, published: Long) with Effect(kind = "io") with Cost(tier = "expensive")
+
+    /** End-to-end: download planet -> delta-update -> download all polygons ->
+        extract per-region PBFs -> publish. Run on a schedule to keep the
+        self-hosted "Geofabrik" fresh. */
+    workflow BuildPlanetExtracts(
+        dest: String = "",
+        polys_dest: String = "",
+        scope: String = "all",
+        out: String = "",
+        base_url: String = "http://afl-minio:9000/osm-extracts",
+        strategy: String = "simple",
+        batch_size: Long = 25,
+        bucket: String = "osm-extracts"
+    ) => (region_count: Long, published: Long) andThen {
+        planet = osm.planet.DownloadPlanet(dest = $.dest)
+        updated = osm.planet.UpdatePlanet(planet_path = planet.planet_path)
+        polys = osm.planet.DownloadPolygons(dest = $.polys_dest, scope = $.scope)
+        extract = osm.planet.ExtractRegions(
+            planet_path = updated.planet_path,
+            regions = polys.regions,
+            out = $.out,
+            base_url = $.base_url,
+            strategy = $.strategy,
+            batch_size = $.batch_size
+        )
+        pub = osm.planet.PublishExtracts(out = extract.out, bucket = $.bucket)
+        yield BuildPlanetExtracts(region_count = extract.region_count, published = pub.published)
+    }
+}

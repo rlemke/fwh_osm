@@ -1,0 +1,161 @@
+"""Handlers for the ``osm.planet`` self-hosted-extracts pipeline.
+
+Backs the event facets that let a workflow build (and keep current) our own
+"Geofabrik": download the OSM planet, delta-update it from replication, download
+osmfr boundary polygons, extract per-region PBFs, and publish them to object
+storage. Each handler is a thin wrapper over the standalone tools in
+``tools/_osm_tools`` (``planet_fetch``, ``polygon_fetch``, ``planet_bootstrap``),
+so the FFL and the ``download-planet`` / ``download-polygons`` / ``planet-bootstrap``
+CLIs share one implementation.
+
+Blocking network + heavy disk I/O — registered with ``timeout_ms=0`` (rely on the
+runner's global execution timeout), like the other cache/download handlers.
+"""
+from __future__ import annotations
+
+import os
+from typing import Any
+
+from ...tools._osm_tools.planet_fetch import fetch_planet, update_planet
+from ...tools._osm_tools.polygon_fetch import fetch_polygons
+from ...tools._osm_tools.planet_bootstrap import bootstrap_batched
+
+NAMESPACE = "osm.planet"
+
+# Defaults for empty-string params (env-overridable), so the workflow can run
+# with no arguments on a host that sets FW_PLANET_DIR / FW_S3_* .
+_PLANET_DIR = os.environ.get("FW_PLANET_DIR", "/Volumes/afl_data/osm-selfhost")
+
+
+def _planet_path(dest: str) -> str:
+    return dest or os.path.join(_PLANET_DIR, "planet-latest.osm.pbf")
+
+
+def _log(params: dict[str, Any]):
+    sl = params.get("_step_log")
+    return (lambda m: sl(m, level="info")) if sl else (lambda m: None)
+
+
+def handle_download_planet(params: dict[str, Any]) -> dict[str, Any]:
+    path = _planet_path(params.get("dest") or "")
+    verify = params.get("verify", True) is not False
+    res = fetch_planet(path, verify=verify, force=bool(params.get("force")), on_log=_log(params))
+    return {"planet_path": res.path, "size_mb": round(res.size_bytes / 1_000_000, 1),
+            "was_cached": res.was_cached}
+
+
+def handle_update_planet(params: dict[str, Any]) -> dict[str, Any]:
+    path = _planet_path(params.get("planet_path") or "")
+    try:
+        max_diff_mb = int(params.get("max_diff_mb") or 4096)
+    except (TypeError, ValueError):
+        max_diff_mb = 4096
+    u = update_planet(path, max_diff_mb=max_diff_mb, on_log=_log(params))
+    return {"planet_path": path, "status": u.status, "advanced": u.advanced}
+
+
+def handle_download_polygons(params: dict[str, Any]) -> dict[str, Any]:
+    dest = params.get("dest") or os.path.join(_PLANET_DIR, "polys")
+    scope = params.get("scope") or "all"
+    regions = fetch_polygons(dest, scope=scope, on_log=_log(params))
+    return {"poly_dir": dest, "region_count": len(regions),
+            "regions": [{"key": r.key, "poly": r.poly} for r in regions]}
+
+
+def handle_extract_regions(params: dict[str, Any]) -> dict[str, Any]:
+    planet = _planet_path(params.get("planet_path") or "")
+    regions = params.get("regions") or []
+    if not regions:
+        raise ValueError("ExtractRegions: 'regions' is empty (run DownloadPolygons first)")
+    out = params.get("out") or os.path.join(_PLANET_DIR, "www")
+    base_url = params.get("base_url") or "http://afl-minio:9000/osm-extracts"
+    strategy = params.get("strategy") or "simple"
+    try:
+        batch_size = int(params.get("batch_size") or 25)
+    except (TypeError, ValueError):
+        batch_size = 25
+    results = bootstrap_batched(source=planet, out=out, regions=regions, base_url=base_url,
+                                strategy=strategy, batch_size=batch_size, on_log=_log(params))
+    return {"region_count": len(results), "out": out}
+
+
+def handle_publish_extracts(params: dict[str, Any]) -> dict[str, Any]:
+    """Upload the extracted ``<key>-latest.osm.pbf`` + ``<key>-updates/state.txt``
+    from a local tree to an S3/MinIO bucket (anonymous-read), so the fleet's
+    download path (FW_GEOFABRIK_BASE_URL) can consume them."""
+    try:
+        import boto3  # optional [s3] extra
+        from boto3.s3.transfer import TransferConfig
+    except ImportError as exc:
+        raise RuntimeError("PublishExtracts needs boto3 (pip install '.[s3]')") from exc
+    import glob
+    import json
+
+    out = params.get("out") or os.path.join(_PLANET_DIR, "www")
+    bucket = params.get("bucket") or os.environ.get("FW_OSM_EXTRACT_BUCKET", "osm-extracts")
+    endpoint = params.get("endpoint") or os.environ.get("FW_S3_ENDPOINT", "http://localhost:9000")
+    s3 = boto3.client("s3", endpoint_url=endpoint,
+                      aws_access_key_id=os.environ.get("FW_S3_ACCESS_KEY", "minioadmin"),
+                      aws_secret_access_key=os.environ.get("FW_S3_SECRET_KEY", "minioadmin"))
+    try:
+        s3.create_bucket(Bucket=bucket)
+    except Exception:
+        pass
+    try:
+        s3.put_bucket_policy(Bucket=bucket, Policy=json.dumps({
+            "Version": "2012-10-17",
+            "Statement": [{"Effect": "Allow", "Principal": {"AWS": ["*"]},
+                           "Action": ["s3:GetObject"], "Resource": [f"arn:aws:s3:::{bucket}/*"]}]}))
+    except Exception:
+        pass
+    tc = TransferConfig(multipart_threshold=64 * 1024 * 1024, multipart_chunksize=64 * 1024 * 1024,
+                        max_concurrency=4)
+    log = _log(params)
+    published = 0
+    for pbf in sorted(glob.glob(os.path.join(out, "**", "*-latest.osm.pbf"), recursive=True)):
+        key = os.path.relpath(pbf, out)                       # <region>-latest.osm.pbf
+        s3.upload_file(pbf, bucket, key, Config=tc)
+        state = os.path.join(os.path.dirname(pbf),
+                             os.path.basename(pbf).replace("-latest.osm.pbf", "-updates"), "state.txt")
+        if os.path.exists(state):
+            s3.upload_file(state, bucket, os.path.relpath(state, out))
+        published += 1
+        if published % 10 == 0:
+            log(f"published {published} extracts")
+    return {"bucket": bucket, "published": published}
+
+
+_DISPATCH = {
+    f"{NAMESPACE}.DownloadPlanet": handle_download_planet,
+    f"{NAMESPACE}.UpdatePlanet": handle_update_planet,
+    f"{NAMESPACE}.DownloadPolygons": handle_download_polygons,
+    f"{NAMESPACE}.ExtractRegions": handle_extract_regions,
+    f"{NAMESPACE}.PublishExtracts": handle_publish_extracts,
+}
+
+
+def handle(payload: dict) -> dict:
+    """RegistryRunner entrypoint."""
+    facet = payload["_facet_name"]
+    handler = _DISPATCH.get(facet)
+    if handler is None:
+        raise ValueError(f"Unknown facet: {facet}")
+    return handler(payload)
+
+
+def register_handlers(runner) -> None:
+    """Register with a RegistryRunner. All steps do blocking network/disk I/O, so
+    timeout_ms=0 (rely on the runner's global execution timeout)."""
+    for facet_name in _DISPATCH:
+        runner.register_handler(
+            facet_name=facet_name,
+            module_uri=f"file://{os.path.abspath(__file__)}",
+            entrypoint="handle",
+            timeout_ms=0,
+        )
+
+
+def register_planet_handlers(poller) -> None:
+    """Register with an AgentPoller."""
+    for facet_name, handler in _DISPATCH.items():
+        poller.register(facet_name, handler)

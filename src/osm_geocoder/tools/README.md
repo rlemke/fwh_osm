@@ -61,6 +61,8 @@ tools/
 │   ├── pbf_update.py                ← apply Geofabrik replication diffs to a cached extract
 │   ├── planet_bootstrap.py          ← split a planet PBF into Geofabrik-style regional extracts (self-hosted, Strategy A — Phase 1)
 │   ├── planet_maintain.py           ← advance the master planet + re-extract regions (self-hosted, Strategy A — Phase 2)
+│   ├── planet_fetch.py              ← download + delta-update the OSM planet (self-hosted master source)
+│   ├── polygon_fetch.py             ← download osmfr boundary polygons (continents + ~199 countries)
 │   ├── pbf_clip.py                  ← custom-geometry clipping into pbf/clips/
 │   ├── pbf_geojson.py               ← osmium export to GeoJSONSeq
 │   ├── pbf_shapefile.py             ← ogr2ogr export to multi-layer shapefile
@@ -75,6 +77,8 @@ tools/
 ├── download-pbf.sh        / download_pbf.py
 ├── planet-bootstrap.sh    / planet_bootstrap.py   ← self-host: planet → regional split (Strategy A, Phase 1)
 ├── planet-maintain.sh     / planet_maintain.py    ← self-host: advance master + re-extract, scheduled (Strategy A, Phase 2)
+├── download-planet.sh     / download_planet.py    ← self-host: download / delta-update the planet
+├── download-polygons.sh   / download_polygons.py  ← self-host: download osmfr boundary polygons
 ├── clip-pbf.sh            / clip_pbf.py
 ├── convert-pbf-geojson.sh / convert_pbf_geojson.py
 ├── convert-pbf-shapefile.sh / convert_pbf_shapefile.py
