@@ -83,4 +83,19 @@ tail -f ~/.facetwork/osm-selfhost/{server,maintain}.log
 
 **Serving at scale:** `http.server` is a fine start for a LAN of runners; front it
 with nginx/caddy, or publish `WWW` into MinIO (`s3://afl-cache`) and serve from
-there, when you outgrow it.
+there, when you outgrow it. Note `http.server` **ignores HTTP Range** and streams
+whole files — for multi-GB continent PBFs that means no resumable/partial fetch and
+one slow read per request; MinIO/nginx handle Range properly.
+
+**macOS TCC gotcha (serving from `/Volumes`):** a **launchd** agent has no access to
+external volumes (`/Volumes/*`) without **Full Disk Access**, so the launchd
+`http.server` binds the port but hangs on the first read (empty logs, requests time
+out) — even though an interactive-shell server reads the same tree fine (it inherits
+the terminal's file-access grant). Fixes, in order of preference:
+1. Put `WWW` on the **internal** disk (HOME), not `/Volumes` — launchd can serve it.
+2. Publish `WWW` into **MinIO** (already running, has disk access, fleet-reachable
+   via the `afl-minio` alias that containers resolve) and set
+   `FW_GEOFABRIK_BASE_URL=http://afl-minio:9000/<bucket>` — the production answer.
+3. Grant the server's `python3` **Full Disk Access** in System Settings (a GUI step;
+   can't be done over SSH). Until then, run the server from an interactive/`nohup`
+   session that has disk access (not reboot-persistent).
