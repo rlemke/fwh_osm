@@ -95,24 +95,36 @@ def handle_extract_regions(params: dict[str, Any]) -> dict[str, Any]:
     return {"region_count": len(results), "out": out}
 
 
-def handle_publish_extracts(params: dict[str, Any]) -> dict[str, Any]:
-    """Upload the extracted ``<key>-latest.osm.pbf`` + ``<key>-updates/state.txt``
-    from a local tree to an S3/MinIO bucket (anonymous-read), so the fleet's
-    download path (FW_GEOFABRIK_BASE_URL) can consume them."""
+def _scratch_dir() -> str:
+    """A host-local writable dir for a single BuildAdminSet task (the fleet
+    runner mounts /scratch → host afl_data/osm-scratch; falls back to /tmp)."""
+    for base in (os.environ.get("FW_LOCAL_SCRATCH"), "/scratch"):
+        if base and os.path.isdir(base):
+            p = os.path.join(base, "osm-admin-set")
+            break
+    else:
+        p = "/tmp/osm-admin-set"
+    os.makedirs(p, exist_ok=True)
+    return p
+
+
+def _s3_client(endpoint: str | None = None):
     try:
         import boto3  # optional [s3] extra
-        from boto3.s3.transfer import TransferConfig
     except ImportError as exc:
-        raise RuntimeError("PublishExtracts needs boto3 (pip install '.[s3]')") from exc
+        raise RuntimeError("this facet needs boto3 (pip install '.[s3]')") from exc
+    return boto3.client(
+        "s3", endpoint_url=endpoint or os.environ.get("FW_S3_ENDPOINT", "http://localhost:9000"),
+        aws_access_key_id=os.environ.get("FW_S3_ACCESS_KEY", "minioadmin"),
+        aws_secret_access_key=os.environ.get("FW_S3_SECRET_KEY", "minioadmin"))
+
+
+def _publish_tree(s3, out: str, bucket: str, log) -> int:
+    """Upload a local ``<key>-latest.osm.pbf`` + ``<key>-updates/state.txt`` tree to
+    ``bucket`` (created anonymous-read). Returns the count published."""
     import glob
     import json
-
-    out = params.get("out") or os.path.join(_PLANET_DIR, "www")
-    bucket = params.get("bucket") or os.environ.get("FW_OSM_EXTRACT_BUCKET", "osm-extracts")
-    endpoint = params.get("endpoint") or os.environ.get("FW_S3_ENDPOINT", "http://localhost:9000")
-    s3 = boto3.client("s3", endpoint_url=endpoint,
-                      aws_access_key_id=os.environ.get("FW_S3_ACCESS_KEY", "minioadmin"),
-                      aws_secret_access_key=os.environ.get("FW_S3_SECRET_KEY", "minioadmin"))
+    from boto3.s3.transfer import TransferConfig
     try:
         s3.create_bucket(Bucket=bucket)
     except Exception:
@@ -126,11 +138,9 @@ def handle_publish_extracts(params: dict[str, Any]) -> dict[str, Any]:
         pass
     tc = TransferConfig(multipart_threshold=64 * 1024 * 1024, multipart_chunksize=64 * 1024 * 1024,
                         max_concurrency=4)
-    log = _log(params)
     published = 0
     for pbf in sorted(glob.glob(os.path.join(out, "**", "*-latest.osm.pbf"), recursive=True)):
-        key = os.path.relpath(pbf, out)                       # <region>-latest.osm.pbf
-        s3.upload_file(pbf, bucket, key, Config=tc)
+        s3.upload_file(pbf, bucket, os.path.relpath(pbf, out), Config=tc)
         state = os.path.join(os.path.dirname(pbf),
                              os.path.basename(pbf).replace("-latest.osm.pbf", "-updates"), "state.txt")
         if os.path.exists(state):
@@ -138,7 +148,52 @@ def handle_publish_extracts(params: dict[str, Any]) -> dict[str, Any]:
         published += 1
         if published % 10 == 0:
             log(f"published {published} extracts")
+    return published
+
+
+def handle_publish_extracts(params: dict[str, Any]) -> dict[str, Any]:
+    """Upload a local extract tree to an S3/MinIO bucket (anonymous-read)."""
+    out = params.get("out") or os.path.join(_PLANET_DIR, "www")
+    bucket = params.get("bucket") or os.environ.get("FW_OSM_EXTRACT_BUCKET", "osm-extracts")
+    published = _publish_tree(_s3_client(params.get("endpoint")), out, bucket, _log(params))
     return {"bucket": bucket, "published": published}
+
+
+def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
+    """SINGLE-TASK admin set — the distributed-fleet-safe path. Downloads a source
+    region from the bucket, generates its ``admin_level`` boundaries, extracts each,
+    and publishes — ALL on the one host that claims this task, so there's no
+    cross-host local-file handoff. Scoped by the source, e.g.
+    ``source_region='europe/germany', admin_level=4`` → German Länder."""
+    import shutil
+    source_region = params.get("source_region") or ""
+    if not source_region:
+        raise ValueError("BuildAdminSet: 'source_region' required (e.g. 'europe/germany')")
+    try:
+        admin_level = int(params.get("admin_level") or 4)
+    except (TypeError, ValueError):
+        admin_level = 4
+    bucket = params.get("bucket") or os.environ.get("FW_OSM_EXTRACT_BUCKET", "osm-extracts")
+    base_url = params.get("base_url") or "http://afl-minio:9000/osm-extracts"
+    strategy = params.get("strategy") or "simple"
+    log = _log(params)
+    s3 = _s3_client(params.get("endpoint"))
+
+    work = _scratch_dir()
+    src = os.path.join(work, f"{source_region.replace('/', '__')}.osm.pbf")
+    log(f"downloading source {source_region} from s3://{bucket}")
+    s3.download_file(bucket, f"{source_region}-latest.osm.pbf", src)
+
+    regions = generate_polygons(src, admin_level, os.path.join(work, "polys"), on_log=log)
+    results = bootstrap_batched(
+        source=src, out=os.path.join(work, "out"),
+        regions=[{"key": r.key, "poly": r.poly} for r in regions],
+        base_url=base_url, strategy=strategy, batch_size=25, on_log=log)
+    published = _publish_tree(s3, os.path.join(work, "out"), bucket, log)
+
+    shutil.rmtree(work, ignore_errors=True)
+    log(f"admin_level={admin_level} of {source_region}: {published} extracts published")
+    return {"region_count": len(results), "published": published}
 
 
 _DISPATCH = {
@@ -148,6 +203,7 @@ _DISPATCH = {
     f"{NAMESPACE}.GenerateRegionPolygons": handle_generate_polygons,
     f"{NAMESPACE}.ExtractRegions": handle_extract_regions,
     f"{NAMESPACE}.PublishExtracts": handle_publish_extracts,
+    f"{NAMESPACE}.BuildAdminSet": handle_build_admin_set,
 }
 
 

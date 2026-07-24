@@ -82,4 +82,38 @@ namespace osm.planet {
         pub = osm.planet.PublishExtracts(out = extract.out, bucket = $.bucket)
         yield BuildPlanetExtracts(region_count = extract.region_count, published = pub.published)
     }
+
+    /** Build extracts for one admin level from OSM admin boundaries (self-generated
+        polygons — no external source): generate the boundaries at `admin_level`
+        from `source`, extract each region, and publish. Scoped by the source —
+        e.g. German Länder = source is a germany extract, admin_level=4. */
+    workflow BuildAdminExtracts(
+        source: String = "",
+        admin_level: Long = 4,
+        polys_dest: String = "",
+        out: String = "",
+        base_url: String = "http://afl-minio:9000/osm-extracts",
+        strategy: String = "simple",
+        bucket: String = "osm-extracts"
+    ) => (region_count: Long, published: Long) andThen {
+        polys = osm.planet.GenerateRegionPolygons(source = $.source, admin_level = $.admin_level, dest = $.polys_dest)
+        extract = osm.planet.ExtractRegions(planet_path = $.source, regions = polys.regions, out = $.out, base_url = $.base_url, strategy = $.strategy)
+        pub = osm.planet.PublishExtracts(out = extract.out, bucket = $.bucket)
+        yield BuildAdminExtracts(region_count = extract.region_count, published = pub.published)
+    }
+
+    /** SINGLE-TASK admin set — the distributed-fleet-safe path. ONE handler
+        downloads `source_region` from the bucket, generates its `admin_level`
+        boundaries, extracts each, and publishes, ALL on the one host that claims
+        it — so it runs cleanly across the multi-host fleet with no cross-host
+        local-file handoff. Scoped by the source: source_region="europe/germany",
+        admin_level=4 → German Länder; "north-america/canada", 4 → provinces. */
+    event facet BuildAdminSet(source_region: String, admin_level: Long = 4, base_url: String = "http://afl-minio:9000/osm-extracts", strategy: String = "simple", bucket: String = "osm-extracts") => (region_count: Long, published: Long) with Effect(kind = "io") with Cost(tier = "expensive")
+
+    /** Distributed fleet run of a self-generated admin set — one BuildAdminSet
+        task, so it executes atomically on a single fleet host. */
+    workflow BuildAdminSetWorkflow(source_region: String, admin_level: Long = 4, base_url: String = "http://afl-minio:9000/osm-extracts", strategy: String = "simple", bucket: String = "osm-extracts") => (region_count: Long, published: Long) andThen {
+        result = osm.planet.BuildAdminSet(source_region = $.source_region, admin_level = $.admin_level, base_url = $.base_url, strategy = $.strategy, bucket = $.bucket)
+        yield BuildAdminSetWorkflow(region_count = result.region_count, published = result.published)
+    }
 }

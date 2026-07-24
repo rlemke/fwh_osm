@@ -128,6 +128,36 @@ def test_generate_polygons_handler_registered():
     assert "osm.planet.GenerateRegionPolygons" in ph._DISPATCH
 
 
+def test_build_admin_set_orchestration(tmp_path, monkeypatch):
+    """The single-task facet downloads the source, generates, extracts, publishes —
+    all in one handler (no cross-host handoff)."""
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+    from osm_geocoder.tools._osm_tools.boundary_gen import BoundaryRegion
+    downloaded = []
+
+    class FakeS3:
+        def download_file(self, bucket, key, dst):
+            downloaded.append(key)
+            open(dst, "w").write("pbf")
+    monkeypatch.setattr(ph, "_s3_client", lambda ep=None: FakeS3())
+    monkeypatch.setattr(ph, "_scratch_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(ph, "generate_polygons",
+                        lambda src, lvl, dest, on_log=None:
+                        [BoundaryRegion("europe/germany/bayern", "/p", "Bayern", 4, "DE-BY")])
+    monkeypatch.setattr(ph, "bootstrap_batched", lambda **k: list(k["regions"]))
+    monkeypatch.setattr(ph, "_publish_tree", lambda s3, out, bucket, log: 1)
+
+    out = ph.handle_build_admin_set({"source_region": "europe/germany", "admin_level": 4})
+    assert out == {"region_count": 1, "published": 1}
+    assert downloaded == ["europe/germany-latest.osm.pbf"]   # source pulled from the bucket
+
+
+def test_build_admin_set_requires_source():
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+    with pytest.raises(ValueError):
+        ph.handle_build_admin_set({"admin_level": 4})
+
+
 # --- batched extract splits into osmium passes to bound RAM ---
 
 def test_bootstrap_batched_splits(monkeypatch):
@@ -180,6 +210,7 @@ def test_handler_dispatch_routes_and_rejects_unknown():
         "osm.planet.DownloadPlanet", "osm.planet.UpdatePlanet",
         "osm.planet.DownloadPolygons", "osm.planet.GenerateRegionPolygons",
         "osm.planet.ExtractRegions", "osm.planet.PublishExtracts",
+        "osm.planet.BuildAdminSet",
     }
     with pytest.raises(ValueError):
         ph.handle({"_facet_name": "osm.planet.Nope"})
