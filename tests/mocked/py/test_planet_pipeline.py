@@ -68,6 +68,24 @@ def test_fetch_subregion_polys_no_dir_is_graceful(tmp_path, monkeypatch):
     assert pf.fetch_subregion_polys("europe/monaco", str(tmp_path)) == []
 
 
+def test_fetch_country_subregions_is_region_aware(tmp_path, monkeypatch):
+    """US → TIGER (osmfr has no US state polys); everywhere else → osmfr."""
+    from osm_geocoder.tools._osm_tools import tiger_fetch as tf
+    # US routes to TIGER, and `only` filters TIGER's full 50+DC to the stragglers
+    monkeypatch.setattr(tf, "fetch_tiger_states", lambda dest, on_log=None: [
+        pf.Region("north-america/us/california", "/p/ca.geojson"),
+        pf.Region("north-america/us/texas", "/p/tx.geojson")])
+    us = pf.fetch_country_subregions("north-america/us", str(tmp_path), only={"texas"})
+    assert [r.key for r in us] == ["north-america/us/texas"]
+
+    # non-US routes to osmfr (dir listing)
+    monkeypatch.setattr(pf.urllib.request, "urlopen",
+                        lambda url, timeout=None: _Resp(
+                            b'href="bayern.poly"' if url.endswith("/") else b"poly"))
+    de = pf.fetch_country_subregions("europe/germany", str(tmp_path))
+    assert [r.key for r in de] == ["europe/germany/bayern"]
+
+
 # --- subnational (TIGER US states) ---
 
 def test_subnational_scope_routes_to_tiger(tmp_path, monkeypatch):
@@ -192,7 +210,7 @@ def test_build_admin_set_orchestration(tmp_path, monkeypatch):
     monkeypatch.setattr(ph, "generate_polygons",
                         lambda src, lvl, dest, on_log=None:
                         [BoundaryRegion("europe/germany/bayern", "/p", "Bayern", 4, "DE-BY")])
-    monkeypatch.setattr(ph, "fetch_subregion_polys", lambda *a, **k: [])
+    monkeypatch.setattr(ph, "fetch_country_subregions", lambda *a, **k: [])
     monkeypatch.setattr(ph, "bootstrap_batched", lambda **k: list(k["regions"]))
     monkeypatch.setattr(ph, "_publish_tree", lambda s3, out, bucket, log: 1)
 
@@ -217,7 +235,7 @@ def test_build_admin_set_osmfr_fallback_fills_stragglers(tmp_path, monkeypatch):
                         lambda src, lvl, dest, on_log=None:
                         [BoundaryRegion("north-america/canada/ontario", "/p/on", "Ontario", 4, "CA-ON")])
     # osmfr lists ontario + quebec; only quebec should be added (ontario already have)
-    monkeypatch.setattr(ph, "fetch_subregion_polys", lambda ck, dest, on_log=None: [
+    monkeypatch.setattr(ph, "fetch_country_subregions", lambda ck, dest, on_log=None: [
         Region("north-america/canada/ontario", "/o/on.poly"),
         Region("north-america/canada/quebec", "/o/qc.poly")])
     monkeypatch.setattr(ph, "bootstrap_batched",
@@ -244,7 +262,7 @@ def test_build_admin_set_fallback_disabled(tmp_path, monkeypatch):
                         lambda src, lvl, dest, on_log=None:
                         [BoundaryRegion("north-america/canada/ontario", "/p/on", "Ontario", 4, "CA-ON")])
     def spy(*a, **k): called.__setitem__("osmfr", True); return []
-    monkeypatch.setattr(ph, "fetch_subregion_polys", spy)
+    monkeypatch.setattr(ph, "fetch_country_subregions", spy)
     monkeypatch.setattr(ph, "bootstrap_batched", lambda **k: list(k["regions"]))
     monkeypatch.setattr(ph, "_publish_tree", lambda s3, out, bucket, log: 1)
 

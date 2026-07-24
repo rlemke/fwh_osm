@@ -135,3 +135,29 @@ def fetch_subregion_polys(country_key: str, dest: str, *, only=None,
         regions.append(Region(key, str(out.resolve())))
     log(f"osmfr fallback: {len(regions)} sub-region poly(s) for {country_key}")
     return regions
+
+
+# The country whose sub-national polys come from Census TIGER, not osmfr (osmfr
+# ships no US state polys). Keyed by our canonical Geofabrik-style country key.
+_TIGER_COUNTRY = "north-america/us"
+
+
+def fetch_country_subregions(country_key: str, dest: str, *, only=None,
+                             on_log: Callable[[str], None] | None = None) -> list[Region]:
+    """Region-AWARE sub-region poly provider — the straggler fallback source.
+
+    Neither provider is universal, so pick by country: **TIGER** (US Census) for the
+    US, since osmfr has no US state polys; **osmfr** for everywhere else, since TIGER
+    is US-only. Returns ``Region(key=<country_key>/<slug>, poly=path)`` restricted to
+    the ``only`` slugs (the stragglers self-generation missed) when given. Degrades
+    to an empty list when the provider has nothing for the country.
+    """
+    log = on_log or (lambda _m: None)
+    if country_key.strip("/") == _TIGER_COUNTRY:
+        from . import tiger_fetch  # lazy: tiger_fetch imports Region from here
+        regions = tiger_fetch.fetch_tiger_states(dest, on_log=on_log)  # all 50 + DC
+        if only is not None:
+            regions = [r for r in regions if r.key.rsplit("/", 1)[-1] in only]
+        log(f"TIGER fallback: {len(regions)} US state poly(s)")
+        return regions
+    return fetch_subregion_polys(country_key, dest, only=only, on_log=on_log)

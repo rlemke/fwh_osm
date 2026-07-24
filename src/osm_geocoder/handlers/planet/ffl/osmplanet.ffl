@@ -113,7 +113,8 @@ namespace osm.planet {
         (Canada is a 6.5 GB PBF) at batch=25 needs ~37 GB → OOM on a 32 GB host.
         `osmfr_fallback` (default true): fill sub-national stragglers osmium export
         can't assemble (nested sub-relations, member ways beyond the source poly —
-        e.g. Quebec/Nova Scotia/Nunavut) from osmfr's ready-made .poly files. */
+        e.g. Quebec/Nova Scotia/Nunavut) from a region-aware ready-made poly source:
+        TIGER for US states (osmfr has none), osmfr for everywhere else. */
     event facet BuildAdminSet(source_region: String, admin_level: Long = 4, base_url: String = "http://afl-minio:9000/osm-extracts", strategy: String = "complete_ways", bucket: String = "osm-extracts", batch_size: Long = 4, osmfr_fallback: Boolean = true) => (region_count: Long, published: Long) with Effect(kind = "io") with Cost(tier = "expensive")
 
     /** Distributed fleet run of a self-generated admin set — one BuildAdminSet
