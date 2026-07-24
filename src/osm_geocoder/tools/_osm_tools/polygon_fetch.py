@@ -94,3 +94,44 @@ def fetch_polygons(dest: str, *, scope: str = "all",
 
     log(f"fetched {len(regions)} polygons (scope={scope})")
     return regions
+
+
+def fetch_subregion_polys(country_key: str, dest: str, *, only=None,
+                          on_log: Callable[[str], None] | None = None) -> list[Region]:
+    """Fetch osmfr sub-region ``.poly`` files for one country — the FALLBACK for
+    regions that self-generation (osmium boundary assembly) can't build.
+
+    ``osmium export`` silently drops boundary relations it can't close into a
+    polygon (nested sub-relations, a member way outside the country poly, topology
+    errors), so self-generation misses a long tail — e.g. Quebec / Nova Scotia /
+    Nunavut for Canada. osmfr ships ready-made, robustly-assembled ``.poly`` files
+    for those, so we fill the GAP from osmfr rather than losing the region.
+
+    ``country_key`` is a Geofabrik-style key (``north-america/canada``); the osmfr
+    path mirrors it. ``only`` (a set of Geofabrik-style slugs) restricts the fetch
+    to specific stragglers; ``None`` fetches every sub-region osmfr lists. Returns
+    ``Region(key=<country_key>/<slug>, poly=path)``. Empty list when osmfr has no
+    sub-region dir for the country (most small countries) or is unreachable — a
+    graceful degrade, never a raise.
+    """
+    log = on_log or (lambda _m: None)
+    dest_p = Path(dest)
+    dest_p.mkdir(parents=True, exist_ok=True)
+    url = f"{OSMFR_POLYGONS}/{country_key}/"
+    try:
+        names = _list_polys(url)
+    except Exception as exc:
+        log(f"osmfr fallback: no sub-region dir for {country_key} ({exc})")
+        return []
+    regions: list[Region] = []
+    for name in names:
+        slug = name.replace("_", "-")             # osmfr new_brunswick -> new-brunswick
+        if only is not None and slug not in only:
+            continue
+        key = f"{country_key}/{slug}"
+        out = dest_p / f"{key.replace('/', '__')}.poly"
+        if not out.exists():
+            out.write_bytes(urllib.request.urlopen(f"{url}{name}.poly", timeout=30).read())
+        regions.append(Region(key, str(out.resolve())))
+    log(f"osmfr fallback: {len(regions)} sub-region poly(s) for {country_key}")
+    return regions

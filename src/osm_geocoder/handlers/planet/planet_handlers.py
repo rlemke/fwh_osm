@@ -17,7 +17,7 @@ import os
 from typing import Any
 
 from ...tools._osm_tools.planet_fetch import fetch_planet, update_planet
-from ...tools._osm_tools.polygon_fetch import fetch_polygons
+from ...tools._osm_tools.polygon_fetch import fetch_polygons, fetch_subregion_polys
 from ...tools._osm_tools.planet_bootstrap import bootstrap_batched
 from ...tools._osm_tools.boundary_gen import generate_polygons
 
@@ -85,7 +85,7 @@ def handle_extract_regions(params: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("ExtractRegions: 'regions' is empty (run DownloadPolygons first)")
     out = params.get("out") or os.path.join(_PLANET_DIR, "www")
     base_url = params.get("base_url") or "http://afl-minio:9000/osm-extracts"
-    strategy = params.get("strategy") or "simple"
+    strategy = params.get("strategy") or "complete_ways"
     try:
         batch_size = int(params.get("batch_size") or 25)
     except (TypeError, ValueError):
@@ -175,7 +175,8 @@ def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
         admin_level = 4
     bucket = params.get("bucket") or os.environ.get("FW_OSM_EXTRACT_BUCKET", "osm-extracts")
     base_url = params.get("base_url") or "http://afl-minio:9000/osm-extracts"
-    strategy = params.get("strategy") or "simple"
+    strategy = params.get("strategy") or "complete_ways"
+    osmfr_fallback = params.get("osmfr_fallback", True) is not False
     # osmium extract holds one node-id bitmap (~1.5 GB over the planet id-space) PER
     # region in a pass, AND a single dense province (Ontario/Quebec) can approach the
     # ~14 GB Docker-VM ceiling on its own — so the real limit is per-region, not just
@@ -193,9 +194,25 @@ def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
     s3.download_file(bucket, f"{source_region}-latest.osm.pbf", src)
 
     regions = generate_polygons(src, admin_level, os.path.join(work, "polys"), on_log=log)
+    poly_regions = [{"key": r.key, "poly": r.poly} for r in regions]
+
+    # osmfr fallback for stragglers: osmium export can't assemble some boundaries
+    # (nested sub-relations, member ways beyond the source poly). Fill the GAP from
+    # osmfr's ready-made sub-region polys — only regions we didn't self-generate, and
+    # only for sub-national levels (osmfr has no admin_level=6 sub-dirs).
+    if osmfr_fallback and admin_level >= 4:
+        have = {r["key"].rsplit("/", 1)[-1] for r in poly_regions}
+        extra = [f for f in fetch_subregion_polys(
+                     source_region, os.path.join(work, "polys_osmfr"), on_log=log)
+                 if f.key.rsplit("/", 1)[-1] not in have]
+        if extra:
+            log(f"osmfr fallback adds {len(extra)} straggler(s): "
+                f"{[f.key.rsplit('/', 1)[-1] for f in extra]}")
+            poly_regions += [{"key": f.key, "poly": f.poly} for f in extra]
+
     results = bootstrap_batched(
         source=src, out=os.path.join(work, "out"),
-        regions=[{"key": r.key, "poly": r.poly} for r in regions],
+        regions=poly_regions,
         base_url=base_url, strategy=strategy, batch_size=batch_size, on_log=log)
     published = _publish_tree(s3, os.path.join(work, "out"), bucket, log)
 

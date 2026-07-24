@@ -104,7 +104,7 @@ def bootstrap(
     out: str,
     regions: list[dict],
     base_url: str,
-    strategy: str = "smart",
+    strategy: str = "complete_ways",
     on_log: Callable[[str], None] | None = None,
 ) -> list[RegionResult]:
     """Split ``source`` into ``regions`` and stamp each with our replication header.
@@ -210,7 +210,7 @@ def bootstrap(
 
 
 def bootstrap_batched(*, source: str, out: str, regions: list[dict], base_url: str,
-                      strategy: str = "smart", batch_size: int = 0,
+                      strategy: str = "complete_ways", batch_size: int = 0,
                       on_log: Callable[[str], None] | None = None) -> list[RegionResult]:
     """Like :func:`bootstrap` but splits ``regions`` into batches.
 

@@ -45,6 +45,29 @@ def test_fetch_polygons_bad_scope(tmp_path):
         pf.fetch_polygons(str(tmp_path), scope="planets")
 
 
+def test_fetch_subregion_polys_fills_stragglers(tmp_path, monkeypatch):
+    """osmfr fallback: fetch only the requested sub-region polys, Geofabrik-keyed."""
+    def fake_urlopen(url, timeout=None):
+        if url.endswith("/"):  # dir listing
+            return _Resp(b'href="quebec.poly" href="nova_scotia.poly" href="ontario.poly"')
+        return _Resp(b"poly-bytes")
+    monkeypatch.setattr(pf.urllib.request, "urlopen", fake_urlopen)
+    # only the two stragglers self-gen missed
+    regions = pf.fetch_subregion_polys("north-america/canada", str(tmp_path),
+                                       only={"quebec", "nova-scotia"})
+    assert sorted(r.key for r in regions) == [
+        "north-america/canada/nova-scotia", "north-america/canada/quebec"]
+    assert all(os.path.exists(r.poly) for r in regions)
+
+
+def test_fetch_subregion_polys_no_dir_is_graceful(tmp_path, monkeypatch):
+    """A country osmfr has no sub-region dir for → empty list, never raises."""
+    def boom(url, timeout=None):
+        raise OSError("404")
+    monkeypatch.setattr(pf.urllib.request, "urlopen", boom)
+    assert pf.fetch_subregion_polys("europe/monaco", str(tmp_path)) == []
+
+
 # --- subnational (TIGER US states) ---
 
 def test_subnational_scope_routes_to_tiger(tmp_path, monkeypatch):
@@ -169,12 +192,65 @@ def test_build_admin_set_orchestration(tmp_path, monkeypatch):
     monkeypatch.setattr(ph, "generate_polygons",
                         lambda src, lvl, dest, on_log=None:
                         [BoundaryRegion("europe/germany/bayern", "/p", "Bayern", 4, "DE-BY")])
+    monkeypatch.setattr(ph, "fetch_subregion_polys", lambda *a, **k: [])
     monkeypatch.setattr(ph, "bootstrap_batched", lambda **k: list(k["regions"]))
     monkeypatch.setattr(ph, "_publish_tree", lambda s3, out, bucket, log: 1)
 
     out = ph.handle_build_admin_set({"source_region": "europe/germany", "admin_level": 4})
     assert out == {"region_count": 1, "published": 1}
     assert downloaded == ["europe/germany-latest.osm.pbf"]   # source pulled from the bucket
+
+
+def test_build_admin_set_osmfr_fallback_fills_stragglers(tmp_path, monkeypatch):
+    """Regions osmium can't self-generate are filled from osmfr and extracted too."""
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+    from osm_geocoder.tools._osm_tools.boundary_gen import BoundaryRegion
+    from osm_geocoder.tools._osm_tools.polygon_fetch import Region
+    extracted = {}
+
+    class FakeS3:
+        def download_file(self, bucket, key, dst): open(dst, "w").write("pbf")
+    monkeypatch.setattr(ph, "_s3_client", lambda ep=None: FakeS3())
+    monkeypatch.setattr(ph, "_scratch_dir", lambda: str(tmp_path))
+    # self-gen assembles only Ontario (a straggler province is missing)
+    monkeypatch.setattr(ph, "generate_polygons",
+                        lambda src, lvl, dest, on_log=None:
+                        [BoundaryRegion("north-america/canada/ontario", "/p/on", "Ontario", 4, "CA-ON")])
+    # osmfr lists ontario + quebec; only quebec should be added (ontario already have)
+    monkeypatch.setattr(ph, "fetch_subregion_polys", lambda ck, dest, on_log=None: [
+        Region("north-america/canada/ontario", "/o/on.poly"),
+        Region("north-america/canada/quebec", "/o/qc.poly")])
+    monkeypatch.setattr(ph, "bootstrap_batched",
+                        lambda **k: extracted.update(keys=[r["key"] for r in k["regions"]]) or list(k["regions"]))
+    monkeypatch.setattr(ph, "_publish_tree", lambda s3, out, bucket, log: len(extracted["keys"]))
+
+    out = ph.handle_build_admin_set({"source_region": "north-america/canada", "admin_level": 4})
+    assert sorted(extracted["keys"]) == [
+        "north-america/canada/ontario", "north-america/canada/quebec"]  # quebec filled, ontario not dup'd
+    assert out == {"region_count": 2, "published": 2}
+
+
+def test_build_admin_set_fallback_disabled(tmp_path, monkeypatch):
+    """osmfr_fallback=false skips the osmfr fetch entirely."""
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+    from osm_geocoder.tools._osm_tools.boundary_gen import BoundaryRegion
+    called = {"osmfr": False}
+
+    class FakeS3:
+        def download_file(self, bucket, key, dst): open(dst, "w").write("pbf")
+    monkeypatch.setattr(ph, "_s3_client", lambda ep=None: FakeS3())
+    monkeypatch.setattr(ph, "_scratch_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(ph, "generate_polygons",
+                        lambda src, lvl, dest, on_log=None:
+                        [BoundaryRegion("north-america/canada/ontario", "/p/on", "Ontario", 4, "CA-ON")])
+    def spy(*a, **k): called.__setitem__("osmfr", True); return []
+    monkeypatch.setattr(ph, "fetch_subregion_polys", spy)
+    monkeypatch.setattr(ph, "bootstrap_batched", lambda **k: list(k["regions"]))
+    monkeypatch.setattr(ph, "_publish_tree", lambda s3, out, bucket, log: 1)
+
+    ph.handle_build_admin_set({"source_region": "north-america/canada",
+                               "admin_level": 4, "osmfr_fallback": False})
+    assert called["osmfr"] is False
 
 
 def test_build_admin_set_requires_source():
