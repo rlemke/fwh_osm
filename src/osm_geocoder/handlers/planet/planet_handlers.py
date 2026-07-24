@@ -177,12 +177,13 @@ def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
     base_url = params.get("base_url") or "http://afl-minio:9000/osm-extracts"
     strategy = params.get("strategy") or "simple"
     # osmium extract holds one node-id bitmap (~1.5 GB over the planet id-space) PER
-    # region in a pass, so a big country (Canada is a 6.5 GB PBF) × batch=25 → ~37 GB
-    # → OOM (-9) on a 32 GB host. Keep the pass small enough to fit the smallest host.
+    # region in a pass, AND a single dense province (Ontario/Quebec) can approach the
+    # ~14 GB Docker-VM ceiling on its own — so the real limit is per-region, not just
+    # count. Default small; pass batch_size=1 for countries with dense sub-regions.
     try:
-        batch_size = int(params.get("batch_size") or 8)
+        batch_size = int(params.get("batch_size") or 4)
     except (TypeError, ValueError):
-        batch_size = 8
+        batch_size = 4
     log = _log(params)
     s3 = _s3_client(params.get("endpoint"))
 

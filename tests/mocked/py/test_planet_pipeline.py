@@ -108,6 +108,31 @@ def test_boundary_gen_filters_and_keys(tmp_path, monkeypatch):
     assert (tmp_path / "europe__germany__bavaria.geojson").exists()
 
 
+def test_boundary_gen_drops_subnational_without_country_iso(tmp_path, monkeypatch):
+    """A level>=4 relation mistagged at that level but lacking a country ISO 3166-2
+    (e.g. a Quebec island) must be DROPPED, not published under a flat root key."""
+    from osm_geocoder.tools._osm_tools import boundary_gen as bg
+
+    def fake_run(cmd):
+        if "export" in cmd:
+            seq = cmd[cmd.index("-o") + 1]
+            with open(seq, "w") as f:
+                # a real province (has ISO3166-2) — kept, hierarchical key
+                f.write('{"type":"Feature","properties":{"boundary":"administrative",'
+                        '"admin_level":"4","name":"Ontario","ISO3166-2":"CA-ON"},'
+                        '"geometry":{"type":"Polygon","coordinates":[]}}\n')
+                # an island mistagged admin_level=4, NO country ISO — must be dropped
+                f.write('{"type":"Feature","properties":{"boundary":"administrative",'
+                        '"admin_level":"4","name":"Ile Lavoie"},'
+                        '"geometry":{"type":"Polygon","coordinates":[]}}\n')
+    monkeypatch.setattr(bg, "_run", fake_run)
+
+    regions = bg.generate_polygons("src.pbf", 4, str(tmp_path))
+    assert [r.key for r in regions] == ["north-america/canada/ontario"]  # island dropped
+    assert not any("/" not in r.key for r in regions)                    # nothing flat/root
+    assert not (tmp_path / "ile-lavoie.geojson").exists()
+
+
 def test_geofabrik_key_mapping():
     from osm_geocoder.tools._osm_tools import boundary_gen as bg
     # country (level 2): English name, Geofabrik continent + slug

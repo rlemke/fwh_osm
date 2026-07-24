@@ -148,6 +148,8 @@ def generate_polygons(source: str, admin_level: int, dest: str, *,
     #    write one GeoJSON polygon per region.
     regions: list[BoundaryRegion] = []
     seen: set[str] = set()
+    dropped = 0  # sub-national relations mistagged at this level (islands/reserves) with no
+                 # resolvable ISO 3166-2 → they'd pollute the bucket root with flat keys.
     with open(seq, encoding="utf-8") as f:
         for line in f:
             line = line.strip().lstrip("\x1e")  # RFC 8142 record separator
@@ -167,6 +169,15 @@ def generate_polygons(source: str, admin_level: int, dest: str, *,
             iso = (props.get("ISO3166-1:alpha2") or props.get("ISO3166-2")
                    or props.get("ISO3166-1"))
             key = _geofabrik_key(name_local or name, name_en, iso, int(admin_level))
+            # A sub-national unit (level >= 4) must resolve to a hierarchical
+            # continent/country/region key (via ISO 3166-2). If it only produced a
+            # flat slug, it lacks a country ISO — i.e. it's an island/reserve
+            # mistagged at this admin_level, NOT a real state/province. Drop it, so
+            # generation stays clean (real provinces only) and nothing lands at the
+            # bucket root. A country (level 2) is allowed a flat fallback.
+            if int(admin_level) >= 4 and "/" not in key:
+                dropped += 1
+                continue
             if key in seen:
                 continue
             seen.add(key)
@@ -178,5 +189,6 @@ def generate_polygons(source: str, admin_level: int, dest: str, *,
             }))
             regions.append(BoundaryRegion(key, str(gj.resolve()), name, int(admin_level), iso))
 
-    log(f"generated {len(regions)} admin_level={admin_level} polygons")
+    suffix = f" (dropped {dropped} without a country ISO 3166-2)" if dropped else ""
+    log(f"generated {len(regions)} admin_level={admin_level} polygons{suffix}")
     return regions
