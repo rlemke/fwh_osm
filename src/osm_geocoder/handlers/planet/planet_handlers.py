@@ -19,6 +19,7 @@ from typing import Any
 from ...tools._osm_tools.planet_fetch import fetch_planet, update_planet
 from ...tools._osm_tools.polygon_fetch import fetch_polygons
 from ...tools._osm_tools.planet_bootstrap import bootstrap_batched
+from ...tools._osm_tools.boundary_gen import generate_polygons
 
 NAMESPACE = "osm.planet"
 
@@ -58,6 +59,21 @@ def handle_download_polygons(params: dict[str, Any]) -> dict[str, Any]:
     dest = params.get("dest") or os.path.join(_PLANET_DIR, "polys")
     scope = params.get("scope") or "all"
     regions = fetch_polygons(dest, scope=scope, on_log=_log(params))
+    return {"poly_dir": dest, "region_count": len(regions),
+            "regions": [{"key": r.key, "poly": r.poly} for r in regions]}
+
+
+def handle_generate_polygons(params: dict[str, Any]) -> dict[str, Any]:
+    """Generate region polygons from OSM admin boundaries (self-contained, no
+    external poly source). Source = the planet, or a continent/country extract for
+    a cheaper pass. Returns the same [{key, poly}] shape ExtractRegions consumes."""
+    source = params.get("source") or _planet_path("")
+    try:
+        admin_level = int(params.get("admin_level") or 2)
+    except (TypeError, ValueError):
+        admin_level = 2
+    dest = params.get("dest") or os.path.join(_PLANET_DIR, f"boundary_polys/admin{admin_level}")
+    regions = generate_polygons(source, admin_level, dest, on_log=_log(params))
     return {"poly_dir": dest, "region_count": len(regions),
             "regions": [{"key": r.key, "poly": r.poly} for r in regions]}
 
@@ -129,6 +145,7 @@ _DISPATCH = {
     f"{NAMESPACE}.DownloadPlanet": handle_download_planet,
     f"{NAMESPACE}.UpdatePlanet": handle_update_planet,
     f"{NAMESPACE}.DownloadPolygons": handle_download_polygons,
+    f"{NAMESPACE}.GenerateRegionPolygons": handle_generate_polygons,
     f"{NAMESPACE}.ExtractRegions": handle_extract_regions,
     f"{NAMESPACE}.PublishExtracts": handle_publish_extracts,
 }

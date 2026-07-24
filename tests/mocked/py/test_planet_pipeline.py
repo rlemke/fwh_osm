@@ -75,6 +75,41 @@ def test_bootstrap_poly_file_type():
     assert pb._poly_file_type("/x/france.poly") == "poly"             # osmfr
 
 
+# --- boundary_gen: region polygons from OSM admin boundaries (no external source) ---
+
+def test_boundary_slug():
+    from osm_geocoder.tools._osm_tools import boundary_gen as bg
+    assert bg._slug("North Rhine-Westphalia") == "north-rhine-westphalia"
+    assert bg._slug("New York") == "new-york"
+
+
+def test_boundary_gen_filters_and_keys(tmp_path, monkeypatch):
+    from osm_geocoder.tools._osm_tools import boundary_gen as bg
+
+    def fake_run(cmd):
+        # emulate `osmium export` writing a GeoJSONSeq of assembled boundaries
+        if "export" in cmd:
+            seq = cmd[cmd.index("-o") + 1]
+            with open(seq, "w") as f:
+                f.write('\x1e{"type":"Feature","properties":{"boundary":"administrative",'
+                        '"admin_level":"4","name":"Bavaria","ISO3166-2":"DE-BY"},'
+                        '"geometry":{"type":"Polygon","coordinates":[]}}\n')
+                f.write('{"type":"Feature","properties":{"boundary":"administrative",'
+                        '"admin_level":"2","name":"Germany"},"geometry":{"type":"Polygon"}}\n')  # wrong level
+                f.write('{"type":"Feature","properties":{"landuse":"forest"},"geometry":{}}\n')  # not admin
+    monkeypatch.setattr(bg, "_run", fake_run)
+
+    regions = bg.generate_polygons("src.pbf", 4, str(tmp_path))
+    assert [r.name for r in regions] == ["Bavaria"]   # only admin_level=4 boundaries kept
+    assert regions[0].key == "bavaria" and regions[0].iso == "DE-BY"
+    assert (tmp_path / "bavaria.geojson").exists()
+
+
+def test_generate_polygons_handler_registered():
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+    assert "osm.planet.GenerateRegionPolygons" in ph._DISPATCH
+
+
 # --- batched extract splits into osmium passes to bound RAM ---
 
 def test_bootstrap_batched_splits(monkeypatch):
@@ -125,8 +160,8 @@ def test_handler_dispatch_routes_and_rejects_unknown():
     from osm_geocoder.handlers.planet import planet_handlers as ph
     assert set(ph._DISPATCH) == {
         "osm.planet.DownloadPlanet", "osm.planet.UpdatePlanet",
-        "osm.planet.DownloadPolygons", "osm.planet.ExtractRegions",
-        "osm.planet.PublishExtracts",
+        "osm.planet.DownloadPolygons", "osm.planet.GenerateRegionPolygons",
+        "osm.planet.ExtractRegions", "osm.planet.PublishExtracts",
     }
     with pytest.raises(ValueError):
         ph.handle({"_facet_name": "osm.planet.Nope"})

@@ -30,6 +30,15 @@ namespace osm.planet {
         Geofabrik style (north-america/us/<state>) so region requests resolve. */
     event facet DownloadPolygons(dest: String = "", scope: String = "all") => (poly_dir: String, region_count: Long, regions: [Region]) with Effect(kind = "external") with Cost(tier = "moderate")
 
+    /** Generate region polygons FROM OSM admin boundaries — no external source.
+        Filters `boundary=administrative` relations at `admin_level` out of `source`
+        (the planet, or a continent/country extract for a cheaper pass) and
+        assembles them via osmium export. Self-contained + universal (any level,
+        worldwide); relations that fail assembly are skipped. `admin_level`:
+        2=country, 4=state/province, 6=county. Returns the same [Region] shape as
+        DownloadPolygons, so ExtractRegions consumes it interchangeably. */
+    event facet GenerateRegionPolygons(source: String = "", admin_level: Long = 2, dest: String = "") => (poly_dir: String, region_count: Long, regions: [Region]) with Effect(kind = "io") with Cost(tier = "expensive")
+
     /** Split the planet into per-region PBFs — one osmium pass per `batch_size`
         regions to bound RAM (osmium holds a node-id set per region). Writes the
         `<key>-latest.osm.pbf` + `<key>-updates/state.txt` tree under `out`. */
