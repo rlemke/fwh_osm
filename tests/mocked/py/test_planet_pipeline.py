@@ -81,6 +81,9 @@ def test_boundary_slug():
     from osm_geocoder.tools._osm_tools import boundary_gen as bg
     assert bg._slug("North Rhine-Westphalia") == "north-rhine-westphalia"
     assert bg._slug("New York") == "new-york"
+    assert bg._slug("Baden-Württemberg") == "baden-wuerttemberg"   # German umlaut -> ue
+    assert bg._slug("Thüringen") == "thueringen"
+    assert bg._slug("Île-de-France") == "ile-de-france"            # other diacritics stripped
 
 
 def test_boundary_gen_filters_and_keys(tmp_path, monkeypatch):
@@ -101,8 +104,23 @@ def test_boundary_gen_filters_and_keys(tmp_path, monkeypatch):
 
     regions = bg.generate_polygons("src.pbf", 4, str(tmp_path))
     assert [r.name for r in regions] == ["Bavaria"]   # only admin_level=4 boundaries kept
-    assert regions[0].key == "bavaria" and regions[0].iso == "DE-BY"
-    assert (tmp_path / "bavaria.geojson").exists()
+    assert regions[0].key == "europe/germany/bavaria" and regions[0].iso == "DE-BY"
+    assert (tmp_path / "europe__germany__bavaria.geojson").exists()
+
+
+def test_geofabrik_key_mapping():
+    from osm_geocoder.tools._osm_tools import boundary_gen as bg
+    # country (level 2): English name, Geofabrik continent + slug
+    assert bg._geofabrik_key("Deutschland", "Germany", "DE", 2) == "europe/germany"
+    assert bg._geofabrik_key("United States", "United States", "US", 2) == "north-america/us"
+    # sub-region (level 4): LOCAL name slug, country prefix from ISO3166-2
+    assert bg._geofabrik_key("Bayern", "Bavaria", "DE-BY", 4) == "europe/germany/bayern"
+    assert bg._geofabrik_key("California", "California", "US-CA", 4) == "north-america/us/california"
+    # Geofabrik's idiosyncrasies: Russia separate, Mexico under central-america
+    assert bg._geofabrik_key("Россия", "Russia", "RU", 2) == "russia/russia"
+    assert bg._geofabrik_key("México", "Mexico", "MX", 2) == "central-america/mexico"
+    # no ISO/continent -> flat fallback
+    assert bg._geofabrik_key("Nowhereland", None, None, 2) == "nowhereland"
 
 
 def test_generate_polygons_handler_registered():

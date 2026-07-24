@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -39,7 +40,73 @@ class BoundaryError(RuntimeError):
 
 
 def _slug(s: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+    """Geofabrik-style slug: German umlauts transliterated (ü→ue, ß→ss …), other
+    diacritics stripped (é→e), then lowercased + hyphenated."""
+    s = s.lower()
+    for a, b in (("ü", "ue"), ("ö", "oe"), ("ä", "ae"), ("ß", "ss")):
+        s = s.replace(a, b)
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+
+
+# --- Geofabrik-style keying -------------------------------------------------
+# "Continent" is a Geofabrik grouping, not an OSM admin concept, so it comes from
+# a static country→continent map keyed by ISO 3166-1 alpha-2. Geofabrik's grouping
+# is idiosyncratic: Mexico + the Caribbean sit under central-america, Russia is its
+# own top level, Turkey under europe. Countries absent here fall back to a flat key.
+_ISO_CONTINENT: dict[str, str] = {}
+
+
+def _reg(continent: str, codes: str) -> None:
+    _ISO_CONTINENT.update({c: continent for c in codes.split()})
+
+
+_reg("europe", "AL AD AT BY BE BA BG HR CY CZ DK EE FO FI FR DE GI GR GG HU IS IE "
+               "IM IT JE XK LV LI LT LU MT MD MC ME NL MK NO PL PT RO SM RS SK SI "
+               "ES SE CH TR UA GB VA")
+_reg("russia", "RU")
+_reg("north-america", "CA US GL BM PM")
+_reg("central-america", "AI AG AW BS BB BZ VG KY CR CU CW DM DO SV GD GP GT HT HN "
+                        "JM MQ MX MS NI PA PR BL KN LC MF VC SX TT TC VI")
+_reg("south-america", "AR BO BR CL CO EC FK GF GY PY PE SR UY VE")
+_reg("africa", "DZ AO BJ BW BF BI CV CM CF TD KM CG CD CI DJ EG GQ ER SZ ET GA GM "
+               "GH GN GW KE LS LR LY MG MW ML MR MU MA MZ NA NE NG RW ST SN SC SL "
+               "SO ZA SS SD TZ TG TN UG EH ZM ZW")
+_reg("asia", "AF AM AZ BH BD BT BN KH CN GE HK IN ID IR IQ IL JP JO KZ KW KG LA LB "
+             "MO MY MV MN MM NP KP OM PK PS PH QA SA SG KR LK SY TW TJ TH TL TM AE "
+             "UZ VN YE")
+_reg("australia-oceania", "AS AU CK FJ PF GU KI MH FM NR NC NZ NU NF MP PW PG PN WS "
+                          "SB TK TO TV VU WF")
+
+# Geofabrik country-PATH slug where it differs from the English name slug, and the
+# country prefix for sub-national keys (the federal/large countries that have
+# admin_level>=4 extracts worth pre-generating). Others fall back to a flat key.
+_ISO_COUNTRY_SLUG: dict[str, str] = {
+    "US": "us", "GB": "great-britain", "RU": "russia",
+    "CA": "canada", "MX": "mexico", "BR": "brazil", "AR": "argentina",
+    "DE": "germany", "FR": "france", "IT": "italy", "ES": "spain", "PL": "poland",
+    "NL": "netherlands", "AT": "austria", "CH": "switzerland", "BE": "belgium",
+    "AU": "australia", "IN": "india", "JP": "japan", "CN": "china",
+}
+
+
+def _geofabrik_key(name_local: str, name_en: str | None, iso: str | None,
+                   admin_level: int) -> str:
+    """Best-effort Geofabrik-exact key. Countries (level 2) use the ENGLISH name
+    (germany); sub-regions (level 4+) use the LOCAL name (bayern, not bavaria) —
+    matching Geofabrik's own inconsistent convention."""
+    iso = (iso or "").upper()
+    if admin_level == 2 and iso:
+        cont = _ISO_CONTINENT.get(iso)
+        if cont:
+            return f"{cont}/{_ISO_COUNTRY_SLUG.get(iso, _slug(name_en or name_local))}"
+    if admin_level >= 4 and "-" in iso:                 # ISO 3166-2, e.g. US-CA / DE-BY
+        country_iso = iso.split("-", 1)[0]
+        cont = _ISO_CONTINENT.get(country_iso)
+        country = _ISO_COUNTRY_SLUG.get(country_iso)
+        if cont and country:
+            return f"{cont}/{country}/{_slug(name_local)}"
+    return _slug(name_local)                             # flat fallback
 
 
 def _run(cmd: list[str]) -> None:
@@ -92,16 +159,18 @@ def generate_polygons(source: str, admin_level: int, dest: str, *,
                 continue
             if str(props.get("admin_level")) != str(admin_level):
                 continue
-            name = props.get("name:en") or props.get("name")
+            name_local = props.get("name")
+            name_en = props.get("name:en")
+            name = name_en or name_local
             if not name:
                 continue
-            key = _slug(name)
+            iso = (props.get("ISO3166-1:alpha2") or props.get("ISO3166-2")
+                   or props.get("ISO3166-1"))
+            key = _geofabrik_key(name_local or name, name_en, iso, int(admin_level))
             if key in seen:
                 continue
             seen.add(key)
-            iso = (props.get("ISO3166-1:alpha2") or props.get("ISO3166-2")
-                   or props.get("ISO3166-1"))
-            gj = dest_p / f"{key}.geojson"
+            gj = dest_p / f"{key.replace('/', '__')}.geojson"
             gj.write_text(json.dumps({
                 "type": "Feature",
                 "properties": {"name": name, "iso": iso, "admin_level": admin_level},
