@@ -45,6 +45,36 @@ def test_fetch_polygons_bad_scope(tmp_path):
         pf.fetch_polygons(str(tmp_path), scope="planets")
 
 
+# --- subnational (TIGER US states) ---
+
+def test_subnational_scope_routes_to_tiger(tmp_path, monkeypatch):
+    from osm_geocoder.tools._osm_tools import tiger_fetch as tf
+    seen = {}
+
+    def fake(dest, on_log=None):
+        seen["dest"] = dest
+        return [pf.Region("north-america/us/california", "/p/california.geojson")]
+    monkeypatch.setattr(tf, "fetch_tiger_states", fake)
+
+    out = pf.fetch_polygons(str(tmp_path), scope="subnational")
+    assert seen["dest"] == str(tmp_path)
+    assert out[0].key == "north-america/us/california"
+    assert "subnational" in pf.SCOPES
+
+
+def test_tiger_state_slug():
+    from osm_geocoder.tools._osm_tools import tiger_fetch as tf
+    assert tf._slug("California") == "california"
+    assert tf._slug("New York") == "new-york"
+    assert tf._slug("District of Columbia") == "district-of-columbia"
+
+
+def test_bootstrap_poly_file_type():
+    assert pb._poly_file_type("/x/california.geojson") == "geojson"   # TIGER state
+    assert pb._poly_file_type("/x/Y.JSON") == "geojson"
+    assert pb._poly_file_type("/x/france.poly") == "poly"             # osmfr
+
+
 # --- batched extract splits into osmium passes to bound RAM ---
 
 def test_bootstrap_batched_splits(monkeypatch):

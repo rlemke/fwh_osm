@@ -30,7 +30,7 @@ _CONTINENT_KEY = {"oceania": "australia-oceania"}
 CONTINENTS = ("africa", "asia", "central-america", "europe",
               "north-america", "oceania", "russia", "south-america")
 
-SCOPES = ("continents", "countries", "all")
+SCOPES = ("continents", "countries", "all", "subnational")
 
 
 class PolygonError(RuntimeError):
@@ -66,6 +66,10 @@ def fetch_polygons(dest: str, *, scope: str = "all",
     if scope not in SCOPES:
         raise PolygonError(f"scope must be one of {SCOPES}, got {scope!r}")
     log = on_log or (lambda _m: None)
+    if scope == "subnational":
+        # US states from Census TIGER (osmfr has no per-state polys; Geofabrik banned).
+        from . import tiger_fetch  # lazy: tiger_fetch imports Region from here
+        return tiger_fetch.fetch_tiger_states(dest, on_log=on_log)
     dest_p = Path(dest)
     dest_p.mkdir(parents=True, exist_ok=True)
     regions: list[Region] = []

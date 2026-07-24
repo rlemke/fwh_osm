@@ -24,9 +24,10 @@ namespace osm.planet {
         no-op status when replication is unreachable rather than failing. */
     event facet UpdatePlanet(planet_path: String, max_diff_mb: Long = 4096) => (planet_path: String, status: String, advanced: Boolean) with Effect(kind = "external") with Cost(tier = "expensive")
 
-    /** Download osmfr boundary polygons. `scope`: "continents", "countries"
-        (~199), or "all". Keys are normalised to Geofabrik style so the
-        pipeline's region requests resolve against the extracts. */
+    /** Download boundary polygons. `scope`: "continents", "countries" (~199), or
+        "all" (osmfr); or "subnational" — US states from Census TIGER (osmfr has no
+        per-state polys, Geofabrik is banned), as GeoJSON. Keys are normalised to
+        Geofabrik style (north-america/us/<state>) so region requests resolve. */
     event facet DownloadPolygons(dest: String = "", scope: String = "all") => (poly_dir: String, region_count: Long, regions: [Region]) with Effect(kind = "external") with Cost(tier = "moderate")
 
     /** Split the planet into per-region PBFs — one osmium pass per `batch_size`

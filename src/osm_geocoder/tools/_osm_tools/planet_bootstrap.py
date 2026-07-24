@@ -93,6 +93,11 @@ def _feature_counts(pbf: str) -> tuple[int, int]:
         return 0, 0
 
 
+def _poly_file_type(path: str) -> str:
+    """osmium polygon file type from extension: GeoJSON (TIGER states) or .poly (osmfr)."""
+    return "geojson" if path.lower().endswith((".geojson", ".json")) else "poly"
+
+
 def bootstrap(
     *,
     source: str,
@@ -142,7 +147,7 @@ def bootstrap(
             polyfile = str(pf.resolve())
         extracts.append({
             "output": f"{safe}.osm.pbf",
-            "polygon": {"file_name": polyfile, "file_type": "poly"},
+            "polygon": {"file_name": polyfile, "file_type": _poly_file_type(polyfile)},
         })
     cfg_path = out_dir / "extract-config.json"
     cfg_path.write_text(json.dumps({"directory": str(out_dir), "extracts": extracts}, indent=2))
