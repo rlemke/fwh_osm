@@ -176,6 +176,13 @@ def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
     bucket = params.get("bucket") or os.environ.get("FW_OSM_EXTRACT_BUCKET", "osm-extracts")
     base_url = params.get("base_url") or "http://afl-minio:9000/osm-extracts"
     strategy = params.get("strategy") or "simple"
+    # osmium extract holds one node-id bitmap (~1.5 GB over the planet id-space) PER
+    # region in a pass, so a big country (Canada is a 6.5 GB PBF) × batch=25 → ~37 GB
+    # → OOM (-9) on a 32 GB host. Keep the pass small enough to fit the smallest host.
+    try:
+        batch_size = int(params.get("batch_size") or 8)
+    except (TypeError, ValueError):
+        batch_size = 8
     log = _log(params)
     s3 = _s3_client(params.get("endpoint"))
 
@@ -188,7 +195,7 @@ def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
     results = bootstrap_batched(
         source=src, out=os.path.join(work, "out"),
         regions=[{"key": r.key, "poly": r.poly} for r in regions],
-        base_url=base_url, strategy=strategy, batch_size=25, on_log=log)
+        base_url=base_url, strategy=strategy, batch_size=batch_size, on_log=log)
     published = _publish_tree(s3, os.path.join(work, "out"), bucket, log)
 
     shutil.rmtree(work, ignore_errors=True)

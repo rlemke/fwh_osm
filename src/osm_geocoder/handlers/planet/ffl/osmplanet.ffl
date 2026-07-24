@@ -107,13 +107,16 @@ namespace osm.planet {
         boundaries, extracts each, and publishes, ALL on the one host that claims
         it — so it runs cleanly across the multi-host fleet with no cross-host
         local-file handoff. Scoped by the source: source_region="europe/germany",
-        admin_level=4 → German Länder; "north-america/canada", 4 → provinces. */
-    event facet BuildAdminSet(source_region: String, admin_level: Long = 4, base_url: String = "http://afl-minio:9000/osm-extracts", strategy: String = "simple", bucket: String = "osm-extracts") => (region_count: Long, published: Long) with Effect(kind = "io") with Cost(tier = "expensive")
+        admin_level=4 → German Länder; "north-america/canada", 4 → provinces.
+        Its `batch_size` (regions per osmium pass) is kept small by default: each
+        region held in a pass costs ~1.5 GB of node-id bitmap, so a big country
+        (Canada is a 6.5 GB PBF) at batch=25 needs ~37 GB → OOM on a 32 GB host. */
+    event facet BuildAdminSet(source_region: String, admin_level: Long = 4, base_url: String = "http://afl-minio:9000/osm-extracts", strategy: String = "simple", bucket: String = "osm-extracts", batch_size: Long = 8) => (region_count: Long, published: Long) with Effect(kind = "io") with Cost(tier = "expensive")
 
     /** Distributed fleet run of a self-generated admin set — one BuildAdminSet
         task, so it executes atomically on a single fleet host. */
-    workflow BuildAdminSetWorkflow(source_region: String, admin_level: Long = 4, base_url: String = "http://afl-minio:9000/osm-extracts", strategy: String = "simple", bucket: String = "osm-extracts") => (region_count: Long, published: Long) andThen {
-        result = osm.planet.BuildAdminSet(source_region = $.source_region, admin_level = $.admin_level, base_url = $.base_url, strategy = $.strategy, bucket = $.bucket)
+    workflow BuildAdminSetWorkflow(source_region: String, admin_level: Long = 4, base_url: String = "http://afl-minio:9000/osm-extracts", strategy: String = "simple", bucket: String = "osm-extracts", batch_size: Long = 8) => (region_count: Long, published: Long) andThen {
+        result = osm.planet.BuildAdminSet(source_region = $.source_region, admin_level = $.admin_level, base_url = $.base_url, strategy = $.strategy, bucket = $.bucket, batch_size = $.batch_size)
         yield BuildAdminSetWorkflow(region_count = result.region_count, published = result.published)
     }
 }
