@@ -83,9 +83,14 @@ def _run(cmd: list[str]) -> None:
 
 
 def _feature_counts(pbf: str) -> tuple[int, int]:
-    info = json.loads(subprocess.check_output(["osmium", "fileinfo", "-ej", pbf]))
-    cnt = info["data"]["count"]
-    return cnt["nodes"], cnt["ways"]
+    """(nodes, ways) via osmium fileinfo; (0, 0) if the file is missing/empty/unreadable."""
+    try:
+        info = json.loads(subprocess.check_output(
+            ["osmium", "fileinfo", "-ej", pbf], stderr=subprocess.DEVNULL))
+        cnt = info["data"]["count"]
+        return cnt["nodes"], cnt["ways"]
+    except (subprocess.CalledProcessError, KeyError, json.JSONDecodeError, FileNotFoundError):
+        return 0, 0
 
 
 def bootstrap(
@@ -153,6 +158,15 @@ def bootstrap(
         key = r["key"]
         safe = key.replace("/", "__")
         raw = out_dir / f"{safe}.osm.pbf"
+        # A region with zero features yields NO output file (a tiny country empty
+        # in the source) OR an empty one (an antimeridian extract) — either would
+        # crash the next osmium step. Skip it up front rather than publishing an
+        # empty extract.
+        nodes, ways = _feature_counts(str(raw)) if raw.exists() else (0, 0)
+        if nodes == 0:
+            log(f"  {key}: empty region (no features) — skipped")
+            raw.unlink(missing_ok=True)
+            continue
         final = out_dir / f"{key}-latest.osm.pbf"
         final.parent.mkdir(parents=True, exist_ok=True)
         # Geofabrik convention: the extract's replication URL is its own
@@ -177,7 +191,6 @@ def bootstrap(
         (upd / "state.txt").write_text(state_txt(seq, ts_iso))
 
         h = get_replication_header(str(final))
-        nodes, ways = _feature_counts(str(final))
         header_ok = (h.url == repl_url and h.sequence == seq)
         if not header_ok:
             raise BootstrapError(

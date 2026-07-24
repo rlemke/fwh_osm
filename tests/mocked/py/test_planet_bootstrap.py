@@ -113,6 +113,33 @@ def test_source_without_sequence_omits_it(tmp_path):
     assert "sequenceNumber" not in (out / "demo/x-updates" / "state.txt").read_text()
 
 
+def test_empty_region_is_skipped(tmp_path):
+    """A region with zero features (osmium writes no output file) is skipped, not
+    fatal — reproduces the antimeridian/empty-country crash."""
+    from osmium.replication import get_replication_header  # noqa: F401
+
+    xml = tmp_path / "src.osm"
+    xml.write_text(SOURCE_XML)  # nodes live around lon 0.2–0.8, lat 0.4–0.6
+    src = tmp_path / "s.osm.pbf"
+    subprocess.run(
+        ["osmium", "cat", str(xml), "-o", str(src), "--overwrite",
+         "--output-header=osmosis_replication_timestamp=2026-01-01T00:00:00Z"],
+        check=True,
+    )
+    out = tmp_path / "out"
+    results = pb.bootstrap(
+        source=str(src), out=str(out), base_url=BASE_URL, strategy="simple",
+        regions=[
+            {"key": "demo/has-data", "bbox": [0.0, 0.0, 1.0, 1.0]},        # contains the nodes
+            {"key": "demo/empty", "bbox": [0.85, 0.85, 0.95, 0.95]},       # in-bounds but empty
+        ],
+    )
+    keys = {r.key for r in results}
+    assert "demo/has-data" in keys          # produced
+    assert "demo/empty" not in keys         # skipped, not crashed
+    assert (out / "demo/has-data-latest.osm.pbf").exists()
+
+
 def test_bad_region_spec_raises(tmp_path):
     source = _make_source(tmp_path)
     with pytest.raises(pb.BootstrapError):
