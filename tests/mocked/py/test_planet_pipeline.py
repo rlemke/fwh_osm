@@ -174,6 +174,39 @@ def test_boundary_gen_drops_subnational_without_country_iso(tmp_path, monkeypatc
     assert not (tmp_path / "ile-lavoie.geojson").exists()
 
 
+def test_boundary_gen_country_prefix_counties_and_noise(tmp_path, monkeypatch):
+    """country_prefix: keeps county-level (no ISO) keyed under the source country,
+    but still drops level<=4 island noise that lacks ISO 3166-2."""
+    from osm_geocoder.tools._osm_tools import boundary_gen as bg
+
+    def county_export(cmd):
+        if "export" in cmd:
+            seq = cmd[cmd.index("-o") + 1]
+            with open(seq, "w") as f:
+                f.write('{"type":"Feature","properties":{"boundary":"administrative",'
+                        '"admin_level":"6","name":"Landkreis München"},'
+                        '"geometry":{"type":"Polygon","coordinates":[]}}\n')
+    monkeypatch.setattr(bg, "_run", county_export)
+    # level 6 county has NO ISO 3166-2 but is kept, keyed under the source country
+    c = bg.generate_polygons("de.pbf", 6, str(tmp_path), country_prefix="europe/germany")
+    assert [r.key for r in c] == ["europe/germany/landkreis-muenchen"]
+
+    def mixed_l4(cmd):
+        if "export" in cmd:
+            seq = cmd[cmd.index("-o") + 1]
+            with open(seq, "w") as f:
+                f.write('{"type":"Feature","properties":{"boundary":"administrative",'
+                        '"admin_level":"4","name":"Querétaro","ISO3166-2":"MX-QUE"},'
+                        '"geometry":{"type":"Polygon","coordinates":[]}}\n')
+                f.write('{"type":"Feature","properties":{"boundary":"administrative",'
+                        '"admin_level":"4","name":"Isla Noise"},'
+                        '"geometry":{"type":"Polygon","coordinates":[]}}\n')
+    monkeypatch.setattr(bg, "_run", mixed_l4)
+    # level 4 keyed under source country (fixes Mexico's continent split); no-ISO dropped
+    l = bg.generate_polygons("mx.pbf", 4, str(tmp_path), country_prefix="north-america/mexico")
+    assert [r.key for r in l] == ["north-america/mexico/queretaro"]  # not central-america; island dropped
+
+
 def test_geofabrik_key_mapping():
     from osm_geocoder.tools._osm_tools import boundary_gen as bg
     # country (level 2): English name, Geofabrik continent + slug

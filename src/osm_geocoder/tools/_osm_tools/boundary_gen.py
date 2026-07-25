@@ -119,12 +119,25 @@ def _run(cmd: list[str]) -> None:
 
 
 def generate_polygons(source: str, admin_level: int, dest: str, *,
+                      country_prefix: str | None = None,
                       on_log: Callable[[str], None] | None = None) -> list[BoundaryRegion]:
     """Extract + assemble ``admin_level`` boundary polygons from ``source`` into ``dest``.
 
     Returns one :class:`BoundaryRegion` per successfully-assembled admin unit, each
     with a GeoJSON polygon that ``planet_bootstrap`` can extract with (it infers the
     GeoJSON file type from the extension).
+
+    ``country_prefix`` (e.g. ``"north-america/mexico"``): when the caller already
+    knows the source country (BuildAdminSet passes ``source_region``), key every
+    sub-country unit as ``<country_prefix>/<local-name-slug>`` instead of via the
+    ISO→continent lookup. That (a) keeps the prefix CONSISTENT with the source
+    extract's own key — the ISO map is idiosyncratic (Mexico sits under
+    ``central-america`` there but the extract lives at ``north-america/mexico``) —
+    and (b) lets **county-level** units through: German *Kreise* (admin_level 6)
+    carry no ISO 3166-2, so the ISO-hierarchy filter would drop all of them. At
+    level ≤ 4 a real state still must carry ISO 3166-2 (else it's island noise
+    mistagged at that level → dropped); at level ≥ 6 that requirement is lifted.
+    Without ``country_prefix`` the standalone ISO→continent behaviour is unchanged.
     """
     log = on_log or (lambda _m: None)
     dest_p = Path(dest)
@@ -168,16 +181,24 @@ def generate_polygons(source: str, admin_level: int, dest: str, *,
                 continue
             iso = (props.get("ISO3166-1:alpha2") or props.get("ISO3166-2")
                    or props.get("ISO3166-1"))
-            key = _geofabrik_key(name_local or name, name_en, iso, int(admin_level))
-            # A sub-national unit (level >= 4) must resolve to a hierarchical
-            # continent/country/region key (via ISO 3166-2). If it only produced a
-            # flat slug, it lacks a country ISO — i.e. it's an island/reserve
-            # mistagged at this admin_level, NOT a real state/province. Drop it, so
-            # generation stays clean (real provinces only) and nothing lands at the
-            # bucket root. A country (level 2) is allowed a flat fallback.
-            if int(admin_level) >= 4 and "/" not in key:
-                dropped += 1
-                continue
+            if country_prefix:
+                # Known source country → key under it (consistent with the source
+                # extract's key). Level ≤ 4: a real state carries ISO 3166-2; without
+                # it, drop as island noise. Level ≥ 6 (counties): no ISO 3166-2 exists
+                # for those, so keep them.
+                has_iso2 = "-" in (iso or "").upper()
+                if int(admin_level) <= 4 and not has_iso2:
+                    dropped += 1
+                    continue
+                key = f"{country_prefix.strip('/')}/{_slug(name_local or name)}"
+            else:
+                # Standalone: derive the continent/country prefix from ISO 3166-2.
+                # A sub-national unit (level >= 4) that only produces a flat slug
+                # lacks a country ISO — island/reserve noise mistagged at this level.
+                key = _geofabrik_key(name_local or name, name_en, iso, int(admin_level))
+                if int(admin_level) >= 4 and "/" not in key:
+                    dropped += 1
+                    continue
             if key in seen:
                 continue
             seen.add(key)

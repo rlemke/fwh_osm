@@ -195,7 +195,11 @@ def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
     log(f"downloading source {source_region} from s3://{bucket}")
     s3.download_file(bucket, f"{source_region}-latest.osm.pbf", src)
 
-    regions = generate_polygons(src, admin_level, os.path.join(work, "polys"), on_log=log)
+    # country_prefix=source_region → sub-regions key consistently under the source
+    # country (fixes the ISO→continent quirk, e.g. mexico) and lets county-level
+    # (admin_level>=6, no ISO 3166-2) units through instead of being dropped.
+    regions = generate_polygons(src, admin_level, os.path.join(work, "polys"),
+                                country_prefix=source_region, on_log=log)
     poly_regions = [{"key": r.key, "poly": r.poly} for r in regions]
 
     # Straggler fallback: osmium export can't assemble some boundaries (nested
