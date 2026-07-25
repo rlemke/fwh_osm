@@ -304,6 +304,29 @@ def test_build_admin_set_fallback_disabled(tmp_path, monkeypatch):
     assert called["osmfr"] is False
 
 
+def test_build_admin_set_county_level_skips_fallback(tmp_path, monkeypatch):
+    """At admin_level>=6 (counties) the state-level fallback must NOT run — else it
+    would inject the country's states (e.g. Länder) into a county set."""
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+    from osm_geocoder.tools._osm_tools.boundary_gen import BoundaryRegion
+    called = {"fb": False}
+
+    class FakeS3:
+        def download_file(self, bucket, key, dst): open(dst, "w").write("pbf")
+    monkeypatch.setattr(ph, "_s3_client", lambda ep=None: FakeS3())
+    monkeypatch.setattr(ph, "_scratch_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(ph, "generate_polygons",
+                        lambda src, lvl, dest, country_prefix=None, on_log=None:
+                        [BoundaryRegion("europe/germany/landkreis-muenchen", "/p", "LK München", 6, None)])
+    def spy(*a, **k): called.__setitem__("fb", True); return []
+    monkeypatch.setattr(ph, "fetch_country_subregions", spy)
+    monkeypatch.setattr(ph, "bootstrap_batched", lambda **k: list(k["regions"]))
+    monkeypatch.setattr(ph, "_publish_tree", lambda s3, out, bucket, log: 1)
+
+    ph.handle_build_admin_set({"source_region": "europe/germany", "admin_level": 6})
+    assert called["fb"] is False  # no state-level fallback at county level
+
+
 def test_build_admin_set_requires_source():
     from osm_geocoder.handlers.planet import planet_handlers as ph
     with pytest.raises(ValueError):

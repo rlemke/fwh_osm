@@ -204,9 +204,11 @@ def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
 
     # Straggler fallback: osmium export can't assemble some boundaries (nested
     # sub-relations, member ways beyond the source poly). Fill the GAP from a
-    # region-aware ready-made poly source — TIGER for US states, osmfr elsewhere —
-    # only regions we didn't self-generate, sub-national levels only.
-    if subregion_fallback and admin_level >= 4:
+    # region-aware ready-made poly source — TIGER for US states, osmfr elsewhere.
+    # ONLY at admin_level==4: both providers ship STATE/PROVINCE-level polys and
+    # nothing deeper, so at county level (>=6) the fallback would wrongly inject the
+    # country's states (osmfr europe/germany/ lists the 16 Länder, not Kreise).
+    if subregion_fallback and admin_level == 4:
         have = {r["key"].rsplit("/", 1)[-1] for r in poly_regions}
         extra = [f for f in fetch_country_subregions(
                      source_region, os.path.join(work, "polys_fallback"), on_log=log)
