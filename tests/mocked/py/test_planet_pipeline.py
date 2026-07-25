@@ -241,7 +241,7 @@ def test_build_admin_set_orchestration(tmp_path, monkeypatch):
     monkeypatch.setattr(ph, "_s3_client", lambda ep=None: FakeS3())
     monkeypatch.setattr(ph, "_scratch_dir", lambda: str(tmp_path))
     monkeypatch.setattr(ph, "generate_polygons",
-                        lambda src, lvl, dest, on_log=None:
+                        lambda src, lvl, dest, country_prefix=None, on_log=None:
                         [BoundaryRegion("europe/germany/bayern", "/p", "Bayern", 4, "DE-BY")])
     monkeypatch.setattr(ph, "fetch_country_subregions", lambda *a, **k: [])
     monkeypatch.setattr(ph, "bootstrap_batched", lambda **k: list(k["regions"]))
@@ -265,7 +265,7 @@ def test_build_admin_set_osmfr_fallback_fills_stragglers(tmp_path, monkeypatch):
     monkeypatch.setattr(ph, "_scratch_dir", lambda: str(tmp_path))
     # self-gen assembles only Ontario (a straggler province is missing)
     monkeypatch.setattr(ph, "generate_polygons",
-                        lambda src, lvl, dest, on_log=None:
+                        lambda src, lvl, dest, country_prefix=None, on_log=None:
                         [BoundaryRegion("north-america/canada/ontario", "/p/on", "Ontario", 4, "CA-ON")])
     # osmfr lists ontario + quebec; only quebec should be added (ontario already have)
     monkeypatch.setattr(ph, "fetch_country_subregions", lambda ck, dest, on_log=None: [
@@ -292,7 +292,7 @@ def test_build_admin_set_fallback_disabled(tmp_path, monkeypatch):
     monkeypatch.setattr(ph, "_s3_client", lambda ep=None: FakeS3())
     monkeypatch.setattr(ph, "_scratch_dir", lambda: str(tmp_path))
     monkeypatch.setattr(ph, "generate_polygons",
-                        lambda src, lvl, dest, on_log=None:
+                        lambda src, lvl, dest, country_prefix=None, on_log=None:
                         [BoundaryRegion("north-america/canada/ontario", "/p/on", "Ontario", 4, "CA-ON")])
     def spy(*a, **k): called.__setitem__("osmfr", True); return []
     monkeypatch.setattr(ph, "fetch_country_subregions", spy)
