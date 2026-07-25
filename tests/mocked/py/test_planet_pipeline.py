@@ -356,7 +356,61 @@ def test_bootstrap_batched_single_pass(monkeypatch):
                         lambda **k: (calls.append(len(k["regions"])) or []))
     pb.bootstrap_batched(source="s", out="o", regions=[{"key": "a", "poly": "p"}],
                          base_url="b", batch_size=0)
-    assert calls == [1]  # batch_size 0 => single pass
+    assert calls == [1]  # one region, adaptive → one pass
+
+
+# --- adaptive memory-budgeted batching ---
+
+def _fake_bootstrap_ok(calls, oom_at=None):
+    def fake(*, source, out, regions, base_url, strategy, on_log=None, pass_stats=None):
+        calls.append(len(regions))
+        if oom_at is not None and len(regions) >= oom_at:
+            raise pb._OOMError("simulated OOM")
+        if pass_stats is not None:
+            pass_stats["peak_bytes"] = 0   # unmeasured
+        return [pb.RegionResult(r["key"], "", 0, 0, "", None, True) for r in regions]
+    return fake
+
+
+def test_adaptive_packs_by_memory_budget(monkeypatch):
+    calls = []
+    monkeypatch.setattr(pb, "_memory_ceiling_bytes", lambda: 10 * (1 << 30))  # 10 GB
+    monkeypatch.setattr(pb, "_load_region_cost", lambda d: 2 * (1 << 30))     # 2 GB/region
+    monkeypatch.setattr(pb, "bootstrap", _fake_bootstrap_ok(calls))
+    regions = [{"key": f"r{i}", "poly": "p"} for i in range(7)]
+    res = pb.bootstrap_batched(source="s", out="o", regions=regions, base_url="b", batch_size=0)
+    assert len(res) == 7
+    assert calls == [3, 3, 1]   # budget=7GB / 2GB ⇒ 3 regions per pass
+
+
+def test_adaptive_self_heals_on_oom(monkeypatch):
+    calls = []
+    monkeypatch.setattr(pb, "_memory_ceiling_bytes", lambda: 10 * (1 << 30))
+    monkeypatch.setattr(pb, "_load_region_cost", lambda d: 2 * (1 << 30))     # ⇒ first pass 3
+    monkeypatch.setattr(pb, "_save_region_cost", lambda d, v: None)
+    monkeypatch.setattr(pb, "bootstrap", _fake_bootstrap_ok(calls, oom_at=3))
+    regions = [{"key": f"r{i}", "poly": "p"} for i in range(4)]
+    res = pb.bootstrap_batched(source="s", out="o", regions=regions, base_url="b", batch_size=0)
+    assert len(res) == 4                 # all recovered
+    assert calls[0] == 3                 # first attempt OOMs at 3
+    assert max(calls[1:]) < 3            # retries strictly smaller
+
+
+def test_adaptive_single_region_over_budget_raises(monkeypatch):
+    monkeypatch.setattr(pb, "_memory_ceiling_bytes", lambda: 1 * (1 << 30))
+    monkeypatch.setattr(pb, "_load_region_cost", lambda d: 5 * (1 << 30))
+    monkeypatch.setattr(pb, "_save_region_cost", lambda d, v: None)
+    monkeypatch.setattr(pb, "bootstrap", _fake_bootstrap_ok([], oom_at=1))
+    with pytest.raises(pb.BootstrapError):   # can't shrink below one region
+        pb.bootstrap_batched(source="s", out="o", regions=[{"key": "big", "poly": "p"}],
+                             base_url="b", batch_size=0)
+
+
+def test_memory_ceiling_and_cost_sidecar(tmp_path):
+    assert pb._memory_ceiling_bytes() > (1 << 30)          # detects a real ceiling
+    pb._save_region_cost(str(tmp_path), 3 * (1 << 30))
+    assert pb._load_region_cost(str(tmp_path)) == 3 * (1 << 30)   # persists + reloads
+    assert pb._load_region_cost(None) == pb._DEFAULT_REGION_BYTES  # cold-start default
 
 
 # --- planet fetch/update ---

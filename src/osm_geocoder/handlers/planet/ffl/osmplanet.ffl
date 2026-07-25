@@ -108,18 +108,20 @@ namespace osm.planet {
         it — so it runs cleanly across the multi-host fleet with no cross-host
         local-file handoff. Scoped by the source: source_region="europe/germany",
         admin_level=4 → German Länder; "north-america/canada", 4 → provinces.
-        Its `batch_size` (regions per osmium pass) is kept small by default: each
-        region held in a pass costs ~1.5 GB of node-id bitmap, so a big country
-        (Canada is a 6.5 GB PBF) at batch=25 needs ~37 GB → OOM on a 32 GB host.
-        `osmfr_fallback` (default true): fill sub-national stragglers osmium export
-        can't assemble (nested sub-relations, member ways beyond the source poly —
-        e.g. Quebec/Nova Scotia/Nunavut) from a region-aware ready-made poly source:
-        TIGER for US states (osmfr has none), osmfr for everywhere else. */
-    event facet BuildAdminSet(source_region: String, admin_level: Long = 4, base_url: String = "http://afl-minio:9000/osm-extracts", strategy: String = "complete_ways", bucket: String = "osm-extracts", batch_size: Long = 4, osmfr_fallback: Boolean = true) => (region_count: Long, published: Long) with Effect(kind = "io") with Cost(tier = "expensive")
+        `batch_size` 0 = ADAPTIVE (default): the batcher detects the memory ceiling
+        (cgroup / the Docker-VM's real RAM), keeps each osmium pass under a fraction
+        of it, MEASURES the peak, learns a per-region cost, and self-heals on OOM —
+        no more hand-guessing (a dense province ~1.5 GB of node-id bitmap alone, and
+        batch=25 over a big country would need ~37 GB). Pass batch_size>0 to force a
+        fixed count. `osmfr_fallback` (default true): fill sub-national stragglers
+        osmium export can't assemble (nested sub-relations, member ways beyond the
+        source poly — e.g. Quebec/Nova Scotia/Nunavut) from a region-aware ready-made
+        poly source: TIGER for US states (osmfr has none), osmfr for everywhere else. */
+    event facet BuildAdminSet(source_region: String, admin_level: Long = 4, base_url: String = "http://afl-minio:9000/osm-extracts", strategy: String = "complete_ways", bucket: String = "osm-extracts", batch_size: Long = 0, osmfr_fallback: Boolean = true) => (region_count: Long, published: Long) with Effect(kind = "io") with Cost(tier = "expensive")
 
     /** Distributed fleet run of a self-generated admin set — one BuildAdminSet
         task, so it executes atomically on a single fleet host. */
-    workflow BuildAdminSetWorkflow(source_region: String, admin_level: Long = 4, base_url: String = "http://afl-minio:9000/osm-extracts", strategy: String = "complete_ways", bucket: String = "osm-extracts", batch_size: Long = 4, osmfr_fallback: Boolean = true) => (region_count: Long, published: Long) andThen {
+    workflow BuildAdminSetWorkflow(source_region: String, admin_level: Long = 4, base_url: String = "http://afl-minio:9000/osm-extracts", strategy: String = "complete_ways", bucket: String = "osm-extracts", batch_size: Long = 0, osmfr_fallback: Boolean = true) => (region_count: Long, published: Long) andThen {
         result = osm.planet.BuildAdminSet(source_region = $.source_region, admin_level = $.admin_level, base_url = $.base_url, strategy = $.strategy, bucket = $.bucket, batch_size = $.batch_size, osmfr_fallback = $.osmfr_fallback)
         yield BuildAdminSetWorkflow(region_count = result.region_count, published = result.published)
     }

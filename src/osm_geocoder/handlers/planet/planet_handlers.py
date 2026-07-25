@@ -179,14 +179,16 @@ def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
     # Region-aware straggler fallback (TIGER for US states, osmfr elsewhere). The
     # param stays named osmfr_fallback for back-compat; it's the on/off toggle.
     subregion_fallback = params.get("osmfr_fallback", True) is not False
-    # osmium extract holds one node-id bitmap (~1.5 GB over the planet id-space) PER
-    # region in a pass, AND a single dense province (Ontario/Quebec) can approach the
-    # ~14 GB Docker-VM ceiling on its own — so the real limit is per-region, not just
-    # count. Default small; pass batch_size=1 for countries with dense sub-regions.
+    # batch_size 0 = ADAPTIVE (default): bootstrap_batched detects the memory ceiling,
+    # keeps each osmium pass under a fraction of it, measures the real peak, learns a
+    # per-region cost (persisted), and self-heals on OOM. Pass batch_size>0 to force a
+    # fixed count. (osmium holds a ~1.5 GB node-id bitmap per region + a dense province
+    # can approach the ~14 GB Docker-VM ceiling alone, which is what the batcher sizes for.)
     try:
-        batch_size = int(params.get("batch_size") or 4)
+        batch_size = int(params.get("batch_size") or 0)
     except (TypeError, ValueError):
-        batch_size = 4
+        batch_size = 0
+    cost_dir = os.environ.get("FW_OSM_COST_DIR") or os.path.expanduser("~/.facetwork/osm-cost")
     log = _log(params)
     s3 = _s3_client(params.get("endpoint"))
 
@@ -221,7 +223,8 @@ def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
     results = bootstrap_batched(
         source=src, out=os.path.join(work, "out"),
         regions=poly_regions,
-        base_url=base_url, strategy=strategy, batch_size=batch_size, on_log=log)
+        base_url=base_url, strategy=strategy, batch_size=batch_size,
+        cost_state_dir=cost_dir, on_log=log)
     published = _publish_tree(s3, os.path.join(work, "out"), bucket, log)
 
     shutil.rmtree(work, ignore_errors=True)

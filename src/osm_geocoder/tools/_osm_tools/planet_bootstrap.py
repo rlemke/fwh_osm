@@ -24,7 +24,10 @@ the update path).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
 from datetime import timezone
 from pathlib import Path
@@ -33,6 +36,16 @@ from typing import Callable, Iterable
 from osmium.replication import get_replication_header
 
 STRATEGIES = ("simple", "complete_ways", "smart")
+
+# Adaptive-batching defaults. osmium extract holds a per-region node-id set (plus,
+# for complete_ways/smart, a node-location index), so peak RAM scales with the
+# regions packed into one pass. Rather than guess a fixed batch_size, we detect the
+# host/container memory CEILING, keep each pass under `budget = ceiling * FRACTION`,
+# MEASURE the pass's real peak, and learn a per-region cost — self-healing on OOM.
+_MEM_FRACTION = float(os.environ.get("FW_OSM_MEM_FRACTION", "0.7"))
+_DEFAULT_REGION_BYTES = int(2.0 * (1 << 30))   # cold-start estimate (2 GiB/region)
+_MAX_REGIONS_PER_PASS = 64                     # backstop so tiny regions don't over-pack
+_COST_SIDECAR = ".region_cost_est.json"        # persists the learned per-region cost
 
 
 class BootstrapError(RuntimeError):
@@ -82,6 +95,101 @@ def _run(cmd: list[str]) -> None:
         raise BootstrapError(f"command failed ({exc.returncode}): {' '.join(cmd)}") from exc
 
 
+class _OOMError(BootstrapError):
+    """A pass was killed by the OOM killer (SIGKILL / -9) or raised MemoryError —
+    recoverable by re-running the same regions in a smaller pass."""
+
+
+def _memory_ceiling_bytes() -> int:
+    """The real memory ceiling this process runs under — the number to size passes
+    against. Prefer the cgroup limit (a container's ACTUAL cap), then the machine's
+    total RAM. On a Docker-Desktop runner the container's `memory.max` is often
+    "max" (unlimited) but the Linux VM only has ~14 GiB, so `/proc/meminfo` is what
+    reveals the true ceiling — exactly the number we kept discovering by hand."""
+    for path in ("/sys/fs/cgroup/memory.max",                       # cgroup v2
+                 "/sys/fs/cgroup/memory/memory.limit_in_bytes"):    # cgroup v1
+        try:
+            v = open(path).read().strip()
+            if v.isdigit() and int(v) < (1 << 62):                  # not "max"/unset
+                return int(v)
+        except OSError:
+            pass
+    try:
+        for line in open("/proc/meminfo"):
+            if line.startswith("MemTotal"):
+                return int(line.split()[1]) * 1024
+    except OSError:
+        pass
+    try:
+        import psutil
+        return int(psutil.virtual_memory().total)
+    except Exception:
+        return 8 * (1 << 30)   # conservative fallback
+
+
+def _run_measured(cmd: list[str]) -> int:
+    """Run ``cmd`` and return the peak resident memory (bytes) of the child (incl.
+    its children), polled best-effort via psutil. Raises :class:`_OOMError` when the
+    child is SIGKILL'd (returncode -9 = the OOM killer), else :class:`BootstrapError`.
+    Falls back to an unmeasured run (peak 0) when psutil is unavailable."""
+    try:
+        import psutil
+    except ImportError:
+        _run(cmd)
+        return 0
+    try:
+        proc = subprocess.Popen(cmd)
+    except FileNotFoundError as exc:
+        raise BootstrapError(f"required binary not found: {cmd[0]}") from exc
+    peak = 0
+    try:
+        p = psutil.Process(proc.pid)
+        while proc.poll() is None:
+            try:
+                rss = p.memory_info().rss
+                for c in p.children(recursive=True):
+                    try:
+                        rss += c.memory_info().rss
+                    except psutil.Error:
+                        pass
+                peak = max(peak, rss)
+            except psutil.Error:
+                break
+            time.sleep(0.3)
+    finally:
+        rc = proc.wait()
+    if rc == -9 or rc == 137:                                  # SIGKILL — OOM killer
+        raise _OOMError(f"osmium killed (OOM, rc={rc}): {' '.join(cmd[:3])}…")
+    if rc != 0:
+        raise BootstrapError(f"command failed ({rc}): {' '.join(cmd)}")
+    return peak
+
+
+def _load_region_cost(state_dir: str | None) -> int:
+    """Learned per-region peak-cost estimate (bytes), persisted across runs so the
+    NEXT split starts calibrated instead of cold. Cold-start default otherwise."""
+    if state_dir:
+        try:
+            v = json.loads(open(os.path.join(state_dir, _COST_SIDECAR)).read())
+            est = int(v.get("region_cost_bytes", 0))
+            if est > 0:
+                return est
+        except (OSError, ValueError, KeyError):
+            pass
+    return _DEFAULT_REGION_BYTES
+
+
+def _save_region_cost(state_dir: str | None, region_cost_bytes: int) -> None:
+    if not state_dir:
+        return
+    try:
+        os.makedirs(state_dir, exist_ok=True)
+        with open(os.path.join(state_dir, _COST_SIDECAR), "w") as f:
+            json.dump({"region_cost_bytes": int(region_cost_bytes)}, f)
+    except OSError:
+        pass
+
+
 def _feature_counts(pbf: str) -> tuple[int, int]:
     """(nodes, ways) via osmium fileinfo; (0, 0) if the file is missing/empty/unreadable."""
     try:
@@ -106,6 +214,7 @@ def bootstrap(
     base_url: str,
     strategy: str = "complete_ways",
     on_log: Callable[[str], None] | None = None,
+    pass_stats: dict | None = None,
 ) -> list[RegionResult]:
     """Split ``source`` into ``regions`` and stamp each with our replication header.
 
@@ -152,9 +261,15 @@ def bootstrap(
     cfg_path = out_dir / "extract-config.json"
     cfg_path.write_text(json.dumps({"directory": str(out_dir), "extracts": extracts}, indent=2))
 
-    # 3. Single pass over the source -> all regional PBFs.
+    # 3. Single pass over the source -> all regional PBFs. When pass_stats is given,
+    #    measure the child's peak RSS so the adaptive batcher can learn the cost.
     log(f"osmium extract ({strategy}) -> {len(extracts)} region(s)")
-    _run(["osmium", "extract", "-c", str(cfg_path), source, "--strategy", strategy, "--overwrite"])
+    extract_cmd = ["osmium", "extract", "-c", str(cfg_path), source,
+                   "--strategy", strategy, "--overwrite"]
+    if pass_stats is not None:
+        pass_stats["peak_bytes"] = _run_measured(extract_cmd)
+    else:
+        _run(extract_cmd)
 
     # 4. Stamp OUR replication header on each output, publish the Geofabrik-style
     #    layout, and verify the round-trip through the delta path's reader.
@@ -211,23 +326,80 @@ def bootstrap(
 
 def bootstrap_batched(*, source: str, out: str, regions: list[dict], base_url: str,
                       strategy: str = "complete_ways", batch_size: int = 0,
+                      cost_state_dir: str | None = None,
                       on_log: Callable[[str], None] | None = None) -> list[RegionResult]:
-    """Like :func:`bootstrap` but splits ``regions`` into batches.
+    """Split ``regions`` into memory-bounded osmium passes.
 
-    osmium holds a node-id set per region in one extract pass, so extracting
-    hundreds of regions at once can exhaust RAM. ``batch_size`` (0 = single pass)
-    bounds peak memory by processing that many regions per osmium pass, at the
-    cost of re-reading ``source`` once per batch. Returns the concatenated results.
+    osmium holds a node-id set per region in one extract pass, so extracting many
+    regions at once can exhaust RAM. Two modes:
+
+    - ``batch_size > 0`` — fixed count per pass (manual override / legacy).
+    - ``batch_size <= 0`` — **adaptive** (default): detect the memory ceiling, keep
+      each pass under a fraction of it, MEASURE the real peak, learn a per-region
+      cost, and self-heal on OOM by re-running the offending regions in a smaller
+      pass. See :func:`_bootstrap_adaptive`.
+
+    Each pass re-reads ``source``. Returns the concatenated results.
     """
     log = on_log or (lambda _m: None)
-    if batch_size <= 0 or batch_size >= len(regions):
-        return bootstrap(source=source, out=out, regions=regions, base_url=base_url,
-                         strategy=strategy, on_log=on_log)
+    if batch_size and batch_size > 0:
+        if batch_size >= len(regions):
+            return bootstrap(source=source, out=out, regions=regions, base_url=base_url,
+                             strategy=strategy, on_log=on_log)
+        results: list[RegionResult] = []
+        nbatches = (len(regions) + batch_size - 1) // batch_size
+        for i in range(0, len(regions), batch_size):
+            batch = regions[i:i + batch_size]
+            log(f"batch {i // batch_size + 1}/{nbatches}: {len(batch)} regions")
+            results.extend(bootstrap(source=source, out=out, regions=batch, base_url=base_url,
+                                     strategy=strategy, on_log=on_log))
+        return results
+    return _bootstrap_adaptive(source=source, out=out, regions=regions, base_url=base_url,
+                               strategy=strategy, cost_state_dir=cost_state_dir, log=log)
+
+
+def _bootstrap_adaptive(*, source, out, regions, base_url, strategy, cost_state_dir, log):
+    """Memory-budgeted, self-healing region split. Sizes each pass from a learned
+    per-region cost against the detected ceiling, measures the actual peak, updates
+    the estimate (EWMA, persisted), and on OOM re-runs the same regions smaller."""
+    ceiling = _memory_ceiling_bytes()
+    budget = max(int(ceiling * _MEM_FRACTION), 1)
+    est = _load_region_cost(cost_state_dir)   # bytes/region (persisted or cold default)
+    log(f"adaptive: ceiling {ceiling / 1e9:.1f}GB, budget {budget / 1e9:.1f}GB "
+        f"(x{_MEM_FRACTION}), start est {est / 1e9:.2f}GB/region")
+
     results: list[RegionResult] = []
-    nbatches = (len(regions) + batch_size - 1) // batch_size
-    for i in range(0, len(regions), batch_size):
-        batch = regions[i:i + batch_size]
-        log(f"batch {i // batch_size + 1}/{nbatches}: {len(batch)} regions")
-        results.extend(bootstrap(source=source, out=out, regions=batch, base_url=base_url,
-                                 strategy=strategy, on_log=on_log))
+    remaining = list(regions)
+    total = len(remaining)
+    done = 0
+    while remaining:
+        n = max(1, min(len(remaining), _MAX_REGIONS_PER_PASS, int(budget // max(est, 1))))
+        batch = remaining[:n]
+        log(f"adaptive pass: {n} region(s) [{done}/{total} done] "
+            f"(est {est * n / 1e9:.1f}GB vs budget {budget / 1e9:.1f}GB)")
+        stats: dict = {}
+        try:
+            res = bootstrap(source=source, out=out, regions=batch, base_url=base_url,
+                            strategy=strategy, on_log=log, pass_stats=stats)
+        except _OOMError as exc:
+            if n <= 1:
+                raise BootstrapError(
+                    f"single region exceeds the memory budget ({budget / 1e9:.1f}GB): "
+                    f"{batch[0].get('key')!r}") from exc
+            # Raise the estimate so the retry packs fewer, then re-run the SAME
+            # remaining regions (nothing consumed) in a smaller pass.
+            est = max(int(est * 1.8), budget // (n - 1) + 1)
+            log(f"adaptive: OOM at {n} region(s) → raise est to {est / 1e9:.2f}GB/region, retry smaller")
+            _save_region_cost(cost_state_dir, est)
+            continue
+        results.extend(res)
+        remaining = remaining[n:]
+        done += n
+        peak = stats.get("peak_bytes") or 0
+        if peak > 0:
+            per = peak / n
+            est = int(0.5 * est + 0.5 * per)          # EWMA toward the measured cost
+            log(f"adaptive: pass peak {peak / 1e9:.1f}GB ({per / 1e9:.2f}GB/region) "
+                f"→ est {est / 1e9:.2f}GB/region")
+            _save_region_cost(cost_state_dir, est)
     return results
