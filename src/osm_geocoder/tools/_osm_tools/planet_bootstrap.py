@@ -335,6 +335,7 @@ def bootstrap(
 def bootstrap_batched(*, source: str, out: str, regions: list[dict], base_url: str,
                       strategy: str = "complete_ways", batch_size: int = 0,
                       cost_state_dir: str | None = None,
+                      on_pass: Callable[[list[RegionResult]], None] | None = None,
                       on_log: Callable[[str], None] | None = None) -> list[RegionResult]:
     """Split ``regions`` into memory-bounded osmium passes.
 
@@ -350,23 +351,30 @@ def bootstrap_batched(*, source: str, out: str, regions: list[dict], base_url: s
     Each pass re-reads ``source``. Returns the concatenated results.
     """
     log = on_log or (lambda _m: None)
+    emit = on_pass or (lambda _r: None)
     if batch_size and batch_size > 0:
         if batch_size >= len(regions):
-            return bootstrap(source=source, out=out, regions=regions, base_url=base_url,
-                             strategy=strategy, on_log=on_log)
+            res = bootstrap(source=source, out=out, regions=regions, base_url=base_url,
+                            strategy=strategy, on_log=on_log)
+            emit(res)
+            return res
         results: list[RegionResult] = []
         nbatches = (len(regions) + batch_size - 1) // batch_size
         for i in range(0, len(regions), batch_size):
             batch = regions[i:i + batch_size]
             log(f"batch {i // batch_size + 1}/{nbatches}: {len(batch)} regions")
-            results.extend(bootstrap(source=source, out=out, regions=batch, base_url=base_url,
-                                     strategy=strategy, on_log=on_log))
+            res = bootstrap(source=source, out=out, regions=batch, base_url=base_url,
+                            strategy=strategy, on_log=on_log)
+            emit(res)                        # publish this batch now (durable progress)
+            results.extend(res)
         return results
     return _bootstrap_adaptive(source=source, out=out, regions=regions, base_url=base_url,
-                               strategy=strategy, cost_state_dir=cost_state_dir, log=log)
+                               strategy=strategy, cost_state_dir=cost_state_dir,
+                               on_pass=emit, log=log)
 
 
-def _bootstrap_adaptive(*, source, out, regions, base_url, strategy, cost_state_dir, log):
+def _bootstrap_adaptive(*, source, out, regions, base_url, strategy, cost_state_dir,
+                        on_pass, log):
     """Memory-budgeted, self-healing region split. Sizes each pass from a learned
     per-region cost against the detected ceiling, measures the actual peak, updates
     the estimate (EWMA, persisted), and on OOM re-runs the same regions smaller."""
@@ -400,6 +408,7 @@ def _bootstrap_adaptive(*, source, out, regions, base_url, strategy, cost_state_
             log(f"adaptive: OOM at {n} region(s) → raise est to {est / 1e9:.2f}GB/region, retry smaller")
             _save_region_cost(cost_state_dir, est)
             continue
+        on_pass(res)                      # publish this pass now (durable progress)
         results.extend(res)
         remaining = remaining[n:]
         done += n

@@ -227,6 +227,16 @@ def test_generate_polygons_handler_registered():
     assert "osm.planet.GenerateRegionPolygons" in ph._DISPATCH
 
 
+def _bb_publishing(**k):
+    """Stand-in for bootstrap_batched: drives the on_pass callback (incremental
+    publish) with one result object per region, like the real batcher."""
+    from types import SimpleNamespace
+    res = [SimpleNamespace(key=r["key"]) for r in k["regions"]]
+    if k.get("on_pass"):
+        k["on_pass"](res)
+    return res
+
+
 def test_build_admin_set_orchestration(tmp_path, monkeypatch):
     """The single-task facet downloads the source, generates, extracts, publishes —
     all in one handler (no cross-host handoff)."""
@@ -244,11 +254,10 @@ def test_build_admin_set_orchestration(tmp_path, monkeypatch):
                         lambda src, lvl, dest, country_prefix=None, on_log=None:
                         [BoundaryRegion("europe/germany/bayern", "/p", "Bayern", 4, "DE-BY")])
     monkeypatch.setattr(ph, "fetch_country_subregions", lambda *a, **k: [])
-    monkeypatch.setattr(ph, "bootstrap_batched", lambda **k: list(k["regions"]))
-    monkeypatch.setattr(ph, "_publish_tree", lambda s3, out, bucket, log: 1)
+    monkeypatch.setattr(ph, "bootstrap_batched", _bb_publishing)
 
     out = ph.handle_build_admin_set({"source_region": "europe/germany", "admin_level": 4})
-    assert out == {"region_count": 1, "published": 1}
+    assert out == {"region_count": 1, "published": 1}   # published incrementally via on_pass
     assert downloaded == ["europe/germany-latest.osm.pbf"]   # source pulled from the bucket
 
 
@@ -271,9 +280,10 @@ def test_build_admin_set_osmfr_fallback_fills_stragglers(tmp_path, monkeypatch):
     monkeypatch.setattr(ph, "fetch_country_subregions", lambda ck, dest, on_log=None: [
         Region("north-america/canada/ontario", "/o/on.poly"),
         Region("north-america/canada/quebec", "/o/qc.poly")])
-    monkeypatch.setattr(ph, "bootstrap_batched",
-                        lambda **k: extracted.update(keys=[r["key"] for r in k["regions"]]) or list(k["regions"]))
-    monkeypatch.setattr(ph, "_publish_tree", lambda s3, out, bucket, log: len(extracted["keys"]))
+    def bb(**k):
+        extracted["keys"] = [r["key"] for r in k["regions"]]
+        return _bb_publishing(**k)
+    monkeypatch.setattr(ph, "bootstrap_batched", bb)
 
     out = ph.handle_build_admin_set({"source_region": "north-america/canada", "admin_level": 4})
     assert sorted(extracted["keys"]) == [
@@ -296,12 +306,39 @@ def test_build_admin_set_fallback_disabled(tmp_path, monkeypatch):
                         [BoundaryRegion("north-america/canada/ontario", "/p/on", "Ontario", 4, "CA-ON")])
     def spy(*a, **k): called.__setitem__("osmfr", True); return []
     monkeypatch.setattr(ph, "fetch_country_subregions", spy)
-    monkeypatch.setattr(ph, "bootstrap_batched", lambda **k: list(k["regions"]))
-    monkeypatch.setattr(ph, "_publish_tree", lambda s3, out, bucket, log: 1)
+    monkeypatch.setattr(ph, "bootstrap_batched", _bb_publishing)
 
     ph.handle_build_admin_set({"source_region": "north-america/canada",
                                "admin_level": 4, "osmfr_fallback": False})
     assert called["osmfr"] is False
+
+
+def test_build_admin_set_resumes_skipping_published(tmp_path, monkeypatch):
+    """A region already published by a prior attempt is skipped, so a large set
+    converges across task retries instead of restarting from zero."""
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+    from osm_geocoder.tools._osm_tools.boundary_gen import BoundaryRegion
+    passed = {}
+
+    class FakeS3:
+        def download_file(self, bucket, key, dst): open(dst, "w").write("pbf")
+    monkeypatch.setattr(ph, "_s3_client", lambda ep=None: FakeS3())
+    monkeypatch.setattr(ph, "_scratch_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(ph, "generate_polygons",
+                        lambda src, lvl, dest, country_prefix=None, on_log=None: [
+                            BoundaryRegion("europe/germany/a", "/p", "A", 6, None),
+                            BoundaryRegion("europe/germany/b", "/p", "B", 6, None)])
+    monkeypatch.setattr(ph, "fetch_country_subregions", lambda *a, **k: [])
+    monkeypatch.setattr(ph, "_published_region_keys",
+                        lambda s3, b, p: {"europe/germany/a"})   # 'a' already done
+    def bb(**k):
+        passed["regions"] = [r["key"] for r in k["regions"]]
+        return _bb_publishing(**k)
+    monkeypatch.setattr(ph, "bootstrap_batched", bb)
+
+    out = ph.handle_build_admin_set({"source_region": "europe/germany", "admin_level": 6})
+    assert passed["regions"] == ["europe/germany/b"]      # only the unpublished one re-extracted
+    assert out == {"region_count": 2, "published": 2}     # 1 resumed + 1 newly published
 
 
 def test_build_admin_set_county_level_skips_fallback(tmp_path, monkeypatch):
@@ -320,8 +357,7 @@ def test_build_admin_set_county_level_skips_fallback(tmp_path, monkeypatch):
                         [BoundaryRegion("europe/germany/landkreis-muenchen", "/p", "LK München", 6, None)])
     def spy(*a, **k): called.__setitem__("fb", True); return []
     monkeypatch.setattr(ph, "fetch_country_subregions", spy)
-    monkeypatch.setattr(ph, "bootstrap_batched", lambda **k: list(k["regions"]))
-    monkeypatch.setattr(ph, "_publish_tree", lambda s3, out, bucket, log: 1)
+    monkeypatch.setattr(ph, "bootstrap_batched", _bb_publishing)
 
     ph.handle_build_admin_set({"source_region": "europe/germany", "admin_level": 6})
     assert called["fb"] is False  # no state-level fallback at county level

@@ -119,12 +119,22 @@ def _s3_client(endpoint: str | None = None):
         aws_secret_access_key=os.environ.get("FW_S3_SECRET_KEY", "minioadmin"))
 
 
-def _publish_tree(s3, out: str, bucket: str, log) -> int:
-    """Upload a local ``<key>-latest.osm.pbf`` + ``<key>-updates/state.txt`` tree to
-    ``bucket`` (created anonymous-read). Returns the count published."""
-    import glob
+_TRANSFER = None
+
+
+def _tc():
+    global _TRANSFER
+    if _TRANSFER is None:
+        from boto3.s3.transfer import TransferConfig
+        _TRANSFER = TransferConfig(multipart_threshold=64 * 1024 * 1024,
+                                   multipart_chunksize=64 * 1024 * 1024, max_concurrency=4)
+    return _TRANSFER
+
+
+def _ensure_public_bucket(s3, bucket: str) -> None:
+    """Create ``bucket`` (idempotent) and grant anonymous read, so FW_GEOFABRIK_BASE_URL
+    consumers can GET the extracts."""
     import json
-    from boto3.s3.transfer import TransferConfig
     try:
         s3.create_bucket(Bucket=bucket)
     except Exception:
@@ -136,15 +146,43 @@ def _publish_tree(s3, out: str, bucket: str, log) -> int:
                            "Action": ["s3:GetObject"], "Resource": [f"arn:aws:s3:::{bucket}/*"]}]}))
     except Exception:
         pass
-    tc = TransferConfig(multipart_threshold=64 * 1024 * 1024, multipart_chunksize=64 * 1024 * 1024,
-                        max_concurrency=4)
+
+
+def _publish_one(s3, out: str, key: str, bucket: str) -> None:
+    """Upload one region's ``<key>-latest.osm.pbf`` + ``<key>-updates/state.txt``."""
+    pbf = os.path.join(out, f"{key}-latest.osm.pbf")
+    if not os.path.exists(pbf):
+        return
+    s3.upload_file(pbf, bucket, f"{key}-latest.osm.pbf", Config=_tc())
+    state = os.path.join(out, f"{key}-updates", "state.txt")
+    if os.path.exists(state):
+        s3.upload_file(state, bucket, f"{key}-updates/state.txt")
+
+
+def _published_region_keys(s3, bucket: str, prefix: str) -> set[str]:
+    """Region keys already published under ``prefix/`` — for resume (skip done work)."""
+    keys: set[str] = set()
+    try:
+        paginator = s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=f"{prefix.strip('/')}/"):
+            for o in page.get("Contents", []):
+                k = o["Key"]
+                if k.endswith("-latest.osm.pbf"):
+                    keys.add(k[: -len("-latest.osm.pbf")])
+    except Exception:
+        pass
+    return keys
+
+
+def _publish_tree(s3, out: str, bucket: str, log) -> int:
+    """Upload a local ``<key>-latest.osm.pbf`` + ``<key>-updates/state.txt`` tree to
+    ``bucket`` (created anonymous-read). Returns the count published."""
+    import glob
+    _ensure_public_bucket(s3, bucket)
     published = 0
     for pbf in sorted(glob.glob(os.path.join(out, "**", "*-latest.osm.pbf"), recursive=True)):
-        s3.upload_file(pbf, bucket, os.path.relpath(pbf, out), Config=tc)
-        state = os.path.join(os.path.dirname(pbf),
-                             os.path.basename(pbf).replace("-latest.osm.pbf", "-updates"), "state.txt")
-        if os.path.exists(state):
-            s3.upload_file(state, bucket, os.path.relpath(state, out))
+        key = os.path.relpath(pbf, out)[: -len("-latest.osm.pbf")]
+        _publish_one(s3, out, key, bucket)
         published += 1
         if published % 10 == 0:
             log(f"published {published} extracts")
@@ -220,16 +258,36 @@ def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
                 f"{[f.key.rsplit('/', 1)[-1] for f in extra]}")
             poly_regions += [{"key": f.key, "poly": f.poly} for f in extra]
 
-    results = bootstrap_batched(
-        source=src, out=os.path.join(work, "out"),
-        regions=poly_regions,
+    out_dir = os.path.join(work, "out")
+    _ensure_public_bucket(s3, bucket)
+
+    # RESUME: skip regions a prior attempt already published, so a large set (e.g.
+    # ~400 German counties) CONVERGES across task retries instead of restarting from
+    # zero each time. Only meaningful for multi-region sets under this exact prefix.
+    already = _published_region_keys(s3, bucket, source_region)
+    todo = [r for r in poly_regions if r["key"] not in already]
+    if len(todo) < len(poly_regions):
+        log(f"resume: {len(poly_regions) - len(todo)} already published, {len(todo)} to go")
+
+    # INCREMENTAL publish: upload each pass's extracts immediately, so progress is
+    # durable even if the task times out mid-run (the next retry resumes from here).
+    published = {"n": len(poly_regions) - len(todo)}
+
+    def _on_pass(results):
+        for rr in results:
+            _publish_one(s3, out_dir, rr.key, bucket)
+            published["n"] += 1
+        if results:
+            log(f"published {published['n']}/{len(poly_regions)}")
+
+    bootstrap_batched(
+        source=src, out=out_dir, regions=todo,
         base_url=base_url, strategy=strategy, batch_size=batch_size,
-        cost_state_dir=cost_dir, on_log=log)
-    published = _publish_tree(s3, os.path.join(work, "out"), bucket, log)
+        cost_state_dir=cost_dir, on_pass=_on_pass, on_log=log)
 
     shutil.rmtree(work, ignore_errors=True)
-    log(f"admin_level={admin_level} of {source_region}: {published} extracts published")
-    return {"region_count": len(results), "published": published}
+    log(f"admin_level={admin_level} of {source_region}: {published['n']} extracts published")
+    return {"region_count": len(poly_regions), "published": published["n"]}
 
 
 _DISPATCH = {
