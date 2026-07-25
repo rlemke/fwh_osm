@@ -135,7 +135,15 @@ def _run_measured(cmd: list[str]) -> int:
     try:
         import psutil
     except ImportError:
-        _run(cmd)
+        # No measurement, but still CLASSIFY OOM so the adaptive batcher can self-heal.
+        try:
+            subprocess.run(cmd, check=True)
+        except FileNotFoundError as exc:
+            raise BootstrapError(f"required binary not found: {cmd[0]}") from exc
+        except subprocess.CalledProcessError as exc:
+            if exc.returncode in (-9, 137):
+                raise _OOMError(f"osmium killed (OOM, rc={exc.returncode})") from exc
+            raise BootstrapError(f"command failed ({exc.returncode}): {' '.join(cmd)}") from exc
         return 0
     try:
         proc = subprocess.Popen(cmd)
