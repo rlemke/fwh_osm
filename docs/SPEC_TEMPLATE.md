@@ -1,4 +1,4 @@
-<!-- SPEC TEMPLATE — every specs/<feature>.md follows this shape so the set reads
+<!-- SPEC TEMPLATE — every docs/<feature>.md follows this shape so the set reads
 consistently. Delete this comment in real specs. Keep sections in this order;
 omit a section only if it genuinely does not apply (say so in one line rather
 than dropping the heading silently). Ground every claim in the actual FFL

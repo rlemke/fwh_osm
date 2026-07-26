@@ -6,7 +6,7 @@
 **Tools:** `tools/_osm_tools/{planet_fetch,planet_bootstrap,polygon_fetch,tiger_fetch,boundary_gen}.py` ·
 **Tests:** `tests/mocked/py/test_planet_pipeline.py`
 
-> This is the flagship feature and the deepest write-up in `specs/`. A companion
+> This is the flagship feature and the deepest write-up in `docs/`. A companion
 > research paper is in the framework repo at
 > `docs/thesis/paper-geofabrik-replacement.md`.
 

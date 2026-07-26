@@ -27,23 +27,23 @@ pick this package up automatically.
 
 ## Feature specifications
 
-Every OSM feature has a spec in [**`specs/`**](specs/README.md) — how it works,
+Every OSM feature has a spec in [**`docs/`**](docs/README.md) — how it works,
 whether/how it **fans out**, what it **filters** and on which OSM **attributes**, the
 **external libraries/binaries** it uses, its **facets & workflows**, and its
 **cache/output**. Start with the flagship
-[**Planet Extraction**](specs/planet-extraction.md) (the self-hosted "Geofabrik") and
-the cross-cutting [**fan-out pattern**](specs/fan-out-pattern.md); the full index is
-in [`specs/README.md`](specs/README.md).
+[**Planet Extraction**](docs/planet-extraction.md) (the self-hosted "Geofabrik") and
+the cross-cutting [**fan-out pattern**](docs/fan-out-pattern.md); the full index is
+in [`docs/README.md`](docs/README.md).
 
 | Area | Specs |
 |------|-------|
-| **Flagship & cross-cutting** | [planet-extraction](specs/planet-extraction.md) · [fan-out-pattern](specs/fan-out-pattern.md) |
-| **Ingest & sources** | [cache-and-download](specs/cache-and-download.md) · [source-adapters](specs/source-adapters.md) · [shapefiles](specs/shapefiles.md) · [osm-changes](specs/osm-changes.md) · [clip](specs/clip.md) |
-| **Filter / transform / vocab** | [filters](specs/filters.md) · [transform](specs/transform.md) · [population](specs/population.md) · [vocab](specs/vocab.md) · [spatial](specs/spatial.md) |
-| **Features / POI / buildings** | [amenities](specs/amenities.md) · [buildings](specs/buildings.md) · [poi](specs/poi.md) · [parks](specs/parks.md) · [boundaries](specs/boundaries.md) |
-| **Visualization / tiles / roads** | [visualization](specs/visualization.md) · [heatmaps](specs/heatmaps.md) · [tiles](specs/tiles.md) · [roads](specs/roads.md) |
-| **Routing** | [routing](specs/routing.md) · [graphhopper](specs/graphhopper.md) · [valhalla](specs/valhalla.md) · [routes](specs/routes.md) · [network](specs/network.md) |
-| **Composition & apps** | [emergency-atlas](specs/emergency-atlas.md) · [cities](specs/cities.md) · [voting](specs/voting.md) · [postgis-db](specs/postgis-db.md) · [composed-workflows](specs/composed-workflows.md) · [geocoding](specs/geocoding.md) |
+| **Flagship & cross-cutting** | [planet-extraction](docs/planet-extraction.md) · [fan-out-pattern](docs/fan-out-pattern.md) |
+| **Ingest & sources** | [cache-and-download](docs/cache-and-download.md) · [source-adapters](docs/source-adapters.md) · [shapefiles](docs/shapefiles.md) · [osm-changes](docs/osm-changes.md) · [clip](docs/clip.md) |
+| **Filter / transform / vocab** | [filters](docs/filters.md) · [transform](docs/transform.md) · [population](docs/population.md) · [vocab](docs/vocab.md) · [spatial](docs/spatial.md) |
+| **Features / POI / buildings** | [amenities](docs/amenities.md) · [buildings](docs/buildings.md) · [poi](docs/poi.md) · [parks](docs/parks.md) · [boundaries](docs/boundaries.md) |
+| **Visualization / tiles / roads** | [visualization](docs/visualization.md) · [heatmaps](docs/heatmaps.md) · [tiles](docs/tiles.md) · [roads](docs/roads.md) |
+| **Routing** | [routing](docs/routing.md) · [graphhopper](docs/graphhopper.md) · [valhalla](docs/valhalla.md) · [routes](docs/routes.md) · [network](docs/network.md) |
+| **Composition & apps** | [emergency-atlas](docs/emergency-atlas.md) · [cities](docs/cities.md) · [voting](docs/voting.md) · [postgis-db](docs/postgis-db.md) · [composed-workflows](docs/composed-workflows.md) · [geocoding](docs/geocoding.md) |
 
 ## Install
 
@@ -125,6 +125,7 @@ fwh_osm/
 ├── README.md
 ├── CLAUDE.md                       # guidance for Claude Code in this repo
 ├── USER_GUIDE.md                   # human-facing walkthrough
+├── docs/                           # per-feature specifications (see docs/README.md)
 ├── runner.env.example              # informational only (values live in __init__.py)
 ├── .claude/                        # MCP server config for Claude Code
 ├── agent-spec/                     # tools-pattern, cache-layout specs
