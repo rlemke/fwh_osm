@@ -49,6 +49,20 @@ def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s).strip("-")
 
 
+# Trailing admin-type words to drop so a self-generated county slug matches Census
+# TIGER's BARE county name (OSM "Alachua County" → "Alachua"). Without this, the
+# TIGER county fallback can't dedupe and publishes BOTH "<x>-county" (self-gen from
+# the OSM name) and "<x>" (TIGER) — a ~2× duplicate per county. US county types:
+# County (most), Parish (LA), Borough / Census Area / Municipality / City and
+# Borough (AK). Harmless elsewhere — no other country's L6 name ends in these.
+_ADMIN_TYPE_SUFFIX = re.compile(
+    r"\s+(county|parish|census area|city and borough|borough|municipality)$", re.I)
+
+
+def _strip_admin_type(name: str) -> str:
+    return _ADMIN_TYPE_SUFFIX.sub("", name).strip() or name
+
+
 # --- Geofabrik-style keying -------------------------------------------------
 # "Continent" is a Geofabrik grouping, not an OSM admin concept, so it comes from
 # a static country→continent map keyed by ISO 3166-1 alpha-2. Geofabrik's grouping
@@ -190,7 +204,10 @@ def generate_polygons(source: str, admin_level: int, dest: str, *,
                 if int(admin_level) <= 4 and not has_iso2:
                     dropped += 1
                     continue
-                key = f"{country_prefix.strip('/')}/{_slug(name_local or name)}"
+                unit = name_local or name
+                if int(admin_level) >= 6:
+                    unit = _strip_admin_type(unit)   # "Alachua County" → "Alachua" (match TIGER)
+                key = f"{country_prefix.strip('/')}/{_slug(unit)}"
             else:
                 # Standalone: derive the continent/country prefix from ISO 3166-2.
                 # A sub-national unit (level >= 4) that only produces a flat slug

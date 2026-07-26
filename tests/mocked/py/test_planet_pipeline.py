@@ -538,3 +538,26 @@ def test_handler_dispatch_routes_and_rejects_unknown():
     }
     with pytest.raises(ValueError):
         ph.handle({"_facet_name": "osm.planet.Nope"})
+
+
+def test_county_slug_strips_admin_type(tmp_path, monkeypatch):
+    """County slugs drop the type suffix (County/Parish/Borough) so self-gen matches
+    TIGER's bare names → the fallback dedupes instead of publishing '<x>' AND '<x>-county'."""
+    from osm_geocoder.tools._osm_tools import boundary_gen as bg
+    assert bg._strip_admin_type("Alachua County") == "Alachua"
+    assert bg._strip_admin_type("St. Bernard Parish") == "St. Bernard"
+    assert bg._strip_admin_type("Prince of Wales-Hyder Census Area") == "Prince of Wales-Hyder"
+    assert bg._strip_admin_type("Bayern") == "Bayern"   # non-county untouched
+
+    def fake_run(cmd):
+        if "export" in cmd:
+            seq = cmd[cmd.index("-o") + 1]
+            with open(seq, "w") as f:
+                for nm in ("Alachua County", "St. Bernard Parish"):
+                    f.write('{"type":"Feature","properties":{"boundary":"administrative",'
+                            f'"admin_level":"6","name":"{nm}"}},'
+                            '"geometry":{"type":"Polygon","coordinates":[]}}\n'.replace("}},", "},"))
+    monkeypatch.setattr(bg, "_run", fake_run)
+    regs = bg.generate_polygons("src.pbf", 6, str(tmp_path), country_prefix="north-america/us/florida")
+    assert sorted(r.key for r in regs) == [
+        "north-america/us/florida/alachua", "north-america/us/florida/st-bernard"]
