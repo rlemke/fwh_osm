@@ -96,14 +96,20 @@ def handle_extract_regions(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _scratch_dir() -> str:
-    """A host-local writable dir for a single BuildAdminSet task (the fleet
-    runner mounts /scratch → host afl_data/osm-scratch; falls back to /tmp)."""
+    """A PER-TASK host-local scratch dir (the fleet runner mounts /scratch → host
+    afl_data/osm-scratch; falls back to /tmp). The UUID suffix is REQUIRED: a host
+    runs several osm runners, so under a fan-out two BuildAdminSet tasks land on one
+    host at once — a shared path let one task's final rmtree delete the other's
+    in-flight download (and boto3 temp files collide), corrupting both. Per-task
+    isolation makes concurrent extraction on a host safe."""
+    import uuid
     for base in (os.environ.get("FW_LOCAL_SCRATCH"), "/scratch"):
         if base and os.path.isdir(base):
-            p = os.path.join(base, "osm-admin-set")
+            root = base
             break
     else:
-        p = "/tmp/osm-admin-set"
+        root = "/tmp"
+    p = os.path.join(root, "osm-admin-set", uuid.uuid4().hex)
     os.makedirs(p, exist_ok=True)
     return p
 

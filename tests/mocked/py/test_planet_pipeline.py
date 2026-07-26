@@ -561,3 +561,12 @@ def test_county_slug_strips_admin_type(tmp_path, monkeypatch):
     regs = bg.generate_polygons("src.pbf", 6, str(tmp_path), country_prefix="north-america/us/florida")
     assert sorted(r.key for r in regs) == [
         "north-america/us/florida/alachua", "north-america/us/florida/st-bernard"]
+
+
+def test_scratch_dir_is_per_task_unique(monkeypatch, tmp_path):
+    """Each call returns a DISTINCT dir so two BuildAdminSet tasks on one host (a
+    fan-out lands several per host) don't clobber each other's /scratch."""
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+    monkeypatch.setenv("FW_LOCAL_SCRATCH", str(tmp_path))
+    a, b = ph._scratch_dir(), ph._scratch_dir()
+    assert a != b and a.startswith(str(tmp_path)) and __import__("os").path.isdir(a)
