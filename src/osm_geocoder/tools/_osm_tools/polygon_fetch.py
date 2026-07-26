@@ -142,22 +142,38 @@ def fetch_subregion_polys(country_key: str, dest: str, *, only=None,
 _TIGER_COUNTRY = "north-america/us"
 
 
-def fetch_country_subregions(country_key: str, dest: str, *, only=None,
+def fetch_country_subregions(country_key: str, dest: str, *, only=None, admin_level: int = 4,
                              on_log: Callable[[str], None] | None = None) -> list[Region]:
-    """Region-AWARE sub-region poly provider — the straggler fallback source.
+    """Region-AWARE, LEVEL-AWARE sub-region poly provider — the straggler fallback.
 
-    Neither provider is universal, so pick by country: **TIGER** (US Census) for the
-    US, since osmfr has no US state polys; **osmfr** for everywhere else, since TIGER
-    is US-only. Returns ``Region(key=<country_key>/<slug>, poly=path)`` restricted to
-    the ``only`` slugs (the stragglers self-generation missed) when given. Degrades
-    to an empty list when the provider has nothing for the country.
+    Neither provider is universal, so pick by (country, admin_level):
+    - US **states** (``north-america/us``, level 4) → TIGER STATE (osmfr has none);
+    - US **counties** (``north-america/us/<state>``, level 6) → TIGER COUNTY for that
+      state (nested, collision-free — 30 states have a "Washington County");
+    - **everywhere else, level 4** → osmfr sub-region polys;
+    - anything else (e.g. non-US level 6 — osmfr has no county tree) → empty list.
+
+    ``only`` restricts to those slugs (the self-gen stragglers). Empty list is a
+    graceful "no provider for this (country, level)", never a raise.
     """
     log = on_log or (lambda _m: None)
-    if country_key.strip("/") == _TIGER_COUNTRY:
+    ck = country_key.strip("/")
+
+    def _filter(regions):
+        return ([r for r in regions if r.key.rsplit("/", 1)[-1] in only]
+                if only is not None else regions)
+
+    if ck == _TIGER_COUNTRY and admin_level == 4:
         from . import tiger_fetch  # lazy: tiger_fetch imports Region from here
-        regions = tiger_fetch.fetch_tiger_states(dest, on_log=on_log)  # all 50 + DC
-        if only is not None:
-            regions = [r for r in regions if r.key.rsplit("/", 1)[-1] in only]
+        regions = _filter(tiger_fetch.fetch_tiger_states(dest, on_log=on_log))
         log(f"TIGER fallback: {len(regions)} US state poly(s)")
         return regions
-    return fetch_subregion_polys(country_key, dest, only=only, on_log=on_log)
+    if ck.startswith(_TIGER_COUNTRY + "/") and admin_level >= 6:
+        from . import tiger_fetch
+        state = ck.rsplit("/", 1)[-1]
+        regions = _filter(tiger_fetch.fetch_tiger_counties(dest, only_state=state, on_log=on_log))
+        log(f"TIGER fallback: {len(regions)} US county poly(s) for {state}")
+        return regions
+    if admin_level == 4:
+        return fetch_subregion_polys(country_key, dest, only=only, on_log=on_log)
+    return []   # no ready-made provider for this (country, admin_level)

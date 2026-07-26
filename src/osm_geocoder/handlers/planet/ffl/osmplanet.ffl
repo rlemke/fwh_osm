@@ -125,4 +125,23 @@ namespace osm.planet {
         result = osm.planet.BuildAdminSet(source_region = $.source_region, admin_level = $.admin_level, base_url = $.base_url, strategy = $.strategy, bucket = $.bucket, batch_size = $.batch_size, osmfr_fallback = $.osmfr_fallback)
         yield BuildAdminSetWorkflow(region_count = result.region_count, published = result.published)
     }
+
+    /** List the DIRECT-CHILD extract keys under `prefix` (e.g. the 51 US states under
+        "north-america/us") — the fan-out driver: a workflow foreach's over these. */
+    event facet ListExtracts(prefix: String, bucket: String = "osm-extracts") => (regions: [String], count: Long) with Effect(kind = "io") with Cost(tier = "free")
+
+    /** FAN-OUT: build one admin level BELOW each direct child of `prefix`, one
+        BuildAdminSet task per child, distributed across the fleet. US counties =
+        prefix "north-america/us", admin_level 6: fan a per-STATE BuildAdminSet over
+        the 51 states (each self-generates its counties from that state's extract and
+        keys them north-america/us/<state>/<county> — nested, so the ~30 states with
+        a "Washington County" don't collide). The N states run in PARALLEL across the
+        runner fleet, so wall-clock ≈ the slowest single state, not the sum. Add
+        runners to go faster. `strategy` "simple" suits many small interior regions. */
+    workflow BuildAdminFanout(prefix: String = "north-america/us", admin_level: Long = 6, strategy: String = "simple", base_url: String = "http://afl-minio:9000/osm-extracts", bucket: String = "osm-extracts") => (published: [Long]) andThen {
+        children = osm.planet.ListExtracts(prefix = $.prefix, bucket = $.bucket) andThen foreach child in $.regions {
+            leaf = osm.planet.BuildAdminSet(source_region = $.child, admin_level = $$.admin_level, strategy = $$.strategy, base_url = $$.base_url, bucket = $$.bucket)
+            yield BuildAdminFanout(published = [leaf.published])
+        }
+    }
 }

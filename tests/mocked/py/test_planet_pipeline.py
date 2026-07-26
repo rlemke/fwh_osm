@@ -86,6 +86,62 @@ def test_fetch_country_subregions_is_region_aware(tmp_path, monkeypatch):
     assert [r.key for r in de] == ["europe/germany/bayern"]
 
 
+def test_fetch_country_subregions_level_aware(tmp_path, monkeypatch):
+    """Level-aware: US state@4 → TIGER states, US state@6 → TIGER counties for that
+    state, non-US @6 → [] (osmfr has no county tree — no wrong-level injection)."""
+    from osm_geocoder.tools._osm_tools import tiger_fetch as tf
+    monkeypatch.setattr(tf, "fetch_tiger_counties",
+                        lambda dest, only_state=None, on_log=None:
+                        [pf.Region(f"north-america/us/{only_state}/los-angeles", "/p")])
+    c = pf.fetch_country_subregions("north-america/us/california", str(tmp_path), admin_level=6)
+    assert [r.key for r in c] == ["north-america/us/california/los-angeles"]
+    # non-US at county level → empty (no provider), NOT osmfr Länder
+    assert pf.fetch_country_subregions("europe/germany", str(tmp_path), admin_level=6) == []
+
+
+def test_fetch_tiger_counties_nested_keys(tmp_path, monkeypatch):
+    """Counties keyed north-america/us/<state>/<county> (nested → collision-free)."""
+    import sys, types
+    sys.modules.setdefault("shapefile", types.SimpleNamespace(Reader=object))  # pyshp guard
+    from osm_geocoder.tools._osm_tools import tiger_fetch as tf
+
+    class _Shape:
+        __geo_interface__ = {"type": "Polygon", "coordinates": []}
+
+    class _Reader:
+        def records(self): return [{"STATEFP": "06", "NAME": "Los Angeles"},
+                                   {"STATEFP": "48", "NAME": "Harris"}]
+        def shapes(self): return [_Shape(), _Shape()]
+    monkeypatch.setattr(tf, "_statefp_slugs", lambda dest_p, log: {"06": "california", "48": "texas"})
+    monkeypatch.setattr(tf, "_download_shp", lambda url, dest_p, tag, log: _Reader())
+
+    allc = tf.fetch_tiger_counties(str(tmp_path))
+    assert sorted(r.key for r in allc) == [
+        "north-america/us/california/los-angeles", "north-america/us/texas/harris"]
+    ca = tf.fetch_tiger_counties(str(tmp_path), only_state="california")
+    assert [r.key for r in ca] == ["north-america/us/california/los-angeles"]
+
+
+def test_list_extracts_direct_children_only(monkeypatch):
+    """ListExtracts returns only keys ONE level below prefix (states, not counties)."""
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+
+    class _P:
+        def paginate(self, Bucket, Prefix):
+            return [{"Contents": [
+                {"Key": "north-america/us/california-latest.osm.pbf"},
+                {"Key": "north-america/us/texas-latest.osm.pbf"},
+                {"Key": "north-america/us/california/los-angeles-latest.osm.pbf"},  # deeper → excluded
+                {"Key": "north-america/us/california-updates/state.txt"},           # not a pbf → excluded
+            ]}]
+
+    class FakeS3:
+        def get_paginator(self, op): return _P()
+    monkeypatch.setattr(ph, "_s3_client", lambda ep=None: FakeS3())
+    out = ph.handle_list_extracts({"prefix": "north-america/us"})
+    assert out == {"regions": ["north-america/us/california", "north-america/us/texas"], "count": 2}
+
+
 # --- subnational (TIGER US states) ---
 
 def test_subnational_scope_routes_to_tiger(tmp_path, monkeypatch):
@@ -277,7 +333,7 @@ def test_build_admin_set_osmfr_fallback_fills_stragglers(tmp_path, monkeypatch):
                         lambda src, lvl, dest, country_prefix=None, on_log=None:
                         [BoundaryRegion("north-america/canada/ontario", "/p/on", "Ontario", 4, "CA-ON")])
     # osmfr lists ontario + quebec; only quebec should be added (ontario already have)
-    monkeypatch.setattr(ph, "fetch_country_subregions", lambda ck, dest, on_log=None: [
+    monkeypatch.setattr(ph, "fetch_country_subregions", lambda ck, dest, admin_level=4, on_log=None: [
         Region("north-america/canada/ontario", "/o/on.poly"),
         Region("north-america/canada/quebec", "/o/qc.poly")])
     def bb(**k):
@@ -341,12 +397,12 @@ def test_build_admin_set_resumes_skipping_published(tmp_path, monkeypatch):
     assert out == {"region_count": 2, "published": 2}     # 1 resumed + 1 newly published
 
 
-def test_build_admin_set_county_level_skips_fallback(tmp_path, monkeypatch):
-    """At admin_level>=6 (counties) the state-level fallback must NOT run — else it
-    would inject the country's states (e.g. Länder) into a county set."""
+def test_build_admin_set_county_level_no_wrong_injection(tmp_path, monkeypatch):
+    """At county level the fallback is region/level-AWARE: for a non-US country it has
+    no provider (returns []), so NO wrong-level states (Länder) get injected."""
     from osm_geocoder.handlers.planet import planet_handlers as ph
     from osm_geocoder.tools._osm_tools.boundary_gen import BoundaryRegion
-    called = {"fb": False}
+    seen = {}
 
     class FakeS3:
         def download_file(self, bucket, key, dst): open(dst, "w").write("pbf")
@@ -355,12 +411,15 @@ def test_build_admin_set_county_level_skips_fallback(tmp_path, monkeypatch):
     monkeypatch.setattr(ph, "generate_polygons",
                         lambda src, lvl, dest, country_prefix=None, on_log=None:
                         [BoundaryRegion("europe/germany/landkreis-muenchen", "/p", "LK München", 6, None)])
-    def spy(*a, **k): called.__setitem__("fb", True); return []
-    monkeypatch.setattr(ph, "fetch_country_subregions", spy)
-    monkeypatch.setattr(ph, "bootstrap_batched", _bb_publishing)
+    monkeypatch.setattr(ph, "fetch_country_subregions",
+                        lambda ck, dest, admin_level=4, on_log=None: [])   # non-US @6 → no provider
+    def bb(**k):
+        seen["regions"] = [r["key"] for r in k["regions"]]
+        return _bb_publishing(**k)
+    monkeypatch.setattr(ph, "bootstrap_batched", bb)
 
     ph.handle_build_admin_set({"source_region": "europe/germany", "admin_level": 6})
-    assert called["fb"] is False  # no state-level fallback at county level
+    assert seen["regions"] == ["europe/germany/landkreis-muenchen"]   # only self-gen; no Länder injected
 
 
 def test_build_admin_set_requires_source():
@@ -475,7 +534,7 @@ def test_handler_dispatch_routes_and_rejects_unknown():
         "osm.planet.DownloadPlanet", "osm.planet.UpdatePlanet",
         "osm.planet.DownloadPolygons", "osm.planet.GenerateRegionPolygons",
         "osm.planet.ExtractRegions", "osm.planet.PublishExtracts",
-        "osm.planet.BuildAdminSet",
+        "osm.planet.BuildAdminSet", "osm.planet.ListExtracts",
     }
     with pytest.raises(ValueError):
         ph.handle({"_facet_name": "osm.planet.Nope"})

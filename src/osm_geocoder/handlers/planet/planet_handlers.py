@@ -197,6 +197,29 @@ def handle_publish_extracts(params: dict[str, Any]) -> dict[str, Any]:
     return {"bucket": bucket, "published": published}
 
 
+def handle_list_extracts(params: dict[str, Any]) -> dict[str, Any]:
+    """List the DIRECT-CHILD extract keys under a prefix (e.g. the 51 US states under
+    ``north-america/us``) — the fan-out driver for a per-child workflow. Returns only
+    keys exactly one level below ``prefix`` (so states, not their nested counties)."""
+    prefix = (params.get("prefix") or "").strip("/")
+    bucket = params.get("bucket") or os.environ.get("FW_OSM_EXTRACT_BUCKET", "osm-extracts")
+    s3 = _s3_client(params.get("endpoint"))
+    depth = prefix.count("/") + 1 if prefix else 0
+    suffix = "-latest.osm.pbf"
+    keys = set()
+    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=f"{prefix}/"):
+        for o in page.get("Contents", []):
+            k = o["Key"]
+            if k.endswith(suffix):
+                region = k[: -len(suffix)]
+                if region.count("/") == depth:            # direct child only
+                    keys.add(region)
+    regions = sorted(keys)
+    log = _log(params)
+    log(f"list {prefix}: {len(regions)} direct-child extract(s)")
+    return {"regions": regions, "count": len(regions)}
+
+
 def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
     """SINGLE-TASK admin set — the distributed-fleet-safe path. Downloads a source
     region from the bucket, generates its ``admin_level`` boundaries, extracts each,
@@ -244,14 +267,15 @@ def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
 
     # Straggler fallback: osmium export can't assemble some boundaries (nested
     # sub-relations, member ways beyond the source poly). Fill the GAP from a
-    # region-aware ready-made poly source — TIGER for US states, osmfr elsewhere.
-    # ONLY at admin_level==4: both providers ship STATE/PROVINCE-level polys and
-    # nothing deeper, so at county level (>=6) the fallback would wrongly inject the
-    # country's states (osmfr europe/germany/ lists the 16 Länder, not Kreise).
-    if subregion_fallback and admin_level == 4:
+    # region-AND-level-aware ready-made poly source (TIGER US states@4 / US
+    # counties@6, osmfr subregions@4). It returns [] for a (country, level) it has
+    # no provider for — so e.g. German Kreise (europe/germany@6) get no wrong-level
+    # Länder injected; US counties (north-america/us/<state>@6) get TIGER counties.
+    if subregion_fallback and admin_level >= 4:
         have = {r["key"].rsplit("/", 1)[-1] for r in poly_regions}
         extra = [f for f in fetch_country_subregions(
-                     source_region, os.path.join(work, "polys_fallback"), on_log=log)
+                     source_region, os.path.join(work, "polys_fallback"),
+                     admin_level=admin_level, on_log=log)
                  if f.key.rsplit("/", 1)[-1] not in have]
         if extra:
             log(f"straggler fallback adds {len(extra)}: "
@@ -298,6 +322,7 @@ _DISPATCH = {
     f"{NAMESPACE}.ExtractRegions": handle_extract_regions,
     f"{NAMESPACE}.PublishExtracts": handle_publish_extracts,
     f"{NAMESPACE}.BuildAdminSet": handle_build_admin_set,
+    f"{NAMESPACE}.ListExtracts": handle_list_extracts,
 }
 
 
