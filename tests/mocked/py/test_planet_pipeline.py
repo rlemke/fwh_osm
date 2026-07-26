@@ -110,14 +110,14 @@ def test_fetch_tiger_counties_nested_keys(tmp_path, monkeypatch):
 
     class _Reader:
         def records(self): return [{"STATEFP": "06", "NAME": "Los Angeles"},
-                                   {"STATEFP": "48", "NAME": "Harris"}]
+                                   {"STATEFP": "02", "NAME": "Aleutians East Borough"}]  # AK carries the type
         def shapes(self): return [_Shape(), _Shape()]
-    monkeypatch.setattr(tf, "_statefp_slugs", lambda dest_p, log: {"06": "california", "48": "texas"})
+    monkeypatch.setattr(tf, "_statefp_slugs", lambda dest_p, log: {"06": "california", "02": "alaska"})
     monkeypatch.setattr(tf, "_download_shp", lambda url, dest_p, tag, log: _Reader())
 
     allc = tf.fetch_tiger_counties(str(tmp_path))
-    assert sorted(r.key for r in allc) == [
-        "north-america/us/california/los-angeles", "north-america/us/texas/harris"]
+    assert sorted(r.key for r in allc) == [                      # 'Borough' stripped → matches self-gen
+        "north-america/us/alaska/aleutians-east", "north-america/us/california/los-angeles"]
     ca = tf.fetch_tiger_counties(str(tmp_path), only_state="california")
     assert [r.key for r in ca] == ["north-america/us/california/los-angeles"]
 

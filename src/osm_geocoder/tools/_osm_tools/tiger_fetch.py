@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import Callable
 
 from .polygon_fetch import Region  # reuse the (key, poly-path) pair
+from .boundary_gen import _strip_admin_type  # drop County/Parish/Borough… so TIGER
+#                                              slugs match self-generated county slugs
 
 TIGER_YEAR = os.environ.get("FW_TIGER_YEAR", "2023")
 TIGER_STATE_URL = os.environ.get(
@@ -147,7 +149,9 @@ def fetch_tiger_counties(dest: str, *, only_state: str | None = None,
             continue
         if only_state and state_slug != only_state:
             continue
-        county_slug = _slug(rec["NAME"])         # NAME is the bare county name
+        # NAME is usually bare ("Alachua") but sometimes carries the type (Alaska
+        # "Aleutians East Borough"). Strip it so TIGER matches self-gen's bare slug.
+        county_slug = _slug(_strip_admin_type(rec["NAME"]))
         key = f"north-america/us/{state_slug}/{county_slug}"
         gj = dest_p / f"{key.replace('/', '__')}.geojson"
         gj.write_text(json.dumps({
