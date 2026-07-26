@@ -9,8 +9,8 @@ point declared in ``pyproject.toml``::
     osm-geocoder = "osm_geocoder:domain"
 
 Once ``pip install -e .`` has been run from this repository, Facetwork's
-``scripts/start-runner --example osm-geocoder`` and
-``scripts/seed-examples`` will pick this package up automatically — no
+``fw runner start --domain osm-geocoder`` and
+``fw ffl seed`` will pick this package up automatically — no
 edits to the Facetwork repository required.
 """
 
@@ -33,7 +33,7 @@ _RUNNER_ENV = {
 
 # Integration-test FFL fixtures live at the repo root (outside src/) so they
 # stay grouped with their pytest scripts. Surface them through the discovery
-# API so `scripts/seed-examples` and friends pick them up.
+# API so `fw ffl seed` and friends pick them up.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _EXTRA_FFL = [_REPO_ROOT / "tests" / "real" / "ffl"]
 

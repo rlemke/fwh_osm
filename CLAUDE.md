@@ -4,14 +4,14 @@ This repository is a **standalone Facetwork example package**. The Facetwork
 platform (workflow compiler + runtime) lives at
 `/Users/ralph_lemke/facetwork`; this repo only contains the OSM-specific
 FFL, handlers, and tools. The two are wired together via the
-`facetwork.examples` entry point in `pyproject.toml`.
+`facetwork.domains` entry point in `pyproject.toml`.
 
 ## Quick orientation
 
 ```
 osm/
-├── pyproject.toml                  # declares the facetwork.examples entry point
-├── src/osm_geocoder/__init__.py    # exports `example: ExamplePackage`
+├── pyproject.toml                  # declares the facetwork.domains entry point
+├── src/osm_geocoder/__init__.py    # exports `domain: DomainPackage`
 ├── src/osm_geocoder/handlers/      # event-facet implementations (27 subpackages; see the library catalog below)
 ├── src/osm_geocoder/ffl/           # top-level FFL workflows
 ├── src/osm_geocoder/handlers/<domain>/ffl/   # per-domain FFL (osm-geocoder convention)
@@ -27,8 +27,8 @@ osm/
 pip install -e .
 
 # From a Facetwork checkout:
-scripts/seed-examples --include osm-geocoder
-scripts/start-runner --example osm-geocoder -- --log-format text
+fw ffl seed --include osm-geocoder
+fw runner start --domain osm-geocoder -- --log-format text
 
 # Run as a standalone agent (skip the registry runner path):
 PYTHONPATH=src python agent.py
@@ -320,7 +320,7 @@ sidecar-backed cache under `$FW_CACHE_ROOT/<namespace>/`. See
 
 PostGIS imports can take hours for large regions (e.g. California 1.2GB
 PBF). The default 15-minute execution timeout kills imports before they
-complete. The package bakes 4-hour overrides into the `ExamplePackage` so
+complete. The package bakes 4-hour overrides into the `DomainPackage` so
 they apply automatically:
 
 ```python
@@ -361,7 +361,7 @@ from PBF.
    `src/osm_geocoder/handlers/__init__.py`.
 4. Drop the FFL declaration into `src/osm_geocoder/ffl/` (or a domain-specific
    `handlers/<domain>/ffl/` for nested workflows).
-5. Re-run `scripts/seed-examples --include osm-geocoder` so the new flow
+5. Re-run `fw ffl seed --include osm-geocoder` so the new flow
    shows up in the dashboard.
 
 ## Code review checklist
