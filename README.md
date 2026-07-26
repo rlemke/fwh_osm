@@ -25,6 +25,26 @@ declared in `pyproject.toml`. After `pip install -e .`, Facetwork's
 `fw runner start --domain osm-geocoder` and `fw ffl seed`
 pick this package up automatically.
 
+## Feature specifications
+
+Every OSM feature has a spec in [**`specs/`**](specs/README.md) — how it works,
+whether/how it **fans out**, what it **filters** and on which OSM **attributes**, the
+**external libraries/binaries** it uses, its **facets & workflows**, and its
+**cache/output**. Start with the flagship
+[**Planet Extraction**](specs/planet-extraction.md) (the self-hosted "Geofabrik") and
+the cross-cutting [**fan-out pattern**](specs/fan-out-pattern.md); the full index is
+in [`specs/README.md`](specs/README.md).
+
+| Area | Specs |
+|------|-------|
+| **Flagship & cross-cutting** | [planet-extraction](specs/planet-extraction.md) · [fan-out-pattern](specs/fan-out-pattern.md) |
+| **Ingest & sources** | [cache-and-download](specs/cache-and-download.md) · [source-adapters](specs/source-adapters.md) · [shapefiles](specs/shapefiles.md) · [osm-changes](specs/osm-changes.md) · [clip](specs/clip.md) |
+| **Filter / transform / vocab** | [filters](specs/filters.md) · [transform](specs/transform.md) · [population](specs/population.md) · [vocab](specs/vocab.md) · [spatial](specs/spatial.md) |
+| **Features / POI / buildings** | [amenities](specs/amenities.md) · [buildings](specs/buildings.md) · [poi](specs/poi.md) · [parks](specs/parks.md) · [boundaries](specs/boundaries.md) |
+| **Visualization / tiles / roads** | [visualization](specs/visualization.md) · [heatmaps](specs/heatmaps.md) · [tiles](specs/tiles.md) · [roads](specs/roads.md) |
+| **Routing** | [routing](specs/routing.md) · [graphhopper](specs/graphhopper.md) · [valhalla](specs/valhalla.md) · [routes](specs/routes.md) · [network](specs/network.md) |
+| **Composition & apps** | [emergency-atlas](specs/emergency-atlas.md) · [cities](specs/cities.md) · [voting](specs/voting.md) · [postgis-db](specs/postgis-db.md) · [composed-workflows](specs/composed-workflows.md) · [geocoding](specs/geocoding.md) |
+
 ## Install
 
 ```bash
