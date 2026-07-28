@@ -79,6 +79,7 @@ research paper in the framework repo (`docs/thesis/paper-geofabrik-replacement.m
 | [postgis-db.md](postgis-db.md) | PostGIS import/query, osm2pgsql-compatible views, spatial SQL. |
 | [composed-workflows.md](composed-workflows.md) | High-level composed pipelines reusing lower-level facets. |
 | [geocoding.md](geocoding.md) | Forward/reverse geocoding. |
+| [ffl-examples.md](ffl-examples.md) | **Usage patterns.** A gallery of complete, compile-checked FFL examples over these facets — resolve→download→extract, extract-once-filter-many, NL→tag via `osm.Vocab`, region `foreach`, `when` guards, mixins + `catch`. |
 
 ---
 

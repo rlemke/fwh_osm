@@ -25,6 +25,55 @@ declared in `pyproject.toml`. After `pip install -e .`, Facetwork's
 `fw runner start --domain osm-geocoder` and `fw ffl seed`
 pick this package up automatically.
 
+## FFL at a glance
+
+The domain is driven from [FFL](https://github.com/rlemke/facetwork/blob/main/docs/reference/language/grammar.md),
+Facetwork's workflow language. A step is `name = Facet(args)`; the cost tiers are
+the design — resolve (`pure`) → download the PBF once (`expensive`, idempotent) →
+chain `cheap` filters over the extracted GeoJSON:
+
+```ffl
+namespace my.osm {
+
+    use osm.Region
+    use osm.cache
+    use osm.Amenities
+    use osm.Vocab
+    use osm.Filters
+
+    /** "coffee shop" → amenity=cafe → filtered GeoJSON for a named region. */
+    workflow FindByTerm(region: String = "Oregon", term: String = "coffee shop") => (path: String, tag: String) andThen {
+
+        resolved = osm.Region.ResolveRegion(name = $.region)
+        cached = osm.cache.Download(region = resolved.region)
+
+        tag = osm.Vocab.ResolveTag(term = $.term)
+
+        all = osm.Amenities.ExtractAmenities(cache = cached.cache, category = "all")
+
+        matched = osm.Filters.FilterByOSMTag(
+            input_path = all.result.output_path,
+            tag_key = tag.result.osm_key,
+            tag_value = tag.result.osm_value)
+
+        yield FindByTerm(
+            path = matched.result.output_path,
+            tag = tag.result.osm_key ++ "=" ++ tag.result.osm_value)
+    }
+}
+```
+
+```bash
+fw ffl run --primary my.ffl --library <the ffl files it uses> \
+  --workflow my.osm.FindByTerm --task-list osm
+```
+
+📖 **[docs/ffl-examples.md](docs/ffl-examples.md)** — the full example gallery:
+the resolve→download→extract chain, extract-once-filter-many, NL→tag lookup,
+`foreach` over regions (and the heavy-fan-out caveat), `when` guards on the
+expensive download, call-time mixins + `catch`, and wrapping the shipped map
+workflows. Every snippet there is compile-checked.
+
 ## Feature specifications
 
 Every OSM feature has a spec in [**`docs/`**](docs/README.md) — how it works,
