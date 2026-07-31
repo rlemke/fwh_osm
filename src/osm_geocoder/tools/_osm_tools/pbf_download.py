@@ -180,6 +180,17 @@ def _use_cache_if_present() -> bool:
     return os.environ.get("FW_OSM_USE_CACHE_IF_PRESENT", "").lower() in ("1", "true", "yes")
 
 
+def _offline_mode() -> bool:
+    """True when ``FW_OSM_OFFLINE`` forbids ALL external mirror fetches.
+
+    Local-only enforcement: the cache is generated from the locally-held planet /
+    continent extracts (clipped with osmium), so nothing should ever reach
+    Geofabrik/osmfr. In offline mode a region download is a cache-read only — a
+    miss fails loudly instead of silently egressing to a mirror.
+    """
+    return os.environ.get("FW_OSM_OFFLINE", "").lower() in ("1", "true", "yes")
+
+
 # Per-process memo of OSM France extract coverage, keyed by Geofabrik region key.
 # A region is probed at most once (a single HEAD); a definitive 404 is cached as
 # "not covered", a 200 as "covered". Transient failures are NOT cached so a later
@@ -735,6 +746,11 @@ def download_region(
     # (reproducing a map, working offline, or when upstream is slow/flaky). Opt-in
     # per call (use_cache_if_present) or globally (FW_OSM_USE_CACHE_IF_PRESENT);
     # `force=True` still bypasses it.
+    # Offline / local-only mode overrides everything: always use the cache if
+    # present and never contact a mirror (even under force / revalidate).
+    offline = _offline_mode()
+    if offline:
+        use_cache_if_present, force = True, False
     prefer_cache = _use_cache_if_present() if use_cache_if_present is None else use_cache_if_present
     if not force and prefer_cache and is_region_cached(region, storage=storage):
         side = sidecar_entry_for(region, storage=storage) or {}
@@ -751,6 +767,16 @@ def download_region(
             downloaded_at=source.get("downloaded_at", ""),
             was_cached=True,
             sidecar=side,
+        )
+
+    # Reached here → the region is NOT cached and we would have to fetch it. In
+    # offline mode that is forbidden: fail loudly so the region is generated
+    # locally (clip the parent continent PBF) instead of egressing to a mirror.
+    if offline:
+        raise DownloadError(
+            f"FW_OSM_OFFLINE: region {rel_path!r} is not in the local cache and "
+            f"external mirror fetches are disabled. Generate it locally by "
+            f"clipping the parent continent PBF (osmium extract), then retry."
         )
 
     with _region_lock(region):
