@@ -52,10 +52,15 @@ class ScanProgressTracker:
         file_size: int,
         step_log: Callable | None = None,
         label: str = "Scan",
+        cancel_check: Callable | None = None,
     ):
         self._file_size = file_size
         self._step_log = step_log
         self._label = label
+        # Runner-injected ``payload["_cancellation_check"]`` — returns a reason
+        # string when this execution's result would no longer be accepted.
+        self._cancel_check = cancel_check
+        self._last_cancel_check = time.monotonic()
 
         self._elements = 0
         self._nodes = 0
@@ -110,6 +115,11 @@ class ScanProgressTracker:
         # Time-based heartbeat: emit a log every 30s even if no milestone hit
         self._maybe_heartbeat()
 
+        # Stop early if the work is no longer wanted. Separate from the
+        # heartbeat because that one bails when there is no step_log, and a
+        # scan without logging must still be cancellable.
+        self._maybe_check_cancel()
+
     def _log_phase_change(self, new_phase: str) -> None:
         """Emit a step log when the element type changes."""
         now = time.monotonic()
@@ -133,6 +143,37 @@ class ScanProgressTracker:
         self._phase_t0 = now
 
     HEARTBEAT_INTERVAL = 30.0  # seconds between heartbeat logs
+    CANCEL_CHECK_INTERVAL = 10.0  # seconds between cancellation checks
+
+    def _maybe_check_cancel(self) -> None:
+        """Abort the scan if this execution has been cancelled.
+
+        ``tick()`` runs once per OSM element — tens of millions of times on a
+        country PBF — so the check is time-gated rather than per element. The
+        runtime's token is itself cached, but the attribute lookup and call are
+        not free at that frequency.
+
+        Raises ``HandlerCancelled``, which propagates out of the pyosmium
+        callback and out of ``apply_file()``, unwinding the scan. The runner
+        treats it as a clean stop: no retry, no failed step.
+        """
+        if self._cancel_check is None:
+            return
+        now = time.monotonic()
+        if now - self._last_cancel_check < self.CANCEL_CHECK_INTERVAL:
+            return
+        self._last_cancel_check = now
+        reason = self._cancel_check()
+        if not reason:
+            return
+        if self._step_log:
+            self._step_log(
+                f"{self._label}: cancelled after {self._elements:,} elements — {reason}",
+                level="warning",
+            )
+        from facetwork.runtime.cancellation import HandlerCancelled
+
+        raise HandlerCancelled(reason)
 
     def _maybe_heartbeat(self) -> None:
         """Emit a periodic heartbeat log so the step never appears stuck."""

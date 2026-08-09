@@ -265,6 +265,7 @@ def combined_scan(
     output_dir: str | None = None,
     step_log: Any = None,
     heartbeat: Any = None,
+    cancel_check: Any = None,
 ) -> CombinedScanResult:
     """Run a combined single-pass extraction.
 
@@ -328,7 +329,10 @@ def combined_scan(
     # Progress tracker
     file_size = get_file_size(pbf_path)
     progress = ScanProgressTracker(
-        file_size, step_log, label=f"CombinedScan[{','.join(categories)}]"
+        file_size,
+        step_log,
+        label=f"CombinedScan[{','.join(categories)}]",
+        cancel_check=cancel_check,
     )
 
     # Single-pass scan — features stream to disk via each plugin's writer

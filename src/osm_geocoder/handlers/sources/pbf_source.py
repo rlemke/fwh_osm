@@ -595,7 +595,13 @@ def _extract_category(payload: dict) -> dict:
     step_log = payload.get("_step_log")
 
     scan_categories = _WARM_CATEGORIES if category in _WARM_CATEGORIES else [category]
-    rv = ensure_scan(cache, scan_categories, step_log, payload.get("_task_heartbeat"))
+    rv = ensure_scan(
+        cache,
+        scan_categories,
+        step_log,
+        payload.get("_task_heartbeat"),
+        payload.get("_cancellation_check"),
+    )
 
     try:
         results = _json.loads(rv.get("results", "{}"))

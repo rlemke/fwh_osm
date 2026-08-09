@@ -99,3 +99,76 @@ class TestGetFileSize:
         f = tmp_path / "test.bin"
         f.write_bytes(b"x" * 12345)
         assert get_file_size(str(f)) == 12345
+
+
+class TestScanCancellation:
+    """A multi-hour PBF scan must stop when the work is no longer wanted.
+
+    The runner injects ``payload["_cancellation_check"]`` — a callable returning
+    a reason string once this execution's result would no longer be accepted
+    (operator terminate, a watchdog that already failed the task, or a reclaim
+    that made this a zombie). The tracker consults it at the one place every
+    scanning handler already goes through: ``tick()``.
+    """
+
+    def test_scan_aborts_when_cancelled(self):
+        from facetwork.runtime.cancellation import HandlerCancelled
+
+        tracker = ScanProgressTracker(
+            1_000_000, None, label="Test", cancel_check=lambda: "task was canceled"
+        )
+        tracker.CANCEL_CHECK_INTERVAL = 0  # check on every tick for the test
+
+        ticks = 0
+        try:
+            for _ in range(1000):
+                tracker.tick("node")
+                ticks += 1
+        except HandlerCancelled as exc:
+            assert exc.reason == "task was canceled"
+        else:
+            raise AssertionError("scan ignored cancellation")
+        assert ticks < 1000, "scan ran to completion despite being cancelled"
+
+    def test_healthy_scan_is_not_interrupted(self):
+        tracker = ScanProgressTracker(1_000_000, None, label="Test", cancel_check=lambda: None)
+        tracker.CANCEL_CHECK_INTERVAL = 0
+        for _ in range(1000):
+            tracker.tick("node")
+        tracker.finish()
+
+    def test_cancellation_works_without_step_log(self):
+        """The heartbeat path bails when step_log is None — cancellation must not.
+
+        A scan with no logging is still cancellable; wiring the check inside
+        _maybe_heartbeat would have silently skipped exactly those runs.
+        """
+        from facetwork.runtime.cancellation import HandlerCancelled
+
+        tracker = ScanProgressTracker(
+            1_000_000, None, label="Test", cancel_check=lambda: "task was reclaimed"
+        )
+        tracker.CANCEL_CHECK_INTERVAL = 0
+        try:
+            for _ in range(100):
+                tracker.tick("node")
+        except HandlerCancelled:
+            return
+        raise AssertionError("un-logged scan was not cancellable")
+
+    def test_check_is_time_gated_not_per_element(self):
+        """tick() runs tens of millions of times — the check must not."""
+        calls = []
+        tracker = ScanProgressTracker(
+            1_000_000, None, label="Test", cancel_check=lambda: calls.append(1)
+        )
+        for _ in range(100_000):
+            tracker.tick("node")
+        assert len(calls) <= 2, f"cancellation check ran {len(calls)} times in one scan"
+
+    def test_no_check_injected_is_a_no_op(self):
+        """Handlers on an older runner (no injected key) keep working."""
+        tracker = ScanProgressTracker(1_000_000, None, label="Test", cancel_check=None)
+        for _ in range(10_000):
+            tracker.tick("node")
+        tracker.finish()
