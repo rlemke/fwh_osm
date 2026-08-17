@@ -1,0 +1,78 @@
+// Ad-hoc tag queries against the LOCAL extracts — the Overpass replacement.
+//
+// `osm.ops.Extract*` already turns a region's PBF into GeoJSON, but its filter is
+// a closed enum of 25 curated categories (water, parks, healthcare …). Every
+// question outside that set has had to go to Overpass, and Overpass is where
+// this fleet keeps meeting somebody else's rate limit — the tag-quality maps are
+// documented "cache-first, do NOT fan out", the ALPR map is a single query
+// because a fan-out would be throttled.
+//
+// The data is already on disk: an 87 GB planet, 8 continents, ~200 country
+// extracts. This facet opens the filter, so a workflow can ask an arbitrary
+// question and fan out over regions without asking anyone's permission.
+//
+// Backed by tools/_osm_tools/tag_query.py.
+
+namespace osm.query {
+
+    /** Every feature matching an osmium `tags-filter` expression in one region,
+      * as GeoJSON-seq in the cache.
+      *
+      * `region` is a Geofabrik-style key already in the PBF cache
+      * (`europe/germany`, `north-america/us/utah`). `filter` is one or more
+      * osmium terms — `nwr/man_made=surveillance`, `r/boundary=protected_area`,
+      * `nwr/amenity=pharmacy,doctors`.
+      *
+      * The answer is cached per (region, filter): the digest of the normalised
+      * expression is part of the cache path, so asking the same question twice
+      * is free and asking a *different* one cannot silently return the previous
+      * answer. Term order and whitespace do not matter.
+      *
+      * Effect is `io` and cost `moderate`: it reads a large local file and
+      * writes a smaller one — no network, no external service, no rate limit. */
+    event facet TagQuery(
+        region: String,
+        filter: String,
+        force: Boolean = false
+    ) => (
+        path: String,
+        feature_count: Long,
+        digest: String,
+        expression: String,
+        size_bytes: Long,
+        duration_seconds: Double,
+        was_cached: Boolean
+    ) with Effect(kind = "io") with Cost(tier = "moderate")
+}
+
+namespace osm.query.example {
+    use osm.query
+
+    /** The shape this exists for: one question, many regions, no rate limit.
+      *
+      * `limit` is not about politeness here — there is nobody to be polite to.
+      * It bounds how many multi-GB extracts are scanned at once, because the
+      * contended resource is this machine's disk. */
+    workflow QueryRegions(
+        regions: Json,
+        filter: String,
+        concurrency: Int = 2
+    ) => (
+        results: Json
+    ) andThen {
+        scanned = ScanEach(
+            regions = $.regions,
+            filter = $.filter,
+            concurrency = $.concurrency
+        )
+        yield QueryRegions(results = scanned.results)
+    }
+
+    facet ScanEach(regions: Json, filter: String, concurrency: Int) => (results: Json)
+        andThen foreach r in $.regions limit $.concurrency {
+            one = osm.query.TagQuery(region = $.r, filter = $.filter)
+            // `+=` AGGREGATES across iterations; a bare `=` would silently keep
+            // only the last region's answer.
+            yield ScanEach(results += one.feature_count)
+        }
+}

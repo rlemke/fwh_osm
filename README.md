@@ -88,7 +88,7 @@ in [`docs/README.md`](docs/README.md).
 |------|-------|
 | **Flagship & cross-cutting** | [planet-extraction](docs/planet-extraction.md) · [fan-out-pattern](docs/fan-out-pattern.md) |
 | **Ingest & sources** | [cache-and-download](docs/cache-and-download.md) · [source-adapters](docs/source-adapters.md) · [shapefiles](docs/shapefiles.md) · [osm-changes](docs/osm-changes.md) · [clip](docs/clip.md) |
-| **Filter / transform / vocab** | [filters](docs/filters.md) · [transform](docs/transform.md) · [population](docs/population.md) · [vocab](docs/vocab.md) · [spatial](docs/spatial.md) |
+| **Filter / transform / vocab** | [local-tag-queries](docs/local-tag-queries.md) · [filters](docs/filters.md) · [transform](docs/transform.md) · [population](docs/population.md) · [vocab](docs/vocab.md) · [spatial](docs/spatial.md) |
 | **Features / POI / buildings** | [amenities](docs/amenities.md) · [buildings](docs/buildings.md) · [poi](docs/poi.md) · [parks](docs/parks.md) · [boundaries](docs/boundaries.md) |
 | **Visualization / tiles / roads** | [visualization](docs/visualization.md) · [heatmaps](docs/heatmaps.md) · [tiles](docs/tiles.md) · [roads](docs/roads.md) |
 | **Routing** | [routing](docs/routing.md) · [graphhopper](docs/graphhopper.md) · [valhalla](docs/valhalla.md) · [routes](docs/routes.md) · [network](docs/network.md) |

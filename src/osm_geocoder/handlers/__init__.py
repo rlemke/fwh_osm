@@ -147,6 +147,7 @@ def register_all_registry_handlers(runner) -> None:
     from .parks.park_handlers import register_handlers as reg_park
     from .planet.planet_handlers import register_handlers as reg_planet
     from .poi.poi_handlers import register_handlers as reg_poi
+    from .query.query_handlers import register_handlers as reg_query
     from .population.population_handlers import register_handlers as reg_population
     from .roads.road_handlers import register_handlers as reg_road
     from .roads.zoom_handlers import register_handlers as reg_zoom
@@ -175,6 +176,7 @@ def register_all_registry_handlers(runner) -> None:
     reg_park(runner)
     reg_planet(runner)
     reg_poi(runner)
+    reg_query(runner)
     reg_population(runner)
     reg_region(runner)
     reg_update(runner)
