@@ -1,0 +1,173 @@
+"""Publish per-region OSM replication diffs — the producer half of the split.
+
+Phase 1 split the planet and stamped every extract to follow OUR replication
+URL, but never published anything there: each ``state.txt`` carried a bare
+timestamp with no sequenceNumber and no ``.osc.gz`` ever existed. Every extract
+has therefore been a frozen snapshot. This fills those directories.
+
+    python publish_replication.py --status
+    python publish_replication.py --anchor 5051      # one-time baseline
+    python publish_replication.py --days 3           # publish 3 new days
+    python publish_replication.py --days 40          # catch all the way up
+
+The anchor is one-time and NEVER inferred: it must be the last upstream
+sequence already contained in the served extract. Prefer the sequence just
+BEFORE the extract's timestamp — re-applying a day is idempotent, whereas
+anchoring too late leaves a permanent gap in the stream.
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _osm_tools import replication_publish as rp  # noqa: E402
+
+
+def _fmt_bytes(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f}{unit}" if unit == "B" else f"{n:.1f}{unit}"
+        n /= 1024.0
+    return f"{n:.1f}GB"
+
+
+def cmd_status(args) -> int:
+    www = Path(args.www) if args.www else rp.www_root()
+    up_seq, up_ts = rp.upstream_state(args.upstream)
+    print(f"upstream: sequence {up_seq} ({up_ts})")
+    print(f"tree:     {www}")
+    print()
+    print(f"{'region':<20}{'published':>11}{'behind':>8}  extract timestamp")
+    print("-" * 72)
+    for r in rp.discover_regions(www):
+        seq, _ts = rp.region_state(r, www)
+        ext = rp.extract_timestamp(r, www) if args.slow else "(--slow to read)"
+        if seq is None:
+            print(f"{r:<20}{'never':>11}{'—':>8}  {ext}")
+        else:
+            print(f"{r:<20}{seq:>11}{up_seq - seq:>8}  {ext}")
+    return 0
+
+
+def cmd_anchor(args) -> int:
+    www = Path(args.www) if args.www else rp.www_root()
+    regions = args.region or rp.discover_regions(www)
+    ts = rp.diff_timestamp(args.anchor, upstream=args.upstream)
+    if not ts:
+        print(f"could not read upstream timestamp for sequence {args.anchor}", file=sys.stderr)
+        return 1
+    touched = rp.anchor(regions, args.anchor, ts, www=www)
+    print(f"anchored {len(touched)} region(s) at sequence {args.anchor} ({ts}):")
+    for r in touched:
+        print(f"  {r}")
+    print("\nThis is the baseline the next --days run publishes FROM. It must be a")
+    print("sequence already contained in the served extract; if unsure, go one lower —")
+    print("a re-applied day is idempotent, a skipped day is a permanent gap.")
+    return 0
+
+
+def cmd_stamp(args) -> int:
+    import os
+
+    www = Path(args.www) if args.www else rp.www_root()
+    base = args.base_url or os.environ.get(rp.BASE_URL_ENV, "")
+    if not base:
+        print(f"--stamp-extracts needs a base URL (--base-url or ${rp.BASE_URL_ENV})",
+              file=sys.stderr)
+        return 1
+    regions = args.region or rp.discover_regions(www)
+    print(f"stamping {len(regions)} extract(s) — each is a full REWRITE, not a patch\n")
+    rc = 0
+    for r in regions:
+        # The EXTRACT's sequence, never the published head — the head runs
+        # ahead by design, and stamping it would make consumers skip every
+        # diff published so far.
+        seq, ts = rp.extract_state(r, www)
+        if seq is None:
+            print(f"  {r:<20} skipped — no extract sequence recorded; --anchor first")
+            rc = 2
+            continue
+        try:
+            size = rp.stamp_extract(r, seq, ts, f"{base.rstrip('/')}/{r}-updates", www=www)
+        except rp.ReplicationError as exc:
+            print(f"  {r:<20} FAILED — {exc}")
+            rc = 1
+            continue
+        print(f"  {r:<20} sequence {seq} ({ts})  {_fmt_bytes(size)}")
+    return rc
+
+
+def cmd_publish(args) -> int:
+    www = Path(args.www) if args.www else rp.www_root()
+    res = rp.publish(
+        regions=args.region or None,
+        max_days=args.days,
+        upstream=args.upstream,
+        www=www,
+        polys=Path(args.polys) if args.polys else None,
+        dry_run=args.dry,
+    )
+    print(f"upstream at {res.upstream_sequence}; published {res.from_sequence} -> "
+          f"{res.to_sequence} ({res.days} day(s), {_fmt_bytes(res.planet_bytes)} fetched)")
+    for r in res.regions:
+        if r.skipped:
+            print(f"  {r.region:<20} skipped — {r.reason}")
+        elif r.published:
+            print(f"  {r.region:<20} +{len(r.published)} diff(s), "
+                  f"{_fmt_bytes(r.bytes_written)}")
+        else:
+            print(f"  {r.region:<20} nothing to do")
+    if any(r.skipped and "anchor" in r.reason for r in res.regions):
+        return 2
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(prog="publish_replication", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--status", action="store_true", help="show how far behind each region is")
+    p.add_argument("--anchor", type=int, metavar="SEQ",
+                   help="one-time: set the baseline sequence for regions that never published")
+    p.add_argument("--days", type=int, default=0, metavar="N",
+                   help="publish at most N new days of diffs")
+    p.add_argument("--region", action="append", default=[], help="limit to a region (repeatable)")
+    p.add_argument("--www", default="", help=f"published tree (default ${rp.WWW_ENV})")
+    p.add_argument("--polys", default="", help=f"region polygons (default ${rp.POLYS_ENV})")
+    p.add_argument("--upstream", default="", help=f"upstream replication URL (default {rp.DEFAULT_UPSTREAM})")
+    p.add_argument("--stamp-extracts", action="store_true",
+                   help="one-time: write the replication sequence into each served extract's "
+                        "PBF header (REWRITES the file — minutes to an hour each). Without "
+                        "it consumers cannot delta and fall back to a full re-download.")
+    p.add_argument("--base-url", default="",
+                   help=f"--stamp-extracts: URL to stamp (default ${rp.BASE_URL_ENV})")
+    p.add_argument("--slow", action="store_true", help="--status: also read each extract's header")
+    p.add_argument("--dry", action="store_true", help="say what would be fetched, write nothing")
+    p.add_argument("-v", "--verbose", action="store_true")
+    a = p.parse_args(argv)
+    a.upstream = a.upstream or None
+
+    logging.basicConfig(level=logging.INFO if a.verbose else logging.WARNING,
+                        format="%(levelname)s %(message)s")
+    try:
+        if a.status:
+            return cmd_status(a)
+        if a.anchor is not None:
+            return cmd_anchor(a)
+        if a.stamp_extracts:
+            return cmd_stamp(a)
+        if a.days:
+            return cmd_publish(a)
+        p.print_help()
+        return 0
+    except rp.ReplicationError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
