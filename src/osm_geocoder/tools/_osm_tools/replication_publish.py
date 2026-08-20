@@ -204,12 +204,61 @@ def polys_root() -> Path:
     return Path(root)
 
 
+#: Regions may be listed explicitly, which is what a scheduled job should do —
+#: see :func:`discover_regions`.
+REGIONS_ENV = "FW_OSM_SELFHOST_REGIONS"
+
+
 def discover_regions(www: Path | None = None) -> list[str]:
-    """Regions with a published ``<region>-updates/`` directory."""
+    """The regions to publish for.
+
+    Prefers an explicit list (``FW_OSM_SELFHOST_REGIONS``, or a ``regions.json``
+    beside the tree) and only ENUMERATES as a last resort, because enumeration
+    is the operation that fails in the environment this runs in.
+
+    On macOS a LaunchAgent may `stat` a path on an external volume while being
+    denied `readdir` on it (TCC). ``test -d`` and ``test -r`` both pass — they
+    lie — and `ls` returns "Operation not permitted". ``Path.glob`` swallows
+    that OSError and yields nothing, so a denied directory is INDISTINGUISHABLE
+    from a correctly configured tree that happens to contain no regions. The
+    nightly job would then report success having published nothing, for as long
+    as anyone left it running: exactly the silent staleness this whole phase
+    exists to end.
+
+    So the fallback path probes the directory explicitly and raises rather than
+    returning an empty list.
+    """
     w = www or www_root()
-    return sorted(
-        p.name[: -len("-updates")] for p in w.glob("*-updates") if p.is_dir()
-    )
+
+    explicit = os.environ.get(REGIONS_ENV, "").strip()
+    if explicit:
+        return sorted({r for r in re.split(r"[,\s]+", explicit) if r})
+
+    manifest = w.parent / "regions.json"
+    if manifest.exists():
+        try:
+            import json
+
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            # Only the KEYS are trusted: the manifest on this deployment still
+            # carries paths from a previous volume name.
+            keys = sorted({str(e["key"]) for e in data if isinstance(e, dict) and e.get("key")})
+            if keys:
+                return keys
+        except (OSError, ValueError, KeyError, TypeError):
+            pass  # fall through to enumeration
+
+    try:
+        entries = list(w.iterdir())
+    except OSError as exc:
+        raise ReplicationError(
+            f"cannot list {w}: {exc}. On macOS a LaunchAgent is often denied "
+            f"readdir on an external volume even though the path stats fine — "
+            f"grant the agent Full Disk Access, or set {REGIONS_ENV} to the "
+            f"region list so no enumeration is needed."
+        ) from exc
+    return sorted(p.name[: -len("-updates")] for p in entries
+                  if p.is_dir() and p.name.endswith("-updates"))
 
 
 #: Records the sequence the SERVED EXTRACT's data is at, which is NOT the

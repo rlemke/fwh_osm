@@ -197,3 +197,51 @@ def test_all_regions_are_cut_in_ONE_pass_per_day(tmp_path, monkeypatch):
     assert passes == [["alpha", "beta", "gamma"], ["alpha", "beta", "gamma"]]
     for r in res.regions:
         assert r.published == [5089, 5090], r
+
+
+# --- enumeration is the operation that fails -------------------------------
+
+
+def test_an_unreadable_tree_raises_instead_of_reporting_no_regions(tmp_path, monkeypatch):
+    """The failure that made the nightly timer a no-op.
+
+    A macOS LaunchAgent can `stat` an external-volume path while being denied
+    `readdir` on it. `Path.glob` swallows that OSError and yields nothing, so a
+    DENIED directory looked exactly like a correctly configured tree with no
+    regions — the job reported success having published nothing, silently, for
+    as long as anyone left it running.
+    """
+    monkeypatch.delenv(rp.REGIONS_ENV, raising=False)
+
+    def _denied(self):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr("pathlib.Path.iterdir", _denied)
+    with pytest.raises(rp.ReplicationError, match="cannot list"):
+        rp.discover_regions(tmp_path)
+
+
+def test_an_explicit_region_list_avoids_enumeration_entirely(tmp_path, monkeypatch):
+    """What a scheduled job should use: no readdir, so no permission to deny."""
+    monkeypatch.setenv(rp.REGIONS_ENV, "europe, africa  asia")
+
+    def _explode(self):
+        raise AssertionError("must not enumerate when the list is explicit")
+
+    monkeypatch.setattr("pathlib.Path.iterdir", _explode)
+    assert rp.discover_regions(tmp_path) == ["africa", "asia", "europe"]
+
+
+def test_regions_json_is_used_for_keys_only(tmp_path, monkeypatch):
+    """The manifest on this deployment still carries paths from a previous
+    volume name, so trusting its `poly` values would point at nothing."""
+    import json
+
+    monkeypatch.delenv(rp.REGIONS_ENV, raising=False)
+    www = tmp_path / "www"
+    www.mkdir()
+    (tmp_path / "regions.json").write_text(json.dumps([
+        {"key": "europe", "poly": "/Volumes/gone/europe.poly"},
+        {"key": "africa", "poly": "/Volumes/gone/africa.poly"},
+    ]))
+    assert rp.discover_regions(www) == ["africa", "europe"]

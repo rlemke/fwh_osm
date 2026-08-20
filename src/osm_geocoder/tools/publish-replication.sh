@@ -27,4 +27,10 @@ if [ -f "${REPO_ROOT}/.venv/bin/activate" ]; then
     source "${REPO_ROOT}/.venv/bin/activate"
 fi
 
-exec python3 "${SCRIPT_DIR}/publish_replication.py" "$@"
+# Prefer the repo venv's interpreter. A bare `python3` resolves from PATH, and
+# under launchd that is Xcode's system 3.9 — which lacks pyosmium and every
+# other dependency this needs. The failure surfaces far from its cause.
+PY="${FW_ROOT:-$REPO_ROOT}/.venv/bin/python3"
+[ -x "$PY" ] || PY="$HOME/facetwork/.venv/bin/python3"
+[ -x "$PY" ] || PY="$(command -v python3)"
+exec "$PY" "${SCRIPT_DIR}/publish_replication.py" "$@"
