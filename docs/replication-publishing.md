@@ -145,8 +145,26 @@ job has gone on long enough.
 | step | cost |
 |---|---|
 | one day, all 8 regions | 83 MB download + ~30 s CPU (one pass) |
-| stamping oceania (1.6 GB) | ~2 min |
+| stamping central-america (853 MB) | ~1 min |
+| stamping asia (17 GB) | ~20 min |
 | stamping europe (37 GB) | ~40 min |
 | full 39-day catch-up | ~3.2 GB down, ~20 min CPU |
 
-Ongoing, a nightly `--days 2` keeps eight regions current in a few minutes.
+Measured over one real 14-day chunk — 1.3 GB fetched upstream, and this much
+published per region:
+
+| region | 14 days of diffs | full extract |
+|---|---:|---:|
+| europe | 468 MB | 37 GB |
+| asia | 230 MB | 17 GB |
+| north-america | 194 MB | 20 GB |
+| africa | 70 MB | 8.2 GB |
+| south-america | 60 MB | 4.2 GB |
+| russia | 37 MB | 4.2 GB |
+| oceania | 26 MB | 1.6 GB |
+| central-america | 18 MB | 853 MB |
+
+That ratio is the whole argument for the delta path: keeping europe current
+costs ~33 MB a day against the 37 GB a re-download would cost — roughly a
+thousand to one. Ongoing, a nightly `--days 2` keeps all eight regions current
+in a few minutes and well under 100 MB.
