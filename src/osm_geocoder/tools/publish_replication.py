@@ -102,6 +102,31 @@ def cmd_stamp(args) -> int:
     return rc
 
 
+def cmd_apply(args) -> int:
+    import os
+
+    www = Path(args.www) if args.www else rp.www_root()
+    base = args.base_url or os.environ.get(rp.BASE_URL_ENV, "")
+    if not base:
+        print(f"--apply needs a base URL (--base-url or ${rp.BASE_URL_ENV})", file=sys.stderr)
+        return 1
+    regions = args.region or rp.discover_regions(www)
+    print(f"rolling {len(regions)} served extract(s) forward over published diffs\n")
+    rc = 0
+    for r in regions:
+        try:
+            frm, to, size = rp.apply_published(r, base, www=www)
+        except rp.ReplicationError as exc:
+            print(f"  {r:<20} FAILED — {exc}")
+            rc = 1
+            continue
+        if to == frm:
+            print(f"  {r:<20} already at {to}")
+        else:
+            print(f"  {r:<20} {frm} -> {to}  ({_fmt_bytes(size)})")
+    return rc
+
+
 def cmd_publish(args) -> int:
     www = Path(args.www) if args.www else rp.www_root()
     res = rp.publish(
@@ -139,6 +164,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--www", default="", help=f"published tree (default ${rp.WWW_ENV})")
     p.add_argument("--polys", default="", help=f"region polygons (default ${rp.POLYS_ENV})")
     p.add_argument("--upstream", default="", help=f"upstream replication URL (default {rp.DEFAULT_UPSTREAM})")
+    p.add_argument("--apply", action="store_true",
+                   help="roll the SERVED extracts forward over diffs already published "
+                        "for them (one osmium pass each; no HTTP). Publishing does not "
+                        "apply, so anything reading these FILES directly stays as old "
+                        "as the last --apply.")
     p.add_argument("--stamp-extracts", action="store_true",
                    help="one-time: write the replication sequence into each served extract's "
                         "PBF header (REWRITES the file — minutes to an hour each). Without "
@@ -158,6 +188,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_status(a)
         if a.anchor is not None:
             return cmd_anchor(a)
+        if a.apply:
+            return cmd_apply(a)
         if a.stamp_extracts:
             return cmd_stamp(a)
         if a.days:

@@ -123,6 +123,32 @@ there. Stopping early is safe; resuming is free.
 Ongoing cost is one 83 MB download per day plus ~27 s of CPU per region, so a
 nightly `--days 2` keeps eight regions current in a few minutes.
 
+## Rolling the served extracts forward — `--apply`
+
+Publishing does not apply, which is right for consumers but leaves anything
+reading these FILES directly — local tag queries, an offline fallback — as old
+as the last apply. The extract and the stream are different things, and only
+the stream advances nightly.
+
+```bash
+publish-replication.sh --apply            # every region
+publish-replication.sh --apply --region europe
+```
+
+All pending diffs go into ONE `osmium apply-changes` pass: applying day by day
+would re-read and re-write the whole extract each time, so europe's 39 days
+would be 39 x 37 GB instead of once. Measured ~59 MB/s of extract, so the full
+93 GB across eight regions is roughly half an hour.
+
+It **refuses to apply across a gap**. If `state.txt` advertises a sequence whose
+diff is missing, applying anyway produces an extract quietly missing a day while
+its header asserts it is current — and every consumer then trusts that header.
+That is the worst corruption available here, so it errors instead.
+
+After applying, the extract's recorded sequence moves with it. Leaving it behind
+would make the next apply redo everything (harmless but wasteful) and would make
+`--stamp-extracts` write a stale baseline (not harmless at all).
+
 ## Interruption is expected, and safe
 
 Both halves are designed to be killed. During the first catch-up on this

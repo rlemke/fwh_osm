@@ -572,6 +572,86 @@ def stamp_extract(
     return size
 
 
+def apply_published(
+    region: str,
+    base_url: str,
+    *,
+    www: Path | None = None,
+    osmium_bin: str = "osmium",
+) -> tuple[int, int, int]:
+    """Roll a SERVED extract forward over the diffs already published for it.
+
+    Publishing deliberately does not apply (see the module docstring): that is
+    the Geofabrik contract, and it keeps the nightly job cheap. But anything
+    reading these files DIRECTLY — local tag queries, an offline fallback — sees
+    the extract, not the stream, and stays as old as the last apply. This closes
+    that gap without any HTTP round trip, since the diffs are already on disk.
+
+    All pending diffs go into ONE ``osmium apply-changes`` pass. Applying them
+    one at a time would re-read and re-write the whole extract per day, so a
+    39-day catch-up on europe would be 39 x 37 GB instead of once.
+
+    Returns ``(from_seq, to_seq, bytes_written)``.
+    """
+    w = www or www_root()
+    pbf = w / f"{region}-latest.osm.pbf"
+    if not pbf.exists():
+        raise ReplicationError(f"no extract at {pbf}")
+
+    ext_seq, _ext_ts = extract_state(region, w)
+    head_seq, head_ts = region_state(region, w)
+    if ext_seq is None or head_seq is None:
+        raise ReplicationError(
+            f"{region}: no recorded sequences — run --anchor first")
+    if head_seq <= ext_seq:
+        return ext_seq, ext_seq, 0
+
+    updates = w / f"{region}-updates"
+    diffs: list[str] = []
+    for seq in range(ext_seq + 1, head_seq + 1):
+        d = updates / f"{sequence_path(seq)}.osc.gz"
+        if not d.exists():
+            # A hole means the stream is not what state.txt claims. Applying
+            # across it would silently produce an extract missing a day while
+            # its header asserts otherwise — the corruption this design works
+            # hardest to avoid.
+            raise ReplicationError(
+                f"{region}: state.txt advertises {head_seq} but diff {seq} is "
+                f"missing at {d}. Refusing to apply across a gap."
+            )
+        diffs.append(str(d))
+
+    tmp = pbf.with_name(pbf.name + ".applying.osm.pbf")
+    try:
+        subprocess.run(
+            [osmium_bin, "apply-changes", "--overwrite", "-o", str(tmp),
+             f"--output-header=osmosis_replication_sequence_number={head_seq}",
+             f"--output-header=osmosis_replication_timestamp={head_ts}",
+             f"--output-header=osmosis_replication_base_url="
+             f"{base_url.rstrip('/')}/{region}-updates",
+             str(pbf), *diffs],
+            check=True, capture_output=True, text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        tmp.unlink(missing_ok=True)
+        raise ReplicationError(
+            f"osmium apply-changes failed for {region}: "
+            f"{(exc.stderr or '').strip()[:300]}"
+        ) from exc
+    except FileNotFoundError as exc:
+        raise ReplicationError(f"osmium not found ({osmium_bin})") from exc
+
+    size = tmp.stat().st_size
+    # Replace only after a complete pass. An open handle keeps the old inode,
+    # so a consumer mid-download is unaffected.
+    tmp.replace(pbf)
+    # The extract has MOVED, so its recorded sequence must move with it —
+    # otherwise the next apply re-applies everything (harmless but wasteful)
+    # and --stamp-extracts would write a stale baseline.
+    (updates / EXTRACT_STATE).write_text(format_state(head_seq, head_ts), encoding="utf-8")
+    return ext_seq, head_seq, size
+
+
 def anchor(regions: list[str], seq: int, timestamp: str, *, www: Path | None = None) -> list[str]:
     """Set the starting sequence for regions that have never published.
 

@@ -245,3 +245,66 @@ def test_regions_json_is_used_for_keys_only(tmp_path, monkeypatch):
         {"key": "africa", "poly": "/Volumes/gone/africa.poly"},
     ]))
     assert rp.discover_regions(www) == ["africa", "europe"]
+
+
+# --- rolling the served extract forward -------------------------------------
+
+
+def test_apply_refuses_to_cross_a_gap(tmp_path, monkeypatch):
+    """The corruption this design works hardest to avoid.
+
+    If state.txt advertises a sequence whose diff is missing, applying across
+    the hole yields an extract that is quietly missing a day while its header
+    asserts it is current — and every consumer then trusts that header.
+    """
+    www = tmp_path
+    (www / "demo-updates").mkdir(parents=True)
+    (www / "demo-latest.osm.pbf").write_bytes(b"pbf")
+    rp.anchor(["demo"], 5088, "2026-08-18T00:00:00Z", www=www)
+    # Head claims 5090, but only 5089 was ever written.
+    (www / "demo-updates" / "state.txt").write_text(
+        rp.format_state(5090, "2026-08-20T00:00:00Z"), encoding="utf-8")
+    d = www / "demo-updates" / rp.sequence_path(5089)
+    d.parent.mkdir(parents=True, exist_ok=True)
+    d.with_suffix(".osc.gz").write_bytes(b"x")
+
+    with pytest.raises(rp.ReplicationError, match="Refusing to apply across a gap"):
+        rp.apply_published("demo", "http://example/", www=www)
+
+
+def test_apply_is_a_noop_when_the_extract_is_already_at_the_head(tmp_path):
+    www = tmp_path
+    (www / "demo-updates").mkdir(parents=True)
+    (www / "demo-latest.osm.pbf").write_bytes(b"pbf")
+    rp.anchor(["demo"], 5090, "2026-08-20T00:00:00Z", www=www)
+    frm, to, size = rp.apply_published("demo", "http://example/", www=www)
+    assert (frm, to, size) == (5090, 5090, 0)
+
+
+def test_apply_moves_the_recorded_extract_sequence(tmp_path, monkeypatch):
+    """The extract has moved, so its recorded sequence must move with it —
+    otherwise the next apply re-does everything and --stamp-extracts would
+    write a stale baseline."""
+    www = tmp_path
+    (www / "demo-updates").mkdir(parents=True)
+    (www / "demo-latest.osm.pbf").write_bytes(b"pbf")
+    rp.anchor(["demo"], 5089, "2026-08-19T00:00:00Z", www=www)
+    (www / "demo-updates" / "state.txt").write_text(
+        rp.format_state(5090, "2026-08-20T00:00:00Z"), encoding="utf-8")
+    d = (www / "demo-updates" / rp.sequence_path(5090)).with_suffix(".osc.gz")
+    d.parent.mkdir(parents=True, exist_ok=True)
+    d.write_bytes(b"x")
+
+    def _fake_run(cmd, **k):
+        # stand in for osmium: produce the output file it was asked for
+        out = cmd[cmd.index("-o") + 1]
+        pathlib.Path(out).write_bytes(b"applied")
+        class R: returncode = 0
+        return R()
+
+    import pathlib
+    import subprocess as sp
+    monkeypatch.setattr(sp, "run", _fake_run)
+    frm, to, _size = rp.apply_published("demo", "http://example/", www=www)
+    assert (frm, to) == (5089, 5090)
+    assert rp.extract_state("demo", www)[0] == 5090
