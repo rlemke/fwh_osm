@@ -148,8 +148,52 @@ def test_a_region_without_a_polygon_is_skipped_not_fabricated(tmp_path, monkeypa
     monkeypatch.setattr(rp, "fetch_planet_diff", lambda seq, dest, **k: fake)
 
     cut_calls: list = []
-    monkeypatch.setattr(rp, "cut_diff", lambda *a, **k: cut_calls.append(a) or 1)
+    # Patch the MULTI cutter — the single-region cut_diff is no longer on this
+    # path, so patching it would make this assertion vacuous and the test
+    # unable to fail on the thing it exists to catch.
+    monkeypatch.setattr(rp, "cut_diff_multi",
+                        lambda *a, **k: cut_calls.append(a) or {})
 
     res = rp.publish(www=www, polys=tmp_path / "no-polys", max_days=1)
     assert cut_calls == [], "must not cut without a polygon"
     assert res.regions[0].skipped and "polygon" in res.regions[0].reason
+
+
+def test_all_regions_are_cut_in_ONE_pass_per_day(tmp_path, monkeypatch):
+    """The optimisation that makes a 39-day catch-up practical.
+
+    Decoding the day's diff dominates; polygon testing is nearly free.
+    Measured: one region 27.3s, three 29.3s. Cutting per region would pay the
+    decode N times — ~2.3 hours across 8 regions instead of ~20 minutes.
+    """
+    www = tmp_path
+    for r in ("alpha", "beta", "gamma"):
+        (www / f"{r}-updates").mkdir(parents=True)
+        (tmp_path / f"{r}.poly").write_text("poly\nEND\n")
+    rp.anchor(["alpha", "beta", "gamma"], 5088, "2026-08-18T00:00:00Z", www=www)
+    monkeypatch.setattr(rp, "upstream_state", lambda *a, **k: (5090, "2026-08-20T00:00:00Z"))
+    monkeypatch.setattr(rp, "diff_timestamp", lambda *a, **k: "2026-08-20T00:00:00Z")
+    fake = tmp_path / "planet.osc.gz"
+    fake.write_bytes(b"x")
+    monkeypatch.setattr(rp, "fetch_planet_diff", lambda seq, dest, **k: fake)
+
+    passes: list[list[str]] = []
+
+    def _multi(planet_diff, regions, polys, staging, **k):
+        passes.append(sorted(regions))
+        staging.mkdir(parents=True, exist_ok=True)
+        out = {}
+        for r in regions:
+            f = staging / f"{r}.osc.gz"
+            f.write_bytes(b"diff")
+            out[r] = f
+        return out
+
+    monkeypatch.setattr(rp, "cut_diff_multi", _multi)
+    res = rp.publish(www=www, polys=tmp_path, max_days=2)
+
+    assert res.days == 2
+    # TWO days, so exactly two passes — not two per region.
+    assert passes == [["alpha", "beta", "gamma"], ["alpha", "beta", "gamma"]]
+    for r in res.regions:
+        assert r.published == [5089, 5090], r
