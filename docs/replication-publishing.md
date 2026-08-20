@@ -123,7 +123,30 @@ there. Stopping early is safe; resuming is free.
 Ongoing cost is one 83 MB download per day plus ~27 s of CPU per region, so a
 nightly `--days 2` keeps eight regions current in a few minutes.
 
-**Still to do for full coverage:** only `central-america` has been stamped and
-caught up; the other seven are anchored but still need `--stamp-extracts` (a
-full PBF rewrite each — minutes for oceania, most of an hour for europe) and a
-bounded catch-up to the head.
+## Interruption is expected, and safe
+
+Both halves are designed to be killed. During the first catch-up on this
+deployment they were, mid-run, and neither left damage:
+
+* **Stamping** replaces the extract only after a *complete* rewrite, so the
+  interrupted region (asia, 17 GB) kept its original file and left a
+  `.stamping.osm.pbf` temp to delete. A half-written extract served to a
+  consumer would be worse than a stale one.
+* **Publishing** writes `state.txt` *after* each diff lands, so the run stopped
+  at a consistent 5062 for all eight regions and resumed from there for free.
+  It never advertises a diff that is not on disk.
+
+Prefer bounded chunks (`--days 14`, one region per stamp) over one long run:
+each completes, and nothing is lost when something outside the tool decides the
+job has gone on long enough.
+
+## Cost, measured
+
+| step | cost |
+|---|---|
+| one day, all 8 regions | 83 MB download + ~30 s CPU (one pass) |
+| stamping oceania (1.6 GB) | ~2 min |
+| stamping europe (37 GB) | ~40 min |
+| full 39-day catch-up | ~3.2 GB down, ~20 min CPU |
+
+Ongoing, a nightly `--days 2` keeps eight regions current in a few minutes.
