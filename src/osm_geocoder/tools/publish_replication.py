@@ -117,7 +117,16 @@ def cmd_check(args) -> int:
     www = Path(args.www) if args.www else rp.www_root()
     problems: list[str] = []
 
-    up_seq, up_ts = rp.upstream_state(args.upstream)
+    try:
+        up_seq, up_ts = rp.upstream_state(args.upstream)
+    except rp.ReplicationError as exc:
+        # CANNOT VERIFY is not the same as STALLED, and conflating them is how
+        # a monitor teaches you to ignore it: a laptop off the network would
+        # alarm every few hours while the chain is perfectly healthy. Distinct
+        # exit code (2), so a watchdog can stay silent for this.
+        print(f"cannot verify: upstream unreachable ({exc})")
+        print("\nUNKNOWN — not a stall; the chain could not be checked.")
+        return 2
     print(f"upstream: {up_seq} ({up_ts})")
 
     behind_limit = args.max_days_behind
@@ -238,9 +247,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--polys", default="", help=f"region polygons (default ${rp.POLYS_ENV})")
     p.add_argument("--upstream", default="", help=f"upstream replication URL (default {rp.DEFAULT_UPSTREAM})")
     p.add_argument("--check", action="store_true",
-                   help="verify the whole chain (stream + indexes) and exit non-zero if "
-                        "anything has stalled. Every other failure here is loud; a stopped "
-                        "nightly job is not, because consumers just fall back.")
+                   help="verify the whole chain (stream + indexes). Exit 0 healthy, "
+                        "1 STALLED, 2 could-not-verify (e.g. no network) — 2 is deliberately "
+                        "distinct so a monitor does not cry wolf when it is merely offline.")
     p.add_argument("--check-index", action="append", default=[], metavar="NAME",
                    help="index to include in --check (default $FW_OSM_NIGHTLY_INDEXES)")
     p.add_argument("--max-days-behind", type=int, default=3,
