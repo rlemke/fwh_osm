@@ -102,6 +102,76 @@ def cmd_stamp(args) -> int:
     return rc
 
 
+def cmd_check(args) -> int:
+    """Verify the whole chain and exit non-zero if any link has stalled.
+
+    Every other failure in this pipeline is loud. This one was not: if the
+    nightly job dies, the stream stops advancing, the index ages out of its
+    freshness budget, and consumers quietly revert to their fallback. Nothing
+    errors — the maps keep rendering, from a slower source, forever. So the
+    stall needs something that actively looks for it.
+    """
+    import os
+    from datetime import UTC, datetime
+
+    www = Path(args.www) if args.www else rp.www_root()
+    problems: list[str] = []
+
+    up_seq, up_ts = rp.upstream_state(args.upstream)
+    print(f"upstream: {up_seq} ({up_ts})")
+
+    behind_limit = args.max_days_behind
+    for r in rp.discover_regions(www):
+        seq, _ts = rp.region_state(r, www)
+        if seq is None:
+            problems.append(f"{r}: never published")
+            continue
+        behind = up_seq - seq
+        flag = "" if behind <= behind_limit else "  <-- STALLED"
+        print(f"  stream {r:<18} {seq}  ({behind} behind){flag}")
+        if behind > behind_limit:
+            problems.append(f"{r}: stream {behind} days behind (limit {behind_limit})")
+
+    names = [i for i in (args.check_index or []) if i]
+    if not names:
+        names = [i for i in os.environ.get("FW_OSM_NIGHTLY_INDEXES", "").replace(",", " ").split() if i]
+    for name in names:
+        try:
+            from _osm_tools import tag_index as ti
+
+            st = ti.stats(name)
+        except Exception as exc:  # noqa: BLE001
+            problems.append(f"index {name}: unreadable ({exc})")
+            continue
+        age_h = None
+        if st.updated_at:
+            try:
+                when = datetime.strptime(st.updated_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+                age_h = (datetime.now(UTC) - when).total_seconds() / 3600.0
+            except ValueError:
+                age_h = None
+        behind = (up_seq - st.sequence) if st.sequence is not None else None
+        age_s = f"{age_h:.0f}h" if age_h is not None else "unknown"
+        flag = ""
+        if age_h is None or age_h > args.max_index_age_hours:
+            flag = "  <-- STALLED"
+            problems.append(f"index {name}: last updated {age_s} ago "
+                            f"(limit {args.max_index_age_hours:.0f}h)")
+        elif behind is not None and behind > behind_limit:
+            flag = "  <-- BEHIND"
+            problems.append(f"index {name}: {behind} sequences behind")
+        print(f"  index  {name:<18} {st.sequence}  {st.count} rows, updated {age_s} ago{flag}")
+
+    print()
+    if problems:
+        print("STALLED:")
+        for p_ in problems:
+            print(f"  - {p_}")
+        return 1
+    print("OK — stream and indexes are current.")
+    return 0
+
+
 def cmd_apply(args) -> int:
     import os
 
@@ -167,6 +237,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--www", default="", help=f"published tree (default ${rp.WWW_ENV})")
     p.add_argument("--polys", default="", help=f"region polygons (default ${rp.POLYS_ENV})")
     p.add_argument("--upstream", default="", help=f"upstream replication URL (default {rp.DEFAULT_UPSTREAM})")
+    p.add_argument("--check", action="store_true",
+                   help="verify the whole chain (stream + indexes) and exit non-zero if "
+                        "anything has stalled. Every other failure here is loud; a stopped "
+                        "nightly job is not, because consumers just fall back.")
+    p.add_argument("--check-index", action="append", default=[], metavar="NAME",
+                   help="index to include in --check (default $FW_OSM_NIGHTLY_INDEXES)")
+    p.add_argument("--max-days-behind", type=int, default=3,
+                   help="--check: stream/index days behind upstream before stalling (3)")
+    p.add_argument("--max-index-age-hours", type=float, default=72.0,
+                   help="--check: index age before stalling (72)")
     p.add_argument("--update-index", action="append", default=[], metavar="NAME",
                    help="also advance this tag index with each day's diff (repeatable). "
                         "Done in the publish loop because the diff is already local and "
@@ -195,6 +275,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_status(a)
         if a.anchor is not None:
             return cmd_anchor(a)
+        if a.check:
+            return cmd_check(a)
         if a.apply:
             return cmd_apply(a)
         if a.stamp_extracts:
