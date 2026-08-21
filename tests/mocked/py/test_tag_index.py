@@ -170,3 +170,35 @@ def test_export_writes_a_feature_collection(tmp_path):
     assert f["geometry"]["coordinates"] == [10.5, -3.25]
     assert f["properties"]["osm_id"] == 7
     assert f["properties"]["operator"] == "x", "verbatim tags are preserved"
+
+
+def test_the_last_operation_in_a_diff_wins(monkeypatch):
+    """A change file may carry several versions of one node in a single day.
+
+    The first implementation collected all removals and all upserts and ran
+    removals-then-upserts, which REORDERS them: a node upserted early and
+    deleted later had the delete applied first and the insert second, leaving a
+    camera in the index that no longer exists. Real data showed the symptom —
+    1325 upserts producing 1256 rows.
+    """
+    _seed()
+    # created as ALPR, then deleted, within one diff
+    up, _rm = _apply(monkeypatch, "t", [
+        _FakeNode(42, tags={"surveillance:type": "ALPR"}),
+        _FakeNode(42, visible=False),
+    ], 101)
+    assert ti.stats("t").count == 0, "the delete came last and must win"
+    assert up == 0
+
+
+def test_a_delete_then_recreate_in_one_diff_keeps_the_node(monkeypatch):
+    """The mirror case, which the old code got right only by accident."""
+    _seed(rows=[(42, 1.0, 2.0, {"surveillance:type": "ALPR"})])
+    _apply(monkeypatch, "t", [
+        _FakeNode(42, visible=False),
+        _FakeNode(42, tags={"surveillance:type": "ALPR"}, lon=9.0, lat=8.0),
+    ], 101)
+    con = ti._connect("t")
+    row = con.execute("SELECT lon, lat FROM nodes WHERE id = 42").fetchone()
+    con.close()
+    assert row == (9.0, 8.0), "the recreate came last and must win"

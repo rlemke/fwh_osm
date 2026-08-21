@@ -240,25 +240,37 @@ def update_from_diff(name: str, diff: Path, sequence: int) -> tuple[int, int]:
                 f"and skip {have_i + 1}..{sequence - 1}"
             )
 
-        upserts: list[tuple] = []
-        removals: list[tuple] = []
+        # LAST operation per id wins, in file order.
+        #
+        # A change file may carry SEVERAL versions of the same node — created
+        # then deleted, or edited twice, within one day. Collecting all removals
+        # and all upserts into two batches and running removals-then-upserts
+        # reorders those: a node upserted early and DELETED later would have the
+        # delete applied first and the insert second, leaving a camera in the
+        # index that no longer exists. The real planet diff showed the symptom —
+        # 1325 upserts producing 1256 rows — which is what prompted looking.
+        #
+        # A dict keyed by id, written in file order, keeps the last word and is
+        # also fewer statements than the two-batch form.
+        ops: dict[int, tuple | None] = {}
 
         class _H(osmium.SimpleHandler):
             def node(self, n):
                 if not n.visible:
-                    removals.append((n.id,))
+                    ops[n.id] = None  # remove
                     return
                 tags = {t.k: t.v for t in n.tags}
                 if matches(tags, terms):
-                    upserts.append((n.id, n.location.lon, n.location.lat,
-                                    json.dumps(tags)))
+                    ops[n.id] = (n.id, n.location.lon, n.location.lat, json.dumps(tags))
                 else:
                     # May have matched before this edit. Removing an id that is
                     # not present is a no-op, so this is safe and necessary.
-                    removals.append((n.id,))
+                    ops[n.id] = None
 
         _H().apply_file(str(diff))
 
+        upserts = [v for v in ops.values() if v is not None]
+        removals = [(k,) for k, v in ops.items() if v is None]
         con.executemany("DELETE FROM nodes WHERE id = ?", removals)
         con.executemany(
             "INSERT OR REPLACE INTO nodes(id, lon, lat, tags) VALUES(?,?,?,?)", upserts)
