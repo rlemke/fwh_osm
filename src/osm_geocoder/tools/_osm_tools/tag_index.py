@@ -71,6 +71,13 @@ class IndexStats:
     sequence: int | None
     count: int
     expression: str
+    updated_at: str = ""
+
+
+def _now_iso() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def index_root() -> Path:
@@ -199,6 +206,7 @@ def build(
             log.info("indexed %d from %s", len(rows), src.name)
         _meta_set(con, "expression", spec)
         _meta_set(con, "sources", json.dumps([str(p) for p in sources]))
+        _meta_set(con, "updated_at", _now_iso())
         if sequence is not None:
             _meta_set(con, "sequence", str(sequence))
         con.commit()
@@ -275,6 +283,11 @@ def update_from_diff(name: str, diff: Path, sequence: int) -> tuple[int, int]:
         con.executemany(
             "INSERT OR REPLACE INTO nodes(id, lon, lat, tags) VALUES(?,?,?,?)", upserts)
         _meta_set(con, "sequence", str(sequence))
+        # Wall clock, not the diff's timestamp. A consumer's real question is
+        # "has the nightly been running?", and a sequence alone cannot answer
+        # it: an index stuck three weeks ago still reports a plausible-looking
+        # number. Together they say both how far it got and when it last moved.
+        _meta_set(con, "updated_at", _now_iso())
         con.commit()
         return len(upserts), len(removals)
     finally:
@@ -290,6 +303,7 @@ def stats(name: str) -> IndexStats:
             sequence=int(seq) if seq is not None else None,
             count=con.execute("SELECT COUNT(*) FROM nodes").fetchone()[0],
             expression=_meta_get(con, "expression") or "",
+            updated_at=_meta_get(con, "updated_at") or "",
         )
     finally:
         con.close()
