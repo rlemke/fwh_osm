@@ -136,9 +136,12 @@ def cmd_publish(args) -> int:
         www=www,
         polys=Path(args.polys) if args.polys else None,
         dry_run=args.dry,
+        update_indexes=[i for i in (args.update_index or []) if i],
     )
     print(f"upstream at {res.upstream_sequence}; published {res.from_sequence} -> "
           f"{res.to_sequence} ({res.days} day(s), {_fmt_bytes(res.planet_bytes)} fetched)")
+    for e in res.index_errors:
+        print(f"  INDEX ERROR {e}")
     for r in res.regions:
         if r.skipped:
             print(f"  {r.region:<20} skipped — {r.reason}")
@@ -149,7 +152,7 @@ def cmd_publish(args) -> int:
             print(f"  {r.region:<20} nothing to do")
     if any(r.skipped and "anchor" in r.reason for r in res.regions):
         return 2
-    return 0
+    return 1 if res.index_errors else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -164,6 +167,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--www", default="", help=f"published tree (default ${rp.WWW_ENV})")
     p.add_argument("--polys", default="", help=f"region polygons (default ${rp.POLYS_ENV})")
     p.add_argument("--upstream", default="", help=f"upstream replication URL (default {rp.DEFAULT_UPSTREAM})")
+    p.add_argument("--update-index", action="append", default=[], metavar="NAME",
+                   help="also advance this tag index with each day's diff (repeatable). "
+                        "Done in the publish loop because the diff is already local and "
+                        "the sequences are already walked in order.")
     p.add_argument("--apply", action="store_true",
                    help="roll the SERVED extracts forward over diffs already published "
                         "for them (one osmium pass each; no HTTP). Publishing does not "

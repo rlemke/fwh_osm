@@ -308,3 +308,75 @@ def test_apply_moves_the_recorded_extract_sequence(tmp_path, monkeypatch):
     frm, to, _size = rp.apply_published("demo", "http://example/", www=www)
     assert (frm, to) == (5089, 5090)
     assert rp.extract_state("demo", www)[0] == 5090
+
+
+# --- index updates ride along with publishing -------------------------------
+
+
+def _fake_cut(planet_diff, regions, polys, staging, **kwargs):
+    """Stand in for osmium: write a stub diff per region.
+
+    Written as a function on purpose. The first attempt was a lambda using
+    `write_bytes(...) is None` as a filter — write_bytes returns a BYTE COUNT,
+    so the comprehension produced an empty dict and the test failed for a reason
+    that had nothing to do with what it was testing.
+    """
+    staging.mkdir(parents=True, exist_ok=True)
+    out = {}
+    for r in regions:
+        f = staging / f"{r}.osc.gz"
+        f.write_bytes(b"d")
+        out[r] = f
+    return out
+
+
+def test_indexes_advance_with_the_same_diff(tmp_path, monkeypatch):
+    """The index update uses the planet diff already downloaded for that
+    sequence, inside the loop that already walks sequences in order. A separate
+    pass would have to reconstruct both facts, and could get either wrong."""
+    www = tmp_path
+    (www / "demo-updates").mkdir(parents=True)
+    (tmp_path / "demo.poly").write_text("poly\nEND\n")
+    rp.anchor(["demo"], 5088, "2026-08-18T00:00:00Z", www=www)
+    monkeypatch.setattr(rp, "upstream_state", lambda *a, **k: (5090, "2026-08-20T00:00:00Z"))
+    monkeypatch.setattr(rp, "diff_timestamp", lambda *a, **k: "2026-08-20T00:00:00Z")
+    fake = tmp_path / "planet.osc.gz"
+    fake.write_bytes(b"x")
+    monkeypatch.setattr(rp, "fetch_planet_diff", lambda seq, dest, **k: fake)
+    monkeypatch.setattr(rp, "cut_diff_multi", _fake_cut)
+
+    seen: list[tuple[str, int]] = []
+    import osm_geocoder.tools._osm_tools.tag_index as ti
+    monkeypatch.setattr(ti, "update_from_diff",
+                        lambda name, diff, seq: (seen.append((name, seq)), (1, 0))[1])
+
+    res = rp.publish(www=www, polys=tmp_path, max_days=2, update_indexes=["alpr"])
+    assert res.days == 2
+    assert seen == [("alpr", 5089), ("alpr", 5090)], seen
+    assert res.index_errors == []
+
+
+def test_a_failing_index_does_not_stop_the_stream(tmp_path, monkeypatch):
+    """Diffs on disk are the durable artefact — an index can always be rebuilt
+    from them, so an index fault must not cost the day's replication."""
+    www = tmp_path
+    (www / "demo-updates").mkdir(parents=True)
+    (tmp_path / "demo.poly").write_text("poly\nEND\n")
+    rp.anchor(["demo"], 5089, "2026-08-19T00:00:00Z", www=www)
+    monkeypatch.setattr(rp, "upstream_state", lambda *a, **k: (5090, "2026-08-20T00:00:00Z"))
+    monkeypatch.setattr(rp, "diff_timestamp", lambda *a, **k: "2026-08-20T00:00:00Z")
+    fake = tmp_path / "planet.osc.gz"
+    fake.write_bytes(b"x")
+    monkeypatch.setattr(rp, "fetch_planet_diff", lambda seq, dest, **k: fake)
+    monkeypatch.setattr(rp, "cut_diff_multi", _fake_cut)
+
+    import osm_geocoder.tools._osm_tools.tag_index as ti
+
+    def _boom(name, diff, seq):
+        raise ti.IndexError_("disk on fire")
+
+    monkeypatch.setattr(ti, "update_from_diff", _boom)
+    res = rp.publish(www=www, polys=tmp_path, max_days=1, update_indexes=["alpr"])
+    assert res.days == 1, "the day still published"
+    assert res.regions[0].published == [5090]
+    assert res.index_errors and "disk on fire" in res.index_errors[0]

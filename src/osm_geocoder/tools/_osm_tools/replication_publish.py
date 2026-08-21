@@ -114,6 +114,7 @@ class PublishResult:
     days: int
     regions: list[RegionResult] = field(default_factory=list)
     planet_bytes: int = 0
+    index_errors: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -438,8 +439,16 @@ def publish(
     osmium_bin: str | None = None,
     dry_run: bool = False,
     work_dir: Path | None = None,
+    update_indexes: list[str] | None = None,
 ) -> PublishResult:
     """Publish new per-region diffs, bounded by ``max_days``.
+
+    ``update_indexes`` advances each named tag index in lockstep, using the
+    planet diff already downloaded for that sequence. Doing it here rather than
+    in a second pass is not just convenience: the diff is already local, it is
+    already the right sequence, and the sequences are already being walked in
+    order — which is exactly what an index update requires and what a separate
+    job would have to reconstruct (and could get wrong).
 
     Bounded on purpose. A region that has never published (the Phase 1 state)
     is arbitrarily far behind, and an unbounded catch-up would download tens of
@@ -544,6 +553,23 @@ def publish(
                     format_state(seq, ts), encoding="utf-8"
                 )
             shutil.rmtree(cut_stage, ignore_errors=True)
+            # Advance any indexes with the SAME diff, before declaring the day
+            # done. An index that falls behind silently is the failure mode this
+            # design keeps meeting; keeping it in step with publishing means
+            # there is only one sequence to reason about.
+            for idx in (update_indexes or []):
+                try:
+                    from .tag_index import update_from_diff
+
+                    up, rm = update_from_diff(idx, planet_diff, seq)
+                    log.info("index %s @%d: +%d -%d", idx, seq, up, rm)
+                except Exception as exc:  # noqa: BLE001
+                    # A failing index must not stop the replication stream —
+                    # diffs already on disk are the durable artefact and an
+                    # index can always be rebuilt from them. Report loudly.
+                    log.error("index %s failed at %d: %s", idx, seq, exc)
+                    result.index_errors.append(f"{idx}@{seq}: {exc}")
+
             result.days += 1
             result.to_sequence = seq
     finally:
