@@ -63,6 +63,36 @@ BASE_URL_ENV = "FW_OSM_SELFHOST_BASE_URL"
 USER_AGENT = "facetwork-osm-selfhost/1.0 (+https://github.com/rlemke/facetwork)"
 
 
+#: Where Homebrew puts osmium on arm64 / intel macs, and the usual Linux spot.
+#: Searched only after $FW_OSMIUM_BIN and PATH.
+_OSMIUM_FALLBACKS = ("/opt/homebrew/bin/osmium", "/usr/local/bin/osmium", "/usr/bin/osmium")
+
+
+def osmium_bin_resolve() -> str:
+    """Resolve the osmium binary without relying on PATH.
+
+    launchd gives a job a MINIMAL environment, and the wrapper is `bash -l`,
+    which reads bash's profile — not the zsh profile where Homebrew's path is
+    actually set on this machine. So a bare "osmium" resolves interactively and
+    vanishes under the timer, which is how the first scheduled run died with
+    "osmium not found" after everything passed by hand. (The same minimal
+    environment had already produced Xcode's sandboxed python3 in place of the
+    venv, so this is the third variant of one root cause.)
+
+    Order: explicit override, then PATH, then the known install locations.
+    """
+    explicit = os.environ.get("FW_OSMIUM_BIN", "").strip()
+    if explicit:
+        return explicit
+    found = shutil.which("osmium")
+    if found:
+        return found
+    for cand in _OSMIUM_FALLBACKS:
+        if os.path.exists(cand):
+            return cand
+    return "osmium"  # let the caller fail with a clear message
+
+
 class ReplicationError(RuntimeError):
     """Raised when diffs cannot be produced or published."""
 
@@ -299,7 +329,7 @@ def extract_timestamp(region: str, www: Path | None = None) -> str:
         return ""
     try:
         out = subprocess.run(
-            ["osmium", "fileinfo", str(pbf)],
+            [osmium_bin_resolve(), "fileinfo", str(pbf)],
             capture_output=True, text=True, timeout=120, check=True,
         ).stdout
     except Exception:  # noqa: BLE001
@@ -308,13 +338,14 @@ def extract_timestamp(region: str, www: Path | None = None) -> str:
     return m.group(1) if m else ""
 
 
-def cut_diff(planet_diff: Path, poly: Path, out: Path, *, osmium_bin: str = "osmium") -> int:
+def cut_diff(planet_diff: Path, poly: Path, out: Path, *, osmium_bin: str | None = None) -> int:
     """Cut a planet diff down to one region's polygon.
 
     ``--with-history`` is REQUIRED: a change file carries several versions of
     the same object, and without it osmium rejects the input rather than
     silently keeping one — the flag is what makes this legal, not an option.
     """
+    osmium_bin = osmium_bin or osmium_bin_resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".part.osc.gz")
     try:
@@ -341,7 +372,7 @@ def cut_diff_multi(
     polys: Path,
     staging: Path,
     *,
-    osmium_bin: str = "osmium",
+    osmium_bin: str | None = None,
 ) -> dict[str, Path]:
     """Cut one planet diff to MANY region polygons in a single osmium pass.
 
@@ -358,6 +389,7 @@ def cut_diff_multi(
     """
     import json
 
+    osmium_bin = osmium_bin or osmium_bin_resolve()
     staging.mkdir(parents=True, exist_ok=True)
     usable = [r for r in regions if (polys / f"{r}.poly").exists()]
     if not usable:
@@ -403,7 +435,7 @@ def publish(
     upstream: str | None = None,
     www: Path | None = None,
     polys: Path | None = None,
-    osmium_bin: str = "osmium",
+    osmium_bin: str | None = None,
     dry_run: bool = False,
     work_dir: Path | None = None,
 ) -> PublishResult:
@@ -463,6 +495,7 @@ def publish(
         result.to_sequence = from_seq
         return result
 
+    osmium_bin = osmium_bin or osmium_bin_resolve()
     tmp_work = work_dir or Path(tempfile.mkdtemp(prefix="osm-repl-"))
     tmp_work.mkdir(parents=True, exist_ok=True)
     per_region = {r: RegionResult(region=r) for r in names}
@@ -528,7 +561,7 @@ def stamp_extract(
     base_url: str,
     *,
     www: Path | None = None,
-    osmium_bin: str = "osmium",
+    osmium_bin: str | None = None,
 ) -> int:
     """Write the replication baseline into a served extract's PBF header.
 
@@ -546,6 +579,7 @@ def stamp_extract(
 
     Returns the rewritten size in bytes.
     """
+    osmium_bin = osmium_bin or osmium_bin_resolve()
     w = www or www_root()
     pbf = w / f"{region}-latest.osm.pbf"
     if not pbf.exists():
@@ -577,7 +611,7 @@ def apply_published(
     base_url: str,
     *,
     www: Path | None = None,
-    osmium_bin: str = "osmium",
+    osmium_bin: str | None = None,
 ) -> tuple[int, int, int]:
     """Roll a SERVED extract forward over the diffs already published for it.
 
@@ -598,6 +632,7 @@ def apply_published(
     if not pbf.exists():
         raise ReplicationError(f"no extract at {pbf}")
 
+    osmium_bin = osmium_bin or osmium_bin_resolve()
     ext_seq, _ext_ts = extract_state(region, w)
     head_seq, head_ts = region_state(region, w)
     if ext_seq is None or head_seq is None:
