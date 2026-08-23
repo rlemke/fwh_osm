@@ -32,6 +32,12 @@ MASTER_SEQ = 500
 UNREACHABLE = "http://replication.invalid/planet"
 
 
+def _seq_of(pbf):
+    """Replication sequence in a PBF header, read independently of the module."""
+    import osmium.replication as _r
+    return _r.get_replication_header(str(pbf)).sequence
+
+
 def _make_master(tmp_path):
     xml = tmp_path / "src.osm"
     xml.write_text(SOURCE_XML)
@@ -98,3 +104,64 @@ def test_cli_smoke(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["master"]["advanced"] is False
     assert payload["regions"][0]["sequence"] == MASTER_SEQ
+
+
+def test_maintain_refuses_to_move_regions_backwards(tmp_path):
+    """A stale master must not overwrite newer published extracts.
+
+    The regression this guards: on 2026-08-23 the master sat at sequence 5051
+    with NO replication header while the served tree was at 5090, kept current
+    by the per-region diff publisher. `update_master` cannot advance a
+    headerless master and deliberately never raises, so the nightly run would
+    have re-extracted every region 39 days BACKWARDS and stranded the published
+    5091+ diffs off a base they no longer apply to.
+    """
+    master = _make_master(tmp_path)          # sequence 500
+    out = tmp_path / "out"
+    regions = [{"key": "demo/west", "bbox": [0.0, 0.0, 0.5, 1.0]}]
+
+    # First cycle publishes at the master's sequence.
+    pm.maintain(master=master, out=str(out), regions=regions,
+                base_url=BASE_URL, strategy="simple")
+    assert _seq_of(out / "demo/west-latest.osm.pbf") == MASTER_SEQ
+
+    # Now the served tree moves AHEAD of the master, as the diff publisher does.
+    ahead = MASTER_SEQ + 40
+    subprocess.run(
+        ["osmium", "cat", str(out / "demo/west-latest.osm.pbf"),
+         "-o", str(out / "demo/west-latest.osm.pbf"), "--overwrite",
+         f"--output-header=osmosis_replication_base_url={BASE_URL}/demo/west-updates",
+         f"--output-header=osmosis_replication_sequence_number={ahead}",
+         "--output-header=osmosis_replication_timestamp=2026-02-10T00:00:00Z"],
+        check=True,
+    )
+    assert _seq_of(out / "demo/west-latest.osm.pbf") == ahead
+
+    with pytest.raises(pm.BootstrapError) as e:
+        pm.maintain(master=master, out=str(out), regions=regions,
+                    base_url=BASE_URL, strategy="simple")
+    msg = str(e.value)
+    assert "refusing to re-extract" in msg
+    assert str(ahead) in msg and str(MASTER_SEQ) in msg
+
+    # And the published extract is untouched — the point of refusing.
+    assert _seq_of(out / "demo/west-latest.osm.pbf") == ahead
+
+
+def test_maintain_refuses_when_master_has_no_replication_header(tmp_path):
+    """The exact shape found in production: a raw planet dump, never stamped."""
+    xml = tmp_path / "src.osm"
+    xml.write_text(SOURCE_XML)
+    bare = tmp_path / "bare.osm.pbf"
+    subprocess.run(["osmium", "cat", str(xml), "-o", str(bare), "--overwrite"], check=True)
+
+    out = tmp_path / "out"
+    regions = [{"key": "demo/west", "bbox": [0.0, 0.0, 0.5, 1.0]}]
+    # Seed a published tree from a properly-stamped master.
+    pm.maintain(master=_make_master(tmp_path), out=str(out), regions=regions,
+                base_url=BASE_URL, strategy="simple")
+
+    with pytest.raises(pm.BootstrapError) as e:
+        pm.maintain(master=str(bare), out=str(out), regions=regions,
+                    base_url=BASE_URL, strategy="simple")
+    assert "NO replication header" in str(e.value)

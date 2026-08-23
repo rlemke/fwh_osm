@@ -34,7 +34,7 @@ from typing import Callable
 import osmium.replication as _repl
 from osmium.replication.server import ReplicationServer
 
-from .planet_bootstrap import RegionResult, bootstrap
+from .planet_bootstrap import BootstrapError, RegionResult, bootstrap
 
 # apply_diffs_to_file's max_size is in KB; cap per-run catch-up (default 1 GB).
 _KB_PER_MB = 1024
@@ -101,6 +101,27 @@ def update_master(master: str, *, max_diff_mb: int = 1024,
     return MasterUpdate(h.sequence, newseq, "updated", True)
 
 
+def published_sequence(out: str, regions: list[dict]) -> int | None:
+    """Highest replication sequence already published under ``out``.
+
+    What consumers are currently being served. Read from the extracts' own
+    headers rather than any state file, because the header is what a consumer
+    actually follows.
+    """
+    best: int | None = None
+    for r in regions:
+        p = Path(out) / f"{r['key']}-latest.osm.pbf"
+        if not p.exists():
+            continue
+        try:
+            h = _repl.get_replication_header(str(p))
+        except Exception:  # unreadable/headerless extract tells us nothing
+            continue
+        if h.sequence is not None:
+            best = h.sequence if best is None else max(best, h.sequence)
+    return best
+
+
 def maintain(*, master: str, out: str, regions: list[dict], base_url: str,
              strategy: str = "smart", max_diff_mb: int = 1024,
              on_log: Callable[[str], None] | None = None) -> MaintainResult:
@@ -109,10 +130,47 @@ def maintain(*, master: str, out: str, regions: list[dict], base_url: str,
     Returns the :class:`MasterUpdate` and the per-region :class:`RegionResult`s.
     Propagates :class:`~planet_bootstrap.BootstrapError` from the re-extract (a
     hard failure — bad region spec, osmium error, or header round-trip mismatch).
+
+    **Refuses to re-extract from a master that is BEHIND what is already
+    published.** ``update_master`` deliberately never raises, so that a flaky
+    replication host degrades to "re-extract at the current sequence" instead of
+    failing the run. That is safe only while the master is at least as new as
+    the served tree — and the assumption is silently false in two real cases: a
+    master with no replication header (it can never advance, so every run
+    re-extracts the same stale data), and a master whose diffs have been failing
+    while the regions were kept current another way.
+
+    Both were live here on 2026-08-23: the master sat at sequence 5051 with no
+    header at all while the served extracts were at 5090, so the next scheduled
+    run would have rewritten every region 39 days BACKWARDS and left the
+    published 5091+ diffs dangling off a base they no longer apply to. Losing
+    39 days of data to a job whose whole purpose is freshness is the kind of
+    thing that must fail loudly, so this raises rather than logging and
+    continuing.
     """
     log = on_log or (lambda _m: None)
     upd = update_master(master, max_diff_mb=max_diff_mb, on_log=log)
     log(f"master: {upd.old_sequence} -> {upd.new_sequence} ({upd.status})")
+
+    published = published_sequence(out, regions)
+    if published is not None:
+        if upd.new_sequence is None:
+            raise BootstrapError(
+                f"refusing to re-extract: {master} has NO replication header, so it "
+                f"cannot advance, while the served tree is at sequence {published}. "
+                "Re-extracting would overwrite the published extracts with whatever "
+                "vintage the master happens to be. Give the master a replication "
+                "header first (pyosmium-up-to-date writes one)."
+            )
+        if upd.new_sequence < published:
+            raise BootstrapError(
+                f"refusing to re-extract: master is at sequence {upd.new_sequence} but "
+                f"the served tree is already at {published} — re-extracting would move "
+                f"every region BACKWARDS by {published - upd.new_sequence} diffs and "
+                f"strand the published diffs above {upd.new_sequence}. "
+                f"master update status: {upd.status!r}."
+            )
+
     results = bootstrap(source=master, out=out, regions=regions, base_url=base_url,
                         strategy=strategy, on_log=log)
     return MaintainResult(upd, results)
