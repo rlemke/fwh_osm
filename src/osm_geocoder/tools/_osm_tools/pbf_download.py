@@ -30,6 +30,7 @@ import random
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -189,6 +190,32 @@ def _offline_mode() -> bool:
     miss fails loudly instead of silently egressing to a mirror.
     """
     return os.environ.get("FW_OSM_OFFLINE", "").lower() in ("1", "true", "yes")
+
+
+#: Hosts the offline guard actually exists to keep us away from. Geofabrik
+#: IP-banned this fleet's egress and osmfr is the flaky stand-in; that ban is the
+#: whole reason the self-hosted mirror was built.
+_THIRD_PARTY_MIRROR_HOSTS = ("download.geofabrik.de", "download.openstreetmap.fr")
+
+
+def _base_is_third_party() -> bool:
+    """True when the configured extract source is somebody else's server.
+
+    ``FW_OSM_OFFLINE`` means "do not egress to Geofabrik/osmfr" — NOT "do not
+    read the self-hosted mirror that replaced them". Once
+    ``FW_GEOFABRIK_BASE_URL`` points at our own store (MinIO, an internal host),
+    a fetch from it IS the intended local path, and refusing it turns the guard
+    into the very outage it was built to prevent: a cache miss fails hard while
+    the bytes sit on our own disk, one HTTP hop away.
+
+    Derived from the configured base rather than a second flag, so it cannot
+    drift out of step with it — the same reason task routing derives its queue
+    from the facet namespace instead of a map.
+    """
+    if EXTRACT_PROVIDER == "osmfr":
+        return True
+    host = (urllib.parse.urlparse(GEOFABRIK_BASE).hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in _THIRD_PARTY_MIRROR_HOSTS)
 
 
 # Per-process memo of OSM France extract coverage, keyed by Geofabrik region key.
@@ -769,14 +796,19 @@ def download_region(
             sidecar=side,
         )
 
-    # Reached here → the region is NOT cached and we would have to fetch it. In
-    # offline mode that is forbidden: fail loudly so the region is generated
-    # locally (clip the parent continent PBF) instead of egressing to a mirror.
-    if offline:
+    # Reached here → the region is NOT cached and we would have to fetch it.
+    # Offline mode forbids that only when the fetch would leave our own
+    # infrastructure. Against a self-hosted base URL the fetch is the intended
+    # local path, so blocking it would fail a region whose bytes are one hop
+    # away on our own object store.
+    if offline and _base_is_third_party():
         raise DownloadError(
             f"FW_OSM_OFFLINE: region {rel_path!r} is not in the local cache and "
-            f"external mirror fetches are disabled. Generate it locally by "
-            f"clipping the parent continent PBF (osmium extract), then retry."
+            f"the configured extract source is a THIRD PARTY "
+            f"({OSMFR_BASE if EXTRACT_PROVIDER == 'osmfr' else GEOFABRIK_BASE}), "
+            f"which offline mode forbids. Either generate the region locally by "
+            f"clipping the parent continent PBF (osmium extract), or point "
+            f"FW_GEOFABRIK_BASE_URL at the self-hosted mirror."
         )
 
     with _region_lock(region):
