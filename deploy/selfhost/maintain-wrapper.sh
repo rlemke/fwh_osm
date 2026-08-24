@@ -20,6 +20,25 @@ source "$CONFIG"
 # every 6h, so `osm-replicate --check` still reports healthy and the watchdog
 # stays quiet while the nightly re-split has been erroring for weeks. The
 # stream being fine is exactly what hides it.
+# Serialise runs. Nothing stopped the 03:30 timer firing on top of a manual
+# catch-up, and two of these re-extracting into the SAME tree would corrupt the
+# extracts the whole fleet consumes. mkdir is the atomic primitive here —
+# macOS has no flock(1).
+LOCKDIR="${HOMEDIR:-$HOME/.facetwork/osm-selfhost}/maintain.lock.d"
+mkdir -p "$(dirname "$LOCKDIR")" 2>/dev/null || true
+if ! mkdir "$LOCKDIR" 2>/dev/null; then
+    _owner="$(cat "$LOCKDIR/pid" 2>/dev/null || true)"
+    if [ -n "$_owner" ] && kill -0 "$_owner" 2>/dev/null; then
+        echo "=== [$(date '+%F %T')] osm-maintain: run $_owner already in progress — exiting ==="
+        exit 0
+    fi
+    # A crashed run must not block the nightly job forever.
+    echo "osm-maintain: clearing stale lock (pid ${_owner:-unknown} not running)" >&2
+    rm -rf "$LOCKDIR"; mkdir "$LOCKDIR" || { echo "osm-maintain: cannot take lock" >&2; exit 1; }
+fi
+echo $$ > "$LOCKDIR/pid"
+trap 'rm -rf "$LOCKDIR"' EXIT INT TERM
+
 HEALTH="${HOMEDIR:-$HOME/.facetwork/osm-selfhost}/maintain-health.txt"
 _record() {   # _record <rc> [note]
     mkdir -p "$(dirname "$HEALTH")" 2>/dev/null || true
