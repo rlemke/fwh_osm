@@ -251,6 +251,12 @@ def bootstrap(
 
     # 2. osmium multi-extract config (one output per region; ABSOLUTE poly paths,
     #    since osmium resolves a relative polygon file_name against `directory`).
+    #
+    #    Each extract carries its OWN `output_header`, so the replication fields are
+    #    written by THIS pass. They used to be added afterwards by a per-region
+    #    `osmium cat`, which copied every extract through a second time: a full read
+    #    AND a full write of ~94 GB of regional PBFs, to set three header fields.
+    repl_urls: dict[str, str] = {}
     extracts = []
     for r in regions:
         if "key" not in r or not ("bbox" in r or "poly" in r):
@@ -262,8 +268,19 @@ def bootstrap(
             pf = poly_dir / f"{safe}.poly"
             pf.write_text(bbox_poly(r["key"], r["bbox"]))
             polyfile = str(pf.resolve())
+        # Geofabrik convention, and the exact URL step 4 verifies round-trips.
+        repl_urls[r["key"]] = repl_url = f"{base_url.rstrip('/')}/{r['key']}-updates"
+        # A source with only a replication TIMESTAMP and no sequence (a plain planet
+        # dump) must not stamp the literal "None" — omit the key, as the old
+        # per-region --output-header flags did.
+        hdr = {"osmosis_replication_base_url": repl_url}
+        if seq is not None:
+            hdr["osmosis_replication_sequence_number"] = str(seq)
+        if ts_iso:
+            hdr["osmosis_replication_timestamp"] = ts_iso
         extracts.append({
             "output": f"{safe}.osm.pbf",
+            "output_header": hdr,
             "polygon": {"file_name": polyfile, "file_type": _poly_file_type(polyfile)},
         })
     cfg_path = out_dir / "extract-config.json"
@@ -302,17 +319,12 @@ def bootstrap(
         # This makes ONE base URL serve both extracts (`<base>/<region>-latest.osm.pbf`)
         # and replication (`<base>/<region>-updates/`), so FW_GEOFABRIK_BASE_URL
         # pointed at a single static server resolves download AND delta coherently.
-        repl_url = f"{base_url.rstrip('/')}/{key}-updates"
+        repl_url = repl_urls[key]
 
-        # Some sources (e.g. the full planet dump) expose only a replication
-        # timestamp, no sequence — don't stamp the literal "None".
-        hdr = [f"--output-header=osmosis_replication_base_url={repl_url}"]
-        if seq is not None:
-            hdr.append(f"--output-header=osmosis_replication_sequence_number={seq}")
-        if ts_iso:
-            hdr.append(f"--output-header=osmosis_replication_timestamp={ts_iso}")
-        _run(["osmium", "cat", str(raw), "-o", str(final), "--overwrite", *hdr])
-        raw.unlink()
+        # The header was already written by the extract pass, so publishing is a
+        # RENAME, not a copy. os.replace is atomic within a filesystem, so a reader
+        # never sees a half-written `<region>-latest.osm.pbf`.
+        os.replace(raw, final)
 
         upd = out_dir / f"{key}-updates"
         upd.mkdir(parents=True, exist_ok=True)

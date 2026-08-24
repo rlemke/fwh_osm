@@ -164,3 +164,51 @@ def test_cli_smoke(tmp_path, capsys):
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["regions"][0]["replication_url"] == f"{BASE_URL}/demo/west-updates"
+
+
+def test_replication_header_is_written_by_the_extract_pass(tmp_path):
+    """The header must come from the extract config, not a second copy.
+
+    It used to be added afterwards by a per-region `osmium cat`, which read and
+    rewrote every extract purely to set three fields — ~94 GB of pointless I/O
+    on the real planet split. `extract-config.json` is a real on-disk artifact
+    and the contract with osmium, so pin it: each extract carries its own
+    `output_header`, and step 4 is left with nothing to do but rename.
+    """
+    source = _make_source(tmp_path)
+    out = tmp_path / "out"
+    regions = [{"key": "demo/west", "bbox": [0.0, 0.0, 0.5, 1.0]}]
+
+    res = pb.bootstrap(source=source, out=str(out), regions=regions,
+                       base_url=BASE_URL, strategy="simple")
+
+    cfg = json.loads((out / "extract-config.json").read_text())
+    hdr = cfg["extracts"][0]["output_header"]
+    assert hdr["osmosis_replication_base_url"] == f"{BASE_URL}/demo/west-updates"
+    assert hdr["osmosis_replication_sequence_number"] == str(SRC_SEQ)
+    assert "osmosis_replication_timestamp" in hdr
+
+    # And the published file really carries it — the extract pass was enough.
+    assert res[0].header_ok is True
+    assert res[0].sequence == SRC_SEQ
+    # The staging name must not survive the rename.
+    assert not (out / "demo__west.osm.pbf").exists()
+
+
+def test_no_sequence_source_omits_the_key_from_the_config(tmp_path):
+    """A planet dump with only a timestamp must not stamp the literal "None"."""
+    xml = tmp_path / "src.osm"
+    xml.write_text(SOURCE_XML)
+    bare = tmp_path / "nosequence.osm.pbf"
+    subprocess.run(
+        ["osmium", "cat", str(xml), "-o", str(bare), "--overwrite",
+         "--output-header=osmosis_replication_timestamp=2026-01-01T00:00:00Z"],
+        check=True,
+    )
+    out = tmp_path / "out"
+    pb.bootstrap(source=str(bare), out=str(out),
+                 regions=[{"key": "demo", "bbox": [0.0, 0.0, 1.0, 1.0]}],
+                 base_url=BASE_URL, strategy="simple")
+
+    hdr = json.loads((out / "extract-config.json").read_text())["extracts"][0]["output_header"]
+    assert "osmosis_replication_sequence_number" not in hdr, hdr
