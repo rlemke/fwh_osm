@@ -165,3 +165,37 @@ def test_maintain_refuses_when_master_has_no_replication_header(tmp_path):
         pm.maintain(master=str(bare), out=str(out), regions=regions,
                     base_url=BASE_URL, strategy="simple")
     assert "NO replication header" in str(e.value)
+
+
+def test_advance_yields_an_int_sequence_not_a_tuple(tmp_path, monkeypatch):
+    """pyosmium's apply_diffs_to_file returns (id, timestamp), not a bare id.
+
+    Storing the tuple was invisible while `new_sequence` was only f-stringed
+    into a log or JSON-dumped. The first code to COMPARE it — the
+    behind-the-served-tree guard — died with "'<' not supported between
+    instances of 'tuple' and 'int'", and only AFTER spending ~50 minutes
+    applying the diff, so a whole run was lost to it.
+    """
+    from osmium.replication.server import ReplicationServer
+
+    master = _make_master(tmp_path)          # header says sequence 500
+
+    class _State:
+        sequence = MASTER_SEQ + 5
+        timestamp = None
+
+    monkeypatch.setattr(ReplicationServer, "get_state_info", lambda self: _State())
+    # Mimic the real return shape, and actually produce the output file so the
+    # os.replace() succeeds.
+    def _apply(self, infile, outfile, start_id, max_size=0):
+        shutil.copyfile(infile, outfile)
+        return (MASTER_SEQ + 5, "2026-02-01T00:00:00Z")
+    monkeypatch.setattr(ReplicationServer, "apply_diffs_to_file", _apply)
+
+    upd = pm.update_master(master, max_diff_mb=1)
+
+    assert upd.advanced is True
+    assert upd.new_sequence == MASTER_SEQ + 5
+    assert isinstance(upd.new_sequence, int), f"tuple leaked out: {upd.new_sequence!r}"
+    # The comparison that used to explode must now just work.
+    assert upd.new_sequence > MASTER_SEQ

@@ -96,6 +96,16 @@ def update_master(master: str, *, max_diff_mb: int = 1024,
         return MasterUpdate(h.sequence, h.sequence, f"apply failed: {type(exc).__name__}", False)
     if newseq is None:  # server advanced then served no diffs (race) — treat as current
         return MasterUpdate(h.sequence, h.sequence, "already current", False)
+    # pyosmium returns (sequence_id, newest_timestamp) — NOT a bare id. Storing
+    # the tuple made `new_sequence` a tuple on every successful advance, which
+    # stayed invisible for as long as the value was only ever f-stringed into a
+    # log line or JSON-dumped. The first code to COMPARE it (the
+    # behind-the-served-tree guard below) died with
+    # "'<' not supported between instances of 'tuple' and 'int'" — after
+    # spending 50 minutes applying the diff, so the cost of the crash was a
+    # whole run. Normalise here, at the boundary, so no caller can inherit it.
+    if isinstance(newseq, tuple):
+        newseq = newseq[0]
     os.replace(tmp, master)
     log(f"master advanced {h.sequence} -> {newseq}")
     return MasterUpdate(h.sequence, newseq, "updated", True)
