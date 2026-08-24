@@ -41,14 +41,27 @@ pytest tests/ src/osm_geocoder/handlers/ -v
 
 ### Source Adapter Pattern
 
-Three source namespaces normalize different inputs into GeoJSON so
-downstream analysis facets work identically regardless of the source:
+Source namespaces normalize different inputs into GeoJSON so downstream analysis
+facets work identically regardless of the source:
 
 | Namespace | Input | Handler |
 |-----------|-------|---------|
 | `osm.Source.PBF` | `.osm.pbf` files via osmium | `handlers/sources/pbf_source.py` |
 | `osm.Source.PostGIS` | SQL queries against `osm_nodes` / `osm_ways` | `handlers/sources/postgis_source.py` |
 | `osm.Source.GeoJSON` | Existing GeoJSON files | `handlers/sources/geojson_source.py` |
+| `osm.Source.OhsomePlanet` | OSM **history** GeoParquet (ohsome-planet) | `handlers/sources/ohsome_source.py` |
+
+**`osm.Source.OhsomePlanet` is the only source with a TIME dimension.** Its rows
+are contributions carrying `valid_from`/`valid_to`, so `as_of` on the source turns
+any category extract into a historical one and `since`/`until` select an edit
+window — putting time on the SOURCE means every extractor gains it rather than
+growing a parallel temporal twin. `ExtractChanges` has no analogue in the snapshot
+sources: each feature IS an edit, with user, changeset, editor and `contrib_type`.
+Mapping is also more faithful than Overture's, because ohsome rows carry OSM's own
+`tags` map — `amenity=cafe` is literally `tags["amenity"]`, not a vocabulary
+translation. Needs the `[ohsome]` extra (pyarrow + shapely) and a converted
+dataset (`FW_OHSOME_PARQUET`); without them the reader raises rather than
+returning empty.
 
 Each source provides per-category extraction facets (routes, amenities, roads,
 parks, buildings, boundaries, population, POIs) that produce category-specific

@@ -41,6 +41,13 @@ overture = [
     "pyarrow>=14.0",
     "shapely>=2.0",
 ]
+# ohsome-planet output is GeoParquet with WKB geometry, so the same two
+# libraries cover it; kept as its own extra so a host can install the history
+# source without implying Overture support (and vice versa).
+ohsome = [
+    "pyarrow>=14.0",
+    "shapely>=2.0",
+]
 
 [project.urls]
 Repository = "https://github.com/rlemke/osm"

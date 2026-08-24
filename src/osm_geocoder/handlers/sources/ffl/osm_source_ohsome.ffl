@@ -1,0 +1,97 @@
+// Source Adapter: ohsome-planet (OSM history) via GeoParquet
+//
+// Extracts features from ohsome-planet output — HeiGIT's conversion of the full
+// OSM history PBF to GeoParquet — into the SAME unified osm.* feature schemas as
+// the PBF / PostGIS / GeoJSON / Overture adapters, so it drops in as a source for
+// any downstream analysis facet.
+//
+// What it adds that no other source can: TIME. Every row is a contribution with
+// valid_from/valid_to, so `as_of` turns any category extract into a historical
+// one, and `since`/`until` select an edit window. Those live on the SOURCE rather
+// than on separate facets, so every extractor becomes time-travelable instead of
+// growing a parallel temporal twin.
+//
+// Reads scan a GeoParquet dataset of the whole OSM history (pyarrow + shapely),
+// so the extract facets are annotated external + expensive.
+
+/** ohsome-planet source adapter — OSM history from GeoParquet. */
+namespace osm.Source.OhsomePlanet {
+    use osm.types
+
+    /** ohsome-planet source: a parquet dataset, a bbox window, and a time position.
+     *
+     *  as_of      — ISO timestamp; the state of the world at that instant. "" = current.
+     *  since/until— ISO timestamps bounding an EDIT window (used by ExtractChanges,
+     *               and by any extractor that wants contributions rather than state).
+     */
+    schema OhsomeSource {
+        dataset: String,
+        min_lon: Double,
+        min_lat: Double,
+        max_lon: Double,
+        max_lat: Double,
+        region: String,
+        as_of: String,
+        since: String,
+        until: String
+    }
+
+    /** Extracts routes by transport type, as of the source's time position. */
+    event facet ExtractRoutes(source: OhsomeSource, route_type: String = "all", network: String = "*", include_infrastructure: Boolean = false) => (result: osm.Routes.RouteFeatures)
+        with Effect(kind="external") with Cost(tier="expensive")
+
+    /** Extracts amenities by category, as of the source's time position. */
+    event facet ExtractAmenities(source: OhsomeSource, category: String = "all") => (result: osm.Amenities.AmenityFeatures)
+        with Effect(kind="external") with Cost(tier="expensive")
+
+    /** Extracts roads by classification, as of the source's time position. */
+    event facet ExtractRoads(source: OhsomeSource, road_class: String = "all") => (result: osm.Roads.RoadFeatures)
+        with Effect(kind="external") with Cost(tier="expensive")
+
+    /** Extracts parks and protected areas, as of the source's time position. */
+    event facet ExtractParks(source: OhsomeSource, park_type: String = "park", protect_classes: String = "*") => (result: osm.Parks.ParkFeatures)
+        with Effect(kind="external") with Cost(tier="expensive")
+
+    /** Extracts building footprints, as of the source's time position. */
+    event facet ExtractBuildings(source: OhsomeSource, building_type: String = "all") => (result: osm.Buildings.BuildingFeatures)
+        with Effect(kind="external") with Cost(tier="expensive")
+
+    /** Extracts administrative boundaries, as of the source's time position. */
+    event facet ExtractBoundaries(source: OhsomeSource, boundary_type: String = "country") => (result: osm.Boundaries.BoundaryFeatures)
+        with Effect(kind="external") with Cost(tier="expensive")
+
+    /** Extracts populated places, as of the source's time position. */
+    event facet ExtractPopulation(source: OhsomeSource, place_type: String = "all", min_population: Int = 0, max_population: Int = 0) => (result: osm.Population.PopulationFilteredFeatures)
+        with Effect(kind="external") with Cost(tier="expensive")
+
+    /** Extracts all POIs, as of the source's time position. */
+    event facet ExtractPOIs(source: OhsomeSource) => (pois: OSMCache)
+        with Effect(kind="external") with Cost(tier="expensive")
+
+    /** Contributions in an edit window — creations, deletions, tag and geometry edits.
+     *
+     *  Has no analogue in the snapshot sources: each feature IS an edit, carrying the
+     *  user, changeset, editor and contrib_type. Requires source.since and/or
+     *  source.until — an unbounded window would stage the entire history.
+     */
+    event facet ExtractChanges(source: OhsomeSource, contrib_types: String = "", tag_key: String = "") => (result: OhsomeChanges)
+        with Effect(kind="external") with Cost(tier="expensive")
+
+    /** Result of an edit-window extraction. */
+    schema OhsomeChanges {
+        output_path: String,
+        feature_count: Int,
+        since: String,
+        until: String,
+        contrib_types: String,
+        creations: Int,
+        deletions: Int,
+        tag_changes: Int,
+        geometry_changes: Int,
+        tag_geometry_changes: Int,
+        distinct_editors: Int,
+        distinct_users: Int,
+        format: String,
+        extraction_date: String
+    }
+}
