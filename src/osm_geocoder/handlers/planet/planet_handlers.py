@@ -84,7 +84,7 @@ def handle_extract_regions(params: dict[str, Any]) -> dict[str, Any]:
     if not regions:
         raise ValueError("ExtractRegions: 'regions' is empty (run DownloadPolygons first)")
     out = params.get("out") or os.path.join(_PLANET_DIR, "www")
-    base_url = params.get("base_url") or "http://afl-minio:9000/osm-extracts"
+    base_url = _extract_base_url(params)
     strategy = params.get("strategy") or "complete_ways"
     try:
         batch_size = int(params.get("batch_size") or 25)
@@ -195,6 +195,22 @@ def _publish_tree(s3, out: str, bucket: str, log) -> int:
     return published
 
 
+# Last-resort in-cluster default. Prefer the deployment's configured endpoint:
+# a literal repeated at each call site cannot follow a store move, and the fleet
+# already carries the value (fleet_config -> FW_GEOFABRIK_BASE_URL).
+_DEFAULT_EXTRACT_BASE_URL = "http://afl-minio:9000/osm-extracts"
+
+
+def _extract_base_url(params: dict[str, Any]) -> str:
+    """Extract-store URL: explicit param > deployment config > in-cluster default."""
+    return (
+        params.get("base_url")
+        or os.environ.get("FW_OSM_EXTRACT_BASE_URL")
+        or os.environ.get("FW_GEOFABRIK_BASE_URL")
+        or _DEFAULT_EXTRACT_BASE_URL
+    )
+
+
 def handle_publish_extracts(params: dict[str, Any]) -> dict[str, Any]:
     """Upload a local extract tree to an S3/MinIO bucket (anonymous-read)."""
     out = params.get("out") or os.path.join(_PLANET_DIR, "www")
@@ -241,7 +257,7 @@ def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         admin_level = 4
     bucket = params.get("bucket") or os.environ.get("FW_OSM_EXTRACT_BUCKET", "osm-extracts")
-    base_url = params.get("base_url") or "http://afl-minio:9000/osm-extracts"
+    base_url = _extract_base_url(params)
     strategy = params.get("strategy") or "complete_ways"
     # Region-aware straggler fallback (TIGER for US states, osmfr elsewhere). The
     # param stays named osmfr_fallback for back-compat; it's the on/off toggle.

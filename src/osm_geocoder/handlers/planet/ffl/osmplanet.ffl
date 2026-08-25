@@ -46,7 +46,7 @@ namespace osm.planet {
         planet_path: String,
         regions: [Region],
         out: String = "",
-        base_url: String = "http://afl-minio:9000/osm-extracts",
+        base_url: String = "",
         strategy: String = "complete_ways",
         batch_size: Long = 25
     ) => (region_count: Long, out: String) with Effect(kind = "io") with Cost(tier = "expensive")
@@ -63,7 +63,7 @@ namespace osm.planet {
         polys_dest: String = "",
         scope: String = "all",
         out: String = "",
-        base_url: String = "http://afl-minio:9000/osm-extracts",
+        base_url: String = "",
         strategy: String = "complete_ways",
         batch_size: Long = 25,
         bucket: String = "osm-extracts"
@@ -92,7 +92,7 @@ namespace osm.planet {
         admin_level: Long = 4,
         polys_dest: String = "",
         out: String = "",
-        base_url: String = "http://afl-minio:9000/osm-extracts",
+        base_url: String = "",
         strategy: String = "complete_ways",
         bucket: String = "osm-extracts"
     ) => (region_count: Long, published: Long) andThen {
@@ -117,11 +117,11 @@ namespace osm.planet {
         osmium export can't assemble (nested sub-relations, member ways beyond the
         source poly — e.g. Quebec/Nova Scotia/Nunavut) from a region-aware ready-made
         poly source: TIGER for US states (osmfr has none), osmfr for everywhere else. */
-    event facet BuildAdminSet(source_region: String, admin_level: Long = 4, base_url: String = "http://afl-minio:9000/osm-extracts", strategy: String = "complete_ways", bucket: String = "osm-extracts", batch_size: Long = 0, osmfr_fallback: Boolean = true) => (region_count: Long, published: Long) with Effect(kind = "io") with Cost(tier = "expensive")
+    event facet BuildAdminSet(source_region: String, admin_level: Long = 4, base_url: String = "", strategy: String = "complete_ways", bucket: String = "osm-extracts", batch_size: Long = 0, osmfr_fallback: Boolean = true) => (region_count: Long, published: Long) with Effect(kind = "io") with Cost(tier = "expensive")
 
     /** Distributed fleet run of a self-generated admin set — one BuildAdminSet
         task, so it executes atomically on a single fleet host. */
-    workflow BuildAdminSetWorkflow(source_region: String, admin_level: Long = 4, base_url: String = "http://afl-minio:9000/osm-extracts", strategy: String = "complete_ways", bucket: String = "osm-extracts", batch_size: Long = 0, osmfr_fallback: Boolean = true) => (region_count: Long, published: Long) andThen {
+    workflow BuildAdminSetWorkflow(source_region: String, admin_level: Long = 4, base_url: String = "", strategy: String = "complete_ways", bucket: String = "osm-extracts", batch_size: Long = 0, osmfr_fallback: Boolean = true) => (region_count: Long, published: Long) andThen {
         result = osm.planet.BuildAdminSet(source_region = $.source_region, admin_level = $.admin_level, base_url = $.base_url, strategy = $.strategy, bucket = $.bucket, batch_size = $.batch_size, osmfr_fallback = $.osmfr_fallback)
         yield BuildAdminSetWorkflow(region_count = result.region_count, published = result.published)
     }
@@ -138,7 +138,7 @@ namespace osm.planet {
         a "Washington County" don't collide). The N states run in PARALLEL across the
         runner fleet, so wall-clock ≈ the slowest single state, not the sum. Add
         runners to go faster. `strategy` "simple" suits many small interior regions. */
-    workflow BuildAdminFanout(prefix: String = "north-america/us", admin_level: Long = 6, strategy: String = "simple", base_url: String = "http://afl-minio:9000/osm-extracts", bucket: String = "osm-extracts") => (published: [Long]) andThen {
+    workflow BuildAdminFanout(prefix: String = "north-america/us", admin_level: Long = 6, strategy: String = "simple", base_url: String = "", bucket: String = "osm-extracts") => (published: [Long]) andThen {
         children = osm.planet.ListExtracts(prefix = $.prefix, bucket = $.bucket) andThen foreach child in $.regions {
             leaf = osm.planet.BuildAdminSet(source_region = $.child, admin_level = $$.admin_level, strategy = $$.strategy, base_url = $$.base_url, bucket = $$.bucket)
             yield BuildAdminFanout(published = [leaf.published])
