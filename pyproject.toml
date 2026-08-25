@@ -63,6 +63,7 @@ osm_geocoder = [
     "ffl/*.ffl",
     "handlers/**/ffl/*.ffl",
     "catalog.yaml",
+    "data/*.json",
 ]
 
 [tool.ruff]

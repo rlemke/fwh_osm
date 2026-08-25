@@ -1,0 +1,20 @@
+{
+  "//": [
+    "Geofabrik region key -> the name a given extract STORE uses for it.",
+    "Geofabrik's key is the canonical one everywhere in this codebase; a store",
+    "that spells a region differently is reconciled here rather than in code, so",
+    "a new store or a renamed region is a config edit, not a release.",
+    "Only the FIRST path segment is remapped (a continent); deeper segments are",
+    "passed through, since stores agree on country/state names.",
+    "Override the whole file with FW_OSM_REGION_ALIASES=/path/to.json.",
+    "A store absent here needs no remapping (identity)."
+  ],
+
+  "osmfr": {
+    "australia-oceania": "oceania"
+  },
+
+  "selfhost": {
+    "australia-oceania": "oceania"
+  }
+}

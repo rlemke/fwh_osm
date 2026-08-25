@@ -22,7 +22,9 @@ are per-entry.
 
 from __future__ import annotations
 
+import functools
 import hashlib
+import json
 import logging
 import os
 import http.client
@@ -35,6 +37,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC
+from pathlib import Path
 from email.utils import format_datetime, parsedate_to_datetime
 from typing import Any
 
@@ -68,8 +71,39 @@ GEOFABRIK_BASE = os.environ.get(
 # changes. Geofabrik stays the default.
 EXTRACT_PROVIDER = os.environ.get("FW_OSM_EXTRACT_PROVIDER", "geofabrik").strip().lower()
 OSMFR_BASE = os.environ.get("FW_OSMFR_BASE_URL", "https://download.openstreetmap.fr").rstrip("/")
-# OSM France's continent tree differs from Geofabrik's at the top level.
-_OSMFR_TOPLEVEL = {"australia-oceania": "oceania"}
+# Stores disagree about what a region is CALLED (OSM France and our self-hosted
+# split tree both say "oceania" where Geofabrik says "australia-oceania"). The
+# Geofabrik key stays canonical in code; the per-store spelling is data, so
+# adding a store or following a rename is a config edit rather than a release.
+# Override the shipped table with FW_OSM_REGION_ALIASES=/path/to.json.
+_REGION_ALIASES_FILE = os.environ.get("FW_OSM_REGION_ALIASES") or str(
+    Path(__file__).resolve().parents[2] / "data" / "region_aliases.json"
+)
+
+
+@functools.lru_cache(maxsize=None)
+def _region_aliases(store: str) -> dict:
+    """Geofabrik top-level key -> ``store``'s name for it ({} if none/unreadable).
+
+    Never raises: a missing or malformed table degrades to identity mapping,
+    which is the pre-existing behaviour for every store but OSM France.
+    """
+    try:
+        with open(_REGION_ALIASES_FILE, encoding="utf-8") as fh:
+            table = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    got = table.get(store)
+    return got if isinstance(got, dict) else {}
+
+
+def remap_region(region: str, store: str) -> str:
+    """``region`` (a Geofabrik key) as ``store`` spells it.
+
+    Only the leading continent segment is remapped; deeper segments pass through.
+    """
+    top, sep, rest = region.partition("/")
+    return _region_aliases(store).get(top, top) + sep + rest
 
 
 def _osmfr_region(region: str) -> str:
@@ -87,8 +121,7 @@ def _osmfr_region(region: str) -> str:
     states, … are simply absent), and Geofabrik's *combined* extracts
     (``senegal-and-gambia``) have no 1:1 equivalent — those still 404 and are
     skipped per region."""
-    top, sep, rest = region.partition("/")
-    top = _OSMFR_TOPLEVEL.get(top, top)
+    top, sep, rest = remap_region(region, "osmfr").partition("/")
     rest = rest.replace("-", "_")  # OSM France: underscores in country/sub names
     return top + sep + rest
 
