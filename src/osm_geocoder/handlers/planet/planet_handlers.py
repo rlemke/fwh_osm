@@ -13,7 +13,9 @@ runner's global execution timeout), like the other cache/download handlers.
 """
 from __future__ import annotations
 
+import contextlib
 import os
+import threading
 from typing import Any
 
 from ...tools._osm_tools.planet_fetch import fetch_planet, update_planet
@@ -201,6 +203,55 @@ def _publish_tree(s3, out: str, bucket: str, log) -> int:
 _DEFAULT_EXTRACT_BASE_URL = "http://afl-minio:9000/osm-extracts"
 
 
+# Seconds between liveness signals during a blocking phase. Well under the
+# stuck-task and execution windows, and cheap: one small Mongo update.
+_HEARTBEAT_INTERVAL_S = 30.0
+
+
+@contextlib.contextmanager
+def _heartbeating(params: dict[str, Any], what: str):
+    """Keep the task's liveness signal alive across ONE BLOCKING CALL.
+
+    The documented batch pattern puts `_task_heartbeat` at a loop boundary, but
+    this handler's long phases have no loop to hook: a multi-GB `download_file`
+    and an `osmium` pass are each a single call that blocks for tens of minutes.
+    With nothing heartbeating, the runtime concludes the execution is dead and
+    re-dispatches the task WHILE IT IS STILL RUNNING.
+
+    Measured 2026-08-25 on `europe` @ admin_level 2: the task reached
+    retry_count 2 and produced TWO concurrent executions, one per osm-capable
+    host, each having re-downloaded the same 40.5 GB extract and each running a
+    competing osmium pass. Nothing failed and no error was recorded — the run
+    simply duplicated itself until it was terminated by hand.
+
+    A ticker thread is the right shape here precisely BECAUSE the work is
+    opaque: it reports elapsed time rather than progress, which is honest about
+    what we can actually observe from outside a blocking C call.
+    """
+    hb = params.get("_task_heartbeat")
+    if not callable(hb):
+        yield
+        return
+    stop = threading.Event()
+
+    def _tick():
+        waited = 0.0
+        while not stop.wait(_HEARTBEAT_INTERVAL_S):
+            waited += _HEARTBEAT_INTERVAL_S
+            try:
+                hb(progress_message=f"{what} ({waited / 60:.0f} min elapsed)")
+            except Exception:  # noqa: BLE001 - liveness must never kill the work
+                pass
+
+    t = threading.Thread(target=_tick, name="fw-heartbeat", daemon=True)
+    t.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        t.join(timeout=5)
+
+
 def _extract_base_url(params: dict[str, Any]) -> str:
     """Extract-store URL: explicit param > deployment config > in-cluster default."""
     return (
@@ -278,13 +329,15 @@ def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
     work = _scratch_dir()
     src = os.path.join(work, f"{source_region.replace('/', '__')}.osm.pbf")
     log(f"downloading source {source_region} from s3://{bucket}")
-    s3.download_file(bucket, f"{source_region}-latest.osm.pbf", src)
+    with _heartbeating(params, f"downloading {source_region}"):
+        s3.download_file(bucket, f"{source_region}-latest.osm.pbf", src)
 
     # country_prefix=source_region → sub-regions key consistently under the source
     # country (fixes the ISO→continent quirk, e.g. mexico) and lets county-level
     # (admin_level>=6, no ISO 3166-2) units through instead of being dropped.
-    regions = generate_polygons(src, admin_level, os.path.join(work, "polys"),
-                                country_prefix=source_region, on_log=log)
+    with _heartbeating(params, f"extracting admin_level={admin_level} boundaries"):
+        regions = generate_polygons(src, admin_level, os.path.join(work, "polys"),
+                                    country_prefix=source_region, on_log=log)
     poly_regions = [{"key": r.key, "poly": r.poly} for r in regions]
 
     # Straggler fallback: osmium export can't assemble some boundaries (nested
@@ -325,11 +378,19 @@ def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
             published["n"] += 1
         if results:
             log(f"published {published['n']}/{len(poly_regions)}")
+        # The one place with real progress to report, so report it here rather
+        # than only elapsed time.
+        hb = params.get("_task_heartbeat")
+        if callable(hb):
+            hb(progress_message=f"published {published['n']}/{len(poly_regions)}")
 
-    bootstrap_batched(
-        source=src, out=out_dir, regions=todo,
-        base_url=base_url, strategy=strategy, batch_size=batch_size,
-        cost_state_dir=cost_dir, on_pass=_on_pass, on_log=log)
+    # A single batch is itself a long osmium pass, so the per-batch heartbeat in
+    # _on_pass is not enough on its own — cover the whole call too.
+    with _heartbeating(params, f"extracting {len(todo)} region(s)"):
+        bootstrap_batched(
+            source=src, out=out_dir, regions=todo,
+            base_url=base_url, strategy=strategy, batch_size=batch_size,
+            cost_state_dir=cost_dir, on_pass=_on_pass, on_log=log)
 
     shutil.rmtree(work, ignore_errors=True)
     log(f"admin_level={admin_level} of {source_region}: {published['n']} extracts published")
