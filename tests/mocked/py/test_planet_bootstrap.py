@@ -212,3 +212,40 @@ def test_no_sequence_source_omits_the_key_from_the_config(tmp_path):
 
     hdr = json.loads((out / "extract-config.json").read_text())["extracts"][0]["output_header"]
     assert "osmosis_replication_sequence_number" not in hdr, hdr
+
+
+def test_probe_region_skips_the_scan_on_large_files(tmp_path, monkeypatch):
+    """A big extract must be called non-empty WITHOUT being read.
+
+    The scan runs at ~32 MB/s, so reading the continental extracts to learn they
+    are non-empty cost ~52 min per maintain run. Guard the property that made
+    that removable: above the threshold we do not call _feature_counts at all.
+    """
+    from osm_geocoder.tools._osm_tools import planet_bootstrap as pb
+
+    called = []
+    monkeypatch.setattr(pb, "_feature_counts",
+                        lambda p: called.append(p) or (123, 45))
+
+    big = tmp_path / "big.osm.pbf"
+    big.write_bytes(b"\0" * (pb._COUNT_SCAN_MAX_BYTES + 1))
+    nodes, ways, size = pb._probe_region(big)
+
+    assert called == [], "large extract must NOT be scanned"
+    assert nodes is None and ways is None, "counts are unknown, not zero"
+    assert size == pb._COUNT_SCAN_MAX_BYTES + 1
+    # The emptiness guard keys off `nodes == 0`; None must not trip it.
+    assert nodes != 0
+
+
+def test_probe_region_still_detects_a_genuinely_empty_extract(tmp_path, monkeypatch):
+    """Small files keep EXACT counts, so the empty-region guard still fires."""
+    from osm_geocoder.tools._osm_tools import planet_bootstrap as pb
+
+    monkeypatch.setattr(pb, "_feature_counts", lambda p: (0, 0))
+    small = tmp_path / "empty.osm.pbf"
+    small.write_bytes(b"\0" * 200)          # a bare header is ~73-200 bytes
+
+    nodes, ways, size = pb._probe_region(small)
+    assert (nodes, ways) == (0, 0), "an empty extract must still be detected"
+    assert size == 200

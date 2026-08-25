@@ -56,11 +56,15 @@ class BootstrapError(RuntimeError):
 class RegionResult:
     key: str
     path: str
-    nodes: int
-    ways: int
+    # None when the extract was too large to count cheaply (the normal case for
+    # continental regions) — NOT zero, which means "verified empty". See
+    # _probe_region for why we no longer scan multi-GB extracts.
+    nodes: int | None
+    ways: int | None
     replication_url: str
     sequence: int | None
     header_ok: bool
+    size_bytes: int = 0
 
 
 def bbox_poly(name: str, bbox: Iterable[float]) -> str:
@@ -209,6 +213,38 @@ def _feature_counts(pbf: str) -> tuple[int, int]:
         return 0, 0
 
 
+# Scanning a PBF to count its features runs at ~32 MB/s, so the eight continental
+# extracts cost ~52 MINUTES per maintain run (measured 2026-08-25: 100.7 GB,
+# predicted 3141 s vs 3143 s observed) to produce two log numbers and one
+# emptiness check. The check is the only load-bearing part, and size already
+# answers it: a feature-less PBF is a bare header — 73 bytes, or ~200 with our
+# replication fields — while any real extract is orders of magnitude larger.
+#
+# So scan ONLY files small enough for the scan to be free. Those still get EXACT
+# counts; anything above the threshold is provably non-empty and is not read at
+# all. This deliberately trades two informational numbers on big regions for
+# ~25% of the run.
+#
+# ⚠️ Do NOT "improve" this into a pyosmium probe that reads just the first
+# feature — osmium.io.Reader.read() is not O(1). Measured on this tree:
+# 1.7 GB -> 2.2 s but 40 GB -> 710 s (~56 MB/s), i.e. it walks the file, which
+# is the very cost this exists to avoid. Size is the only free signal.
+_COUNT_SCAN_MAX_BYTES = 64 * 1024 * 1024
+
+
+def _probe_region(pbf: Path) -> tuple[int | None, int | None, int]:
+    """``(nodes, ways, size_bytes)``; counts are ``None`` if the file was too big to scan.
+
+    ``nodes == 0`` therefore means *verified empty*, and ``nodes is None`` means
+    *not counted, definitely not empty* — callers must not conflate them.
+    """
+    size = pbf.stat().st_size
+    if size > _COUNT_SCAN_MAX_BYTES:
+        return None, None, size          # far too large to be a bare header
+    nodes, ways = _feature_counts(str(pbf))
+    return nodes, ways, size
+
+
 def _poly_file_type(path: str) -> str:
     """osmium polygon file type from extension: GeoJSON (TIGER states) or .poly (osmfr)."""
     return "geojson" if path.lower().endswith((".geojson", ".json")) else "poly"
@@ -307,7 +343,7 @@ def bootstrap(
         # in the source) OR an empty one (an antimeridian extract) — either would
         # crash the next osmium step. Skip it up front rather than publishing an
         # empty extract.
-        nodes, ways = _feature_counts(str(raw)) if raw.exists() else (0, 0)
+        nodes, ways, size_bytes = _probe_region(raw) if raw.exists() else (0, 0, 0)
         if nodes == 0:
             log(f"  {key}: empty region (no features) — skipped")
             raw.unlink(missing_ok=True)
@@ -338,8 +374,13 @@ def bootstrap(
                 f"(url={h.url!r} seq={h.sequence!r}; expected {repl_url!r} {seq!r}) "
                 "— the delta path would NOT follow our server"
             )
-        results.append(RegionResult(key, str(final), nodes, ways, repl_url, h.sequence, header_ok))
-        log(f"  {key}: {nodes} nodes / {ways} ways -> {repl_url}")
+        results.append(RegionResult(key, str(final), nodes, ways, repl_url,
+                                    h.sequence, header_ok, size_bytes))
+        # Size stands in for the counts on unscanned regions: it catches the same
+        # class of bad split (a region that suddenly halves) at zero cost.
+        measure = (f"{nodes} nodes / {ways} ways" if nodes is not None
+                   else f"{size_bytes / 1e9:.2f} GB")
+        log(f"  {key}: {measure} -> {repl_url}")
 
     return results
 
