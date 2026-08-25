@@ -20,6 +20,8 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+
+from .cancellation import run_cancellable
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -125,7 +127,8 @@ def _geofabrik_key(name_local: str, name_en: str | None, iso: str | None,
 
 def _run(cmd: list[str]) -> None:
     try:
-        subprocess.run(cmd, check=True)
+        # Cancellable: this is the pass that kept running after a terminate.
+        run_cancellable(cmd)
     except FileNotFoundError as exc:
         raise BoundaryError(f"required binary not found: {cmd[0]}") from exc
     except subprocess.CalledProcessError as exc:

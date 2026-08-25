@@ -301,7 +301,7 @@ def test_build_admin_set_orchestration(tmp_path, monkeypatch):
     downloaded = []
 
     class FakeS3:
-        def download_file(self, bucket, key, dst):
+        def download_file(self, bucket, key, dst, **kwargs):
             downloaded.append(key)
             open(dst, "w").write("pbf")
     monkeypatch.setattr(ph, "_s3_client", lambda ep=None: FakeS3())
@@ -325,7 +325,7 @@ def test_build_admin_set_osmfr_fallback_fills_stragglers(tmp_path, monkeypatch):
     extracted = {}
 
     class FakeS3:
-        def download_file(self, bucket, key, dst): open(dst, "w").write("pbf")
+        def download_file(self, bucket, key, dst, **kwargs): open(dst, "w").write("pbf")
     monkeypatch.setattr(ph, "_s3_client", lambda ep=None: FakeS3())
     monkeypatch.setattr(ph, "_scratch_dir", lambda: str(tmp_path))
     # self-gen assembles only Ontario (a straggler province is missing)
@@ -354,7 +354,7 @@ def test_build_admin_set_fallback_disabled(tmp_path, monkeypatch):
     called = {"osmfr": False}
 
     class FakeS3:
-        def download_file(self, bucket, key, dst): open(dst, "w").write("pbf")
+        def download_file(self, bucket, key, dst, **kwargs): open(dst, "w").write("pbf")
     monkeypatch.setattr(ph, "_s3_client", lambda ep=None: FakeS3())
     monkeypatch.setattr(ph, "_scratch_dir", lambda: str(tmp_path))
     monkeypatch.setattr(ph, "generate_polygons",
@@ -377,7 +377,7 @@ def test_build_admin_set_resumes_skipping_published(tmp_path, monkeypatch):
     passed = {}
 
     class FakeS3:
-        def download_file(self, bucket, key, dst): open(dst, "w").write("pbf")
+        def download_file(self, bucket, key, dst, **kwargs): open(dst, "w").write("pbf")
     monkeypatch.setattr(ph, "_s3_client", lambda ep=None: FakeS3())
     monkeypatch.setattr(ph, "_scratch_dir", lambda: str(tmp_path))
     monkeypatch.setattr(ph, "generate_polygons",
@@ -405,7 +405,7 @@ def test_build_admin_set_county_level_no_wrong_injection(tmp_path, monkeypatch):
     seen = {}
 
     class FakeS3:
-        def download_file(self, bucket, key, dst): open(dst, "w").write("pbf")
+        def download_file(self, bucket, key, dst, **kwargs): open(dst, "w").write("pbf")
     monkeypatch.setattr(ph, "_s3_client", lambda ep=None: FakeS3())
     monkeypatch.setattr(ph, "_scratch_dir", lambda: str(tmp_path))
     monkeypatch.setattr(ph, "generate_polygons",

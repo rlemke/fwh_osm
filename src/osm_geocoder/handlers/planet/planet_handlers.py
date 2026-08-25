@@ -20,6 +20,7 @@ from typing import Any
 
 from ...tools._osm_tools.planet_fetch import fetch_planet, update_planet
 from ...tools._osm_tools.polygon_fetch import fetch_polygons, fetch_country_subregions
+from ...tools._osm_tools.cancellation import cancellable, raise_if_cancelled
 from ...tools._osm_tools.planet_bootstrap import bootstrap_batched
 from ...tools._osm_tools.boundary_gen import generate_polygons
 
@@ -294,6 +295,16 @@ def handle_list_extracts(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
+    """Split a region into admin-level children (cancellation-aware wrapper)."""
+    # Make this thread's osmium passes interruptible for the duration. Without
+    # it, terminating the workflow marks Mongo terminal while the passes keep
+    # running — measured 2026-08-25, two hosts burned CPU until the containers
+    # were restarted by hand.
+    with cancellable(params.get("_cancellation_check")):
+        return _build_admin_set(params)
+
+
+def _build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
     """SINGLE-TASK admin set — the distributed-fleet-safe path. Downloads a source
     region from the bucket, generates its ``admin_level`` boundaries, extracts each,
     and publishes — ALL on the one host that claims this task, so there's no
@@ -329,12 +340,21 @@ def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
     work = _scratch_dir()
     src = os.path.join(work, f"{source_region.replace('/', '__')}.osm.pbf")
     log(f"downloading source {source_region} from s3://{bucket}")
+
+    def _abort_if_cancelled(_bytes: int) -> None:
+        # boto3 invokes this per chunk; raising aborts the transfer. Checking
+        # only around the call would leave a ~30 min download running after a
+        # terminate — the single longest uninterruptible stretch in this handler.
+        raise_if_cancelled()
+
     with _heartbeating(params, f"downloading {source_region}"):
-        s3.download_file(bucket, f"{source_region}-latest.osm.pbf", src)
+        s3.download_file(bucket, f"{source_region}-latest.osm.pbf", src,
+                         Callback=_abort_if_cancelled)
 
     # country_prefix=source_region → sub-regions key consistently under the source
     # country (fixes the ISO→continent quirk, e.g. mexico) and lets county-level
     # (admin_level>=6, no ISO 3166-2) units through instead of being dropped.
+    raise_if_cancelled()
     with _heartbeating(params, f"extracting admin_level={admin_level} boundaries"):
         regions = generate_polygons(src, admin_level, os.path.join(work, "polys"),
                                     country_prefix=source_region, on_log=log)
@@ -373,6 +393,8 @@ def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
     published = {"n": len(poly_regions) - len(todo)}
 
     def _on_pass(results):
+        # Batch boundary: the cheapest honest place to stop between passes.
+        raise_if_cancelled()
         for rr in results:
             _publish_one(s3, out_dir, rr.key, bucket)
             published["n"] += 1
@@ -386,6 +408,7 @@ def handle_build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
 
     # A single batch is itself a long osmium pass, so the per-batch heartbeat in
     # _on_pass is not enough on its own — cover the whole call too.
+    raise_if_cancelled()
     with _heartbeating(params, f"extracting {len(todo)} region(s)"):
         bootstrap_batched(
             source=src, out=out_dir, regions=todo,

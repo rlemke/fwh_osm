@@ -26,6 +26,14 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+
+from .cancellation import (
+    HandlerCancelled,
+    _terminate_group,
+    cancelled_reason,
+    raise_if_cancelled,
+    run_cancellable,
+)
 import threading
 import time
 from dataclasses import dataclass
@@ -92,7 +100,7 @@ def state_txt(seq: int | None, ts_iso: str | None) -> str:
 
 def _run(cmd: list[str]) -> None:
     try:
-        subprocess.run(cmd, check=True)
+        run_cancellable(cmd)
     except FileNotFoundError as exc:  # osmium binary missing
         raise BootstrapError(f"required binary not found: {cmd[0]}") from exc
     except subprocess.CalledProcessError as exc:
@@ -141,7 +149,7 @@ def _run_measured(cmd: list[str]) -> int:
     except ImportError:
         # No measurement, but still CLASSIFY OOM so the adaptive batcher can self-heal.
         try:
-            subprocess.run(cmd, check=True)
+            run_cancellable(cmd)
         except FileNotFoundError as exc:
             raise BootstrapError(f"required binary not found: {cmd[0]}") from exc
         except subprocess.CalledProcessError as exc:
@@ -150,7 +158,9 @@ def _run_measured(cmd: list[str]) -> int:
             raise BootstrapError(f"command failed ({exc.returncode}): {' '.join(cmd)}") from exc
         return 0
     try:
-        proc = subprocess.Popen(cmd)
+        # Own process group: cancelling must take osmium's helpers with it,
+        # and signalling only the direct child would orphan them.
+        proc = subprocess.Popen(cmd, start_new_session=True)
     except FileNotFoundError as exc:
         raise BootstrapError(f"required binary not found: {cmd[0]}") from exc
     peak = 0
@@ -167,6 +177,13 @@ def _run_measured(cmd: list[str]) -> int:
                 peak = max(peak, rss)
             except psutil.Error:
                 break
+            # This loop already polls every 0.3s, so it is the natural place to
+            # notice a terminate. Kill BEFORE raising: the `finally` below waits
+            # on the child, and waiting on a live osmium would hang the abort.
+            reason = cancelled_reason()
+            if reason is not None:
+                _terminate_group(proc)
+                raise HandlerCancelled(reason)
             time.sleep(0.3)
     finally:
         rc = proc.wait()
