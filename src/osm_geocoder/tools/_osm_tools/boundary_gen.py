@@ -232,4 +232,22 @@ def generate_polygons(source: str, admin_level: int, dest: str, *,
 
     suffix = f" (dropped {dropped} without a country ISO 3166-2)" if dropped else ""
     log(f"generated {len(regions)} admin_level={admin_level} polygons{suffix}")
+
+    # Found candidates and kept NONE. That is a parameter/data mismatch, not an
+    # empty level, and it must not read as success: on 2026-08-26 a scheduled
+    # `europe` @ admin_level=2 run downloaded 40 GB, assembled a 227 MB boundary
+    # extract, dropped all 94 countries it found, published nothing, and
+    # reported rc=0 after 3h20m. A weekly job would have done that forever.
+    #
+    # Distinguish from a genuinely empty level (dropped == 0), which is a legitimate
+    # "nothing here" — e.g. a country with no units at the requested level.
+    if dropped and not regions:
+        raise BoundaryError(
+            f"admin_level={admin_level}: found {dropped} boundary relation(s) and kept NONE — "
+            "every one lacked an ISO 3166-2 code. Under a country_prefix, levels <= 4 are "
+            "SUBDIVISIONS and must carry ISO 3166-2 (e.g. 'DE-BY'); a COUNTRY carries "
+            "ISO 3166-1 (e.g. 'DE') and is dropped as island noise. Asking a CONTINENT for "
+            "admin_level=2 hits exactly this. Use a country source_region "
+            "(e.g. 'europe/germany') with admin_level >= 4."
+        )
     return regions
