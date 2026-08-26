@@ -117,12 +117,12 @@ namespace osm.planet {
         osmium export can't assemble (nested sub-relations, member ways beyond the
         source poly — e.g. Quebec/Nova Scotia/Nunavut) from a region-aware ready-made
         poly source: TIGER for US states (osmfr has none), osmfr for everywhere else. */
-    event facet BuildAdminSet(source_region: String, admin_level: Long = 4, base_url: String = "", strategy: String = "complete_ways", bucket: String = "osm-extracts", batch_size: Long = 0, osmfr_fallback: Boolean = true) => (region_count: Long, published: Long) with Effect(kind = "io") with Cost(tier = "expensive")
+    event facet BuildAdminSet(source_region: String, admin_level: Long = 4, base_url: String = "", strategy: String = "complete_ways", bucket: String = "osm-extracts", batch_size: Long = 0, osmfr_fallback: Boolean = true, refresh_after_days: Long = 0, force_refresh: Boolean = false) => (region_count: Long, published: Long) with Effect(kind = "io") with Cost(tier = "expensive")
 
     /** Distributed fleet run of a self-generated admin set — one BuildAdminSet
         task, so it executes atomically on a single fleet host. */
-    workflow BuildAdminSetWorkflow(source_region: String, admin_level: Long = 4, base_url: String = "", strategy: String = "complete_ways", bucket: String = "osm-extracts", batch_size: Long = 0, osmfr_fallback: Boolean = true) => (region_count: Long, published: Long) andThen {
-        result = osm.planet.BuildAdminSet(source_region = $.source_region, admin_level = $.admin_level, base_url = $.base_url, strategy = $.strategy, bucket = $.bucket, batch_size = $.batch_size, osmfr_fallback = $.osmfr_fallback)
+    workflow BuildAdminSetWorkflow(source_region: String, admin_level: Long = 4, base_url: String = "", strategy: String = "complete_ways", bucket: String = "osm-extracts", batch_size: Long = 0, osmfr_fallback: Boolean = true, refresh_after_days: Long = 0, force_refresh: Boolean = false) => (region_count: Long, published: Long) andThen {
+        result = osm.planet.BuildAdminSet(source_region = $.source_region, admin_level = $.admin_level, base_url = $.base_url, strategy = $.strategy, bucket = $.bucket, batch_size = $.batch_size, osmfr_fallback = $.osmfr_fallback, refresh_after_days = $.refresh_after_days, force_refresh = $.force_refresh)
         yield BuildAdminSetWorkflow(region_count = result.region_count, published = result.published)
     }
 

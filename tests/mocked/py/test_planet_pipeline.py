@@ -385,8 +385,9 @@ def test_build_admin_set_resumes_skipping_published(tmp_path, monkeypatch):
                             BoundaryRegion("europe/germany/a", "/p", "A", 6, None),
                             BoundaryRegion("europe/germany/b", "/p", "B", 6, None)])
     monkeypatch.setattr(ph, "fetch_country_subregions", lambda *a, **k: [])
-    monkeypatch.setattr(ph, "_published_region_keys",
-                        lambda s3, b, p: {"europe/germany/a"})   # 'a' already done
+    # 'a' already done — published 0.01 days ago, i.e. minutes, as a resume would see it
+    monkeypatch.setattr(ph, "_published_region_ages",
+                        lambda s3, b, p: {"europe/germany/a": 0.01})
     def bb(**k):
         passed["regions"] = [r["key"] for r in k["regions"]]
         return _bb_publishing(**k)
