@@ -122,3 +122,21 @@ class _NoopS3:
             def paginate(self, **kw):
                 return []
         return P()
+
+
+def test_a_flat_key_never_reaches_the_bucket_root(tmp_path, monkeypatch):
+    """A level-2 unit with no continent mapping must be DROPPED, not published.
+
+    Measured 2026-08-27: a central-america split emitted
+    `united-states-of-america-minor-outlying-islands-navassa-island-disputed-…`
+    with no continent prefix, which lands in the bucket ROOT beside the 8
+    continent extracts — the namespace consumers read `<continent>-latest.osm.pbf`
+    from.
+    """
+    good = _feature("Jamaica", "JM", 2)
+    orphan = _feature("Navassa Island (disputed)", "", 2)   # no ISO -> flat key
+    _fake_run(monkeypatch, tmp_path, [good, orphan], 2)
+    got = bg.generate_polygons("src.pbf", 2, str(tmp_path), country_prefix=None)
+    keys = [r.key for r in got]
+    assert all("/" in k for k in keys), f"a flat key would land at the root: {keys}"
+    assert "central-america/jamaica" in keys

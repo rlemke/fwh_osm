@@ -216,7 +216,17 @@ def generate_polygons(source: str, admin_level: int, dest: str, *,
                 # A sub-national unit (level >= 4) that only produces a flat slug
                 # lacks a country ISO — island/reserve noise mistagged at this level.
                 key = _geofabrik_key(name_local or name, name_en, iso, int(admin_level))
-                if int(admin_level) >= 4 and "/" not in key:
+                # A flat key means _geofabrik_key could not place the unit under a
+                # continent (no ISO, or an ISO outside the continent table). At
+                # level >= 4 that is island/reserve noise mistagged at this level.
+                # At level 2 it is a disputed/aggregate area — and publishing it
+                # flat puts it in the BUCKET ROOT beside the 8 continent extracts,
+                # where consumers look for `<continent>-latest.osm.pbf`. Measured
+                # 2026-08-27: a central-america split published
+                # `united-states-of-america-minor-outlying-islands-navassa-island-…`
+                # to the root. Drop it at every level rather than pollute that
+                # namespace; a unit worth having needs a continent.
+                if "/" not in key:
                     dropped += 1
                     continue
             if key in seen:
