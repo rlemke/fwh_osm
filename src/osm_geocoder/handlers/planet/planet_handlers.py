@@ -398,9 +398,19 @@ def _build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
     # country (fixes the ISO→continent quirk, e.g. mexico) and lets county-level
     # (admin_level>=6, no ISO 3166-2) units through instead of being dropped.
     raise_if_cancelled()
+    # country_prefix is what keys sub-national units under their COUNTRY
+    # (europe/germany/bayern). At admin_level <= 2 the children ARE countries,
+    # and that branch requires ISO 3166-2 ("DE-BY") — a country carries ISO
+    # 3166-1 ("DE"), so every one is dropped as island noise. Measured
+    # 2026-08-26: `europe` @ 2 assembled 94 countries and kept ZERO.
+    #
+    # The standalone path (country_prefix=None) is built for exactly this case:
+    # _geofabrik_key maps a level-2 ISO 3166-1 code to `<continent>/<country>`,
+    # which is the key layout the bucket already uses.
+    prefix = source_region if int(admin_level) > 2 else None
     with _heartbeating(params, f"extracting admin_level={admin_level} boundaries"):
         regions = generate_polygons(src, admin_level, os.path.join(work, "polys"),
-                                    country_prefix=source_region, on_log=log)
+                                    country_prefix=prefix, on_log=log)
     poly_regions = [{"key": r.key, "poly": r.poly} for r in regions]
 
     # Straggler fallback: osmium export can't assemble some boundaries (nested

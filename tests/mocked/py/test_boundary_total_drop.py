@@ -72,3 +72,53 @@ def test_partial_drop_is_tolerated(tmp_path, monkeypatch):
     _fake_run(monkeypatch, tmp_path, feats, 4)
     got = bg.generate_polygons("src.pbf", 4, str(tmp_path), country_prefix="europe/germany")
     assert len(got) == 1
+
+
+def test_a_continent_split_keys_countries_under_the_continent(tmp_path, monkeypatch):
+    """admin_level 2 must use the STANDALONE keying, not the country_prefix one.
+
+    A country carries ISO 3166-1 ("DE"); the country_prefix branch demands
+    ISO 3166-2 ("DE-BY") and drops everything without it. `europe` @ 2 assembled
+    94 countries and kept zero (2026-08-26). The standalone path's
+    _geofabrik_key is built for this and yields `<continent>/<country>`.
+    """
+    feats = [_feature("Germany", "DE", 2), _feature("France", "FR", 2)]
+    _fake_run(monkeypatch, tmp_path, feats, 2)
+    got = bg.generate_polygons("src.pbf", 2, str(tmp_path), country_prefix=None)
+    assert sorted(r.key for r in got) == ["europe/france", "europe/germany"]
+
+
+def test_the_handler_drops_country_prefix_at_level_2(monkeypatch):
+    """The wiring, not just the primitive: BuildAdminSet must pass None at <= 2
+    and the source_region at >= 4."""
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+
+    seen = {}
+
+    def fake_generate(src, lvl, dest, *, country_prefix=None, on_log=None):
+        seen[lvl] = country_prefix
+        raise RuntimeError("stop here — we only care about the argument")
+
+    monkeypatch.setattr(ph, "generate_polygons", fake_generate)
+    monkeypatch.setattr(ph, "_s3_client", lambda *a, **k: _NoopS3())
+    monkeypatch.setattr(ph, "_ensure_public_bucket", lambda *a, **k: None)
+
+    for level, expected in ((2, None), (6, "europe/germany")):
+        try:
+            ph.handle_build_admin_set({"source_region": "europe/germany",
+                                       "admin_level": level})
+        except Exception:
+            pass
+        assert seen.get(level) == expected, (
+            f"level {level}: country_prefix should be {expected!r}, got {seen.get(level)!r}")
+
+
+class _NoopS3:
+    def download_file(self, *a, **k):
+        pass
+
+    def get_paginator(self, *a, **k):
+        class P:
+            def paginate(self, **kw):
+                return []
+        return P()
