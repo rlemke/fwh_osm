@@ -165,3 +165,124 @@ def test_build_report_summary_follows_the_mirrors_it_was_given():
     out = ih.handle_build_state_report({"survey": json.dumps(survey),
                                         "overpass": json.dumps(mirrors)})
     assert "1/2 usable" in out["detail"]      # not the stale 9/9 it was handed
+
+
+# --------------------------------------------------------------------------- #
+# sub-regions: countries / states / counties
+# --------------------------------------------------------------------------- #
+def _obj(key: str, days_old: float, size: int = 10):
+    return {"Key": key, "Size": size,
+            "LastModified": datetime.now(UTC) - timedelta(days=days_old)}
+
+
+class _FakeS3:
+    """Enough of the boto3 client for the survey: list + ranged get."""
+
+    def __init__(self, objects, header_bytes=b""):
+        self._objects = objects
+        self._header = header_bytes
+
+    def get_paginator(self, _name):
+        objs = self._objects
+
+        class _P:
+            def paginate(self, **_kw):
+                return [{"Contents": objs}]
+        return _P()
+
+    def get_object(self, **_kw):
+        class _B:
+            def __init__(self, data): self._d = data
+            def read(self): return self._d
+        return {"Body": _B(self._header)}
+
+
+def test_key_depth_maps_to_administrative_tier():
+    assert inv.DEPTH_TIERS[0] == "continent"
+    assert inv.DEPTH_TIERS[1] == "country"
+    assert inv.DEPTH_TIERS[2] == "state-or-province"
+    assert inv.DEPTH_TIERS[3] == "county-or-district"
+
+
+def test_subregion_survey_groups_by_tier_and_counts_stale(monkeypatch):
+    objs = [
+        _obj("europe-latest.osm.pbf", 1),
+        _obj("europe/france-latest.osm.pbf", 30),
+        _obj("north-america/us/texas-latest.osm.pbf", 30),
+        _obj("north-america/us/texas/harris-latest.osm.pbf", 33),
+        _obj("north-america/us/texas/travis-latest.osm.pbf", 2),
+    ]
+    monkeypatch.setattr(inv, "_s3_client", lambda *a, **k: _FakeS3(objs))
+    monkeypatch.setattr(inv, "_probe_s3_header",
+                        lambda *a, **k: {"has_replication_timestamp": False})
+    out = inv.survey_subregions(sample_per_tier=1, stale_after_days=14)
+    assert out["total_objects"] == 5
+    assert out["tiers"]["county-or-district"]["count"] == 2
+    # only the 33-day county is stale; the 2-day one is not
+    assert out["tiers"]["county-or-district"]["mtime_stale_count"] == 1
+    assert out["tiers"]["continent"]["mtime_stale_count"] == 0
+    assert out["mtime_stale_count"] == 3
+
+
+def test_missing_data_vintage_is_surfaced_as_a_finding(monkeypatch):
+    """Sub-regions carry a replication BASE URL but no timestamp/sequence, so
+    their diffs cannot be applied and their age cannot be stated from content.
+    That must be reported, not silently replaced by mtime."""
+    objs = [_obj("europe-latest.osm.pbf", 1),                  # continent: has one
+            _obj("europe/france-latest.osm.pbf", 1)]           # country: does not
+
+    def probe(_c, _b, key):
+        return {"has_replication_timestamp": key.count("/") == 0}
+    monkeypatch.setattr(inv, "_s3_client", lambda *a, **k: _FakeS3(objs))
+    monkeypatch.setattr(inv, "_probe_s3_header", probe)
+    out = inv.survey_subregions(sample_per_tier=1)
+    # Exactly the tier whose samples lack a timestamp, and only that one.
+    assert out["tiers_without_data_vintage"] == ["country"]
+    assert out["tiers"]["continent"]["sampled_with_replication_timestamp"] == 1
+    assert out["tiers"]["country"]["sampled_with_replication_timestamp"] == 0
+
+
+def test_mtime_fields_are_named_so_they_cannot_be_read_as_data_vintage(monkeypatch):
+    """A weaker signal must not wear the same name as a stronger one."""
+    objs = [_obj("europe/france-latest.osm.pbf", 5)]
+    monkeypatch.setattr(inv, "_s3_client", lambda *a, **k: _FakeS3(objs))
+    monkeypatch.setattr(inv, "_probe_s3_header",
+                        lambda *a, **k: {"has_replication_timestamp": False})
+    tier = inv.survey_subregions(sample_per_tier=1)["tiers"]["country"]
+    assert "mtime_oldest_days" in tier and "mtime_stale_count" in tier
+    # nothing in this tier may claim a header-derived age
+    assert "age_hours" not in tier and "oldest_age_hours" not in tier
+
+
+def test_subregion_staleness_does_not_turn_the_headline_red(monkeypatch):
+    """The sub-region tier refreshes on its own schedule. Folding it into the
+    top-level verdict would leave the report permanently red, which is how an
+    alarm stops being read."""
+    monkeypatch.setattr(inv, "regions", lambda: ["a"])
+    monkeypatch.setattr(inv, "survey_tree", lambda *a, **k: {
+        "store": "t", "base": "", "scope": "", "regions": {"a": {"present": True,
+                                                                 "age_hours": 1.0}}})
+    monkeypatch.setattr(inv, "survey_subregions", lambda **k: {
+        "total_objects": 3917, "total_bytes": 1, "mtime_stale_count": 3419,
+        "tiers": {}, "tiers_without_data_vintage": ["county-or-district"]})
+    r = inv.build_report(include_object_store=False, include_overpass=False,
+                         include_subregions=True)
+    assert r["status"] == "ok"                 # continents are healthy
+    assert r["subregion_status"] == "stale"    # and this is reported separately
+    assert r["summary"]["subregion_stale"] == 3419
+
+
+def test_subregion_html_explains_why_there_is_no_vintage():
+    sub = {"total_objects": 2, "total_bytes": 2e9, "bucket": "b", "stale_after_days": 14,
+           "tiers": {"county-or-district": {"count": 2, "bytes": 2e9,
+                                            "mtime_oldest_days": 33.0,
+                                            "mtime_stale_count": 2,
+                                            "sampled": 3,
+                                            "sampled_with_replication_timestamp": 0}},
+           "tiers_without_data_vintage": ["county-or-district"]}
+    html = inv._subregion_html(sub)
+    assert "No data vintage" in html
+    assert "osmium extract" in html and "sequence number" in html
+    assert "LAST-MODIFIED" in html
+    # and the not-surveyed case must not pretend everything is fine
+    assert "Not surveyed" in inv._subregion_html(None)

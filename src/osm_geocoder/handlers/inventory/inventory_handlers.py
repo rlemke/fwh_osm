@@ -124,6 +124,48 @@ def handle_probe_region(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def handle_survey_subregions(params: dict[str, Any]) -> dict[str, Any]:
+    """Handle SurveySubRegions - the country/state/county tier."""
+    sample = int(params.get("sample_per_tier", 3) or 3)
+    stale_days = float(params.get("stale_after_days", 14.0) or 14.0)
+    step_log = params.get("_step_log")
+    _log(step_log, f"SurveySubRegions sample_per_tier={sample} stale_after={stale_days}d")
+
+    sub = extract_inventory.survey_subregions(sample_per_tier=sample,
+                                              stale_after_days=stale_days)
+    if sub.get("error"):
+        raise RuntimeError(f"sub-region survey failed: {sub['error']}")
+
+    for tier, v in sorted(sub["tiers"].items(), key=lambda kv: -kv[1]["count"]):
+        level = "warning" if v["mtime_stale_count"] else "info"
+        _log(step_log,
+             f"{tier}: {v['count']:,} objects, {v['bytes'] / 1e9:.1f} GB, "
+             f"oldest {v['mtime_oldest_days']:.1f}d (mtime), "
+             f"{v['mtime_stale_count']:,} stale, "
+             f"{v['sampled_with_replication_timestamp']}/{v['sampled']} sampled carry a "
+             f"replication timestamp", level)
+    missing = sub.get("tiers_without_data_vintage") or []
+    if missing:
+        _log(step_log,
+             "no data vintage for " + ", ".join(missing) + ": these carry an "
+             "osmosis_replication_base_url but NO sequence number, so their diffs cannot "
+             "be applied and their age is only the object's last-modified time",
+             "warning")
+    status = "stale" if sub.get("mtime_stale_count") else "ok"
+    _log(step_log,
+         f"[{status}] {sub['total_objects']:,} sub-region objects, "
+         f"{sub['total_bytes'] / 1e9:.1f} GB, {sub['mtime_stale_count']:,} stale",
+         "warning" if status == "stale" else "success")
+    return {
+        "report": json.dumps(sub),
+        "total_objects": int(sub["total_objects"]),
+        "total_bytes": int(sub["total_bytes"]),
+        "stale_count": int(sub["mtime_stale_count"]),
+        "tiers_without_vintage": json.dumps(missing),
+        "status": status,
+    }
+
+
 def handle_probe_overpass(params: dict[str, Any]) -> dict[str, Any]:
     """Handle ProbeOverpass - mirror reachability, data currency and quota."""
     step_log = params.get("_step_log")
@@ -156,6 +198,18 @@ def handle_build_state_report(params: dict[str, Any]) -> dict[str, Any]:
     step_log = params.get("_step_log")
 
     survey = json.loads(survey_raw) if isinstance(survey_raw, str) else survey_raw
+    sub_raw = params.get("subregions") or ""
+    if sub_raw:
+        sub = json.loads(sub_raw) if isinstance(sub_raw, str) else sub_raw
+        if isinstance(sub, dict) and sub:
+            survey["subregions"] = sub
+            survey.setdefault("summary", {}).update(
+                subregion_objects=sub.get("total_objects"),
+                subregion_stale=sub.get("mtime_stale_count"))
+            # A separate verdict on purpose: the sub-region tier refreshes on its
+            # own schedule, so folding it into the headline would leave the report
+            # permanently red - which is how an alarm stops being read.
+            survey["subregion_status"] = "stale" if sub.get("mtime_stale_count") else "ok"
     mirrors = json.loads(overpass_raw) if isinstance(overpass_raw, str) else overpass_raw
     if isinstance(mirrors, list):
         survey.setdefault("overpass", {})["mirrors"] = mirrors
@@ -173,6 +227,9 @@ def handle_build_state_report(params: dict[str, Any]) -> dict[str, Any]:
               f"missing={len(s.get('missing', []))} stale={len(s.get('stale', []))}; "
               f"oldest {_f(s.get('oldest_age_hours')):.1f}h; "
               f"Overpass {s.get('overpass_usable', '?')} usable")
+    if s.get("subregion_objects"):
+        detail += (f"; sub-regions {s['subregion_objects']:,} objects, "
+                   f"{s.get('subregion_stale', 0):,} stale ({survey.get('subregion_status')})")
     _log(step_log, f"[{status}] {detail} -> {html_path}",
          "success" if status == "ok" else "warning")
     return {"status": status, "html_path": html_path,
@@ -182,6 +239,7 @@ def handle_build_state_report(params: dict[str, Any]) -> dict[str, Any]:
 _DISPATCH: dict[str, Any] = {
     f"{NAMESPACE}.SurveyExtracts": handle_survey_extracts,
     f"{NAMESPACE}.ProbeRegion": handle_probe_region,
+    f"{NAMESPACE}.SurveySubRegions": handle_survey_subregions,
     f"{NAMESPACE}.ProbeOverpass": handle_probe_overpass,
     f"{NAMESPACE}.BuildStateReport": handle_build_state_report,
 }

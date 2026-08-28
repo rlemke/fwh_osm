@@ -75,6 +75,38 @@ namespace osm.inventory {
         relation_count: Long
     ) with Effect(kind = "external") with Cost(tier = "expensive")
 
+    /** Survey the country / state / county extracts in the object store.
+      *
+      * A different tier with a different failure mode from the continents.
+      * Measured 2026-08-28: 3,167 counties + 511 states + 226 countries
+      * (232.5 GB), against 13 continents - and while the continents were 3 days
+      * old, EVERY county was over 32 days old.
+      *
+      * ⚠️ This tier has NO data vintage. Only the continents carry
+      * `osmosis_replication_timestamp`; sub-regions are cut from them with
+      * `osmium extract`, which does not propagate it. They keep an
+      * `osmosis_replication_base_url` - a promise of an update stream - with no
+      * sequence number saying where to start, so nothing can apply those diffs
+      * and nothing can state how old the data is. Ages are therefore the
+      * object's LAST-MODIFIED time, which says when the file was written, not
+      * how old the data in it is. Every such field is named `mtime_*` so the
+      * two can never be read as the same measurement.
+      *
+      * Listing is one paginated call; headers are SAMPLED per tier, because
+      * probing all ~3,900 would be that many ranged GETs to establish what the
+      * sample already establishes. */
+    event facet SurveySubRegions(
+        sample_per_tier: Int = 3,
+        stale_after_days: Double = 14.0
+    ) => (
+        report: Json,
+        total_objects: Long,
+        total_bytes: Long,
+        stale_count: Long,
+        tiers_without_vintage: Json,
+        status: String
+    ) with Effect(kind = "external") with Cost(tier = "moderate")
+
     /** Overpass mirror state: does it answer, how far behind wall-clock is its
       * DATA (/api/timestamp), and what quota does it advertise (/api/status).
       *
@@ -100,6 +132,7 @@ namespace osm.inventory {
     event facet BuildStateReport(
         survey: Json,
         overpass: Json,
+        subregions: Json = "",
         dest: String = "",
         stale_after_hours: Double = 48.0
     ) => (
@@ -114,6 +147,8 @@ namespace osm.inventory {
       * downloading a single extract. */
     workflow OsmExtractStateReport(
         include_object_store: Boolean = true,
+        include_subregions: Boolean = true,
+        subregion_stale_days: Double = 14.0,
         stale_after_hours: Double = 48.0,
         local_dir: String = "",
         dest: String = ""
@@ -131,6 +166,14 @@ namespace osm.inventory {
             yield OsmExtractStateReport(status = "unverified", html_path = "",
                 detail = "extract survey failed")
         }
+        subregions = SurveySubRegions(
+            stale_after_days = $.subregion_stale_days
+        ) catch {
+            // The object store being unreachable must not lose the continent
+            // survey that already succeeded.
+            yield OsmExtractStateReport(status = "partial", html_path = "",
+                detail = "continent survey ok; sub-region survey failed")
+        }
         overpass = ProbeOverpass() catch {
             // A dead Overpass must NOT fail the extract report - the whole point
             // is that our extracts do not depend on it.
@@ -140,6 +183,7 @@ namespace osm.inventory {
         report = BuildStateReport(
             survey = survey.report,
             overpass = overpass.mirrors,
+            subregions = subregions.report,
             dest = $.dest,
             stale_after_hours = $.stale_after_hours
         ) catch {

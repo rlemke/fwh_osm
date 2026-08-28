@@ -229,6 +229,128 @@ def survey_object_store(region_list: list[str] | None = None, *,
     return out
 
 
+
+# --------------------------------------------------------------------------- #
+# sub-regions (countries / states / counties)
+# --------------------------------------------------------------------------- #
+# Key depth IS the administrative tier: the split writes
+# <continent>/<country>/<state>/<county>-latest.osm.pbf.
+DEPTH_TIERS = {0: "continent", 1: "country", 2: "state-or-province", 3: "county-or-district"}
+
+
+def _s3_client(endpoint: str | None = None):
+    """Same construction the planet handlers use, so one env config governs both."""
+    try:
+        import boto3  # optional [s3] extra
+    except ImportError as exc:
+        raise RuntimeError("sub-region survey needs boto3 (pip install '.[s3]')") from exc
+    return boto3.client(
+        "s3", endpoint_url=endpoint or os.environ.get("FW_S3_ENDPOINT", "http://localhost:9000"),
+        aws_access_key_id=os.environ.get("FW_S3_ACCESS_KEY", "minioadmin"),
+        aws_secret_access_key=os.environ.get("FW_S3_SECRET_KEY", "minioadmin"))
+
+
+def _probe_s3_header(client, bucket: str, key: str) -> dict[str, Any]:
+    """Replication header of one object via a 64 KB ranged GET."""
+    rec: dict[str, Any] = {}
+    try:
+        body = client.get_object(Bucket=bucket, Key=key,
+                                 Range=f"bytes=0-{HEADER_PROBE_BYTES - 1}")["Body"].read()
+        with tempfile.NamedTemporaryFile(suffix=".osm.pbf", delete=False) as fh:
+            fh.write(body)
+            tmp = fh.name
+        try:
+            opt = (_fileinfo(tmp).get("header") or {}).get("option") or {}
+        finally:
+            os.unlink(tmp)
+        ts = opt.get("osmosis_replication_timestamp")
+        rec.update(replication_timestamp=ts,
+                   replication_sequence=opt.get("osmosis_replication_sequence_number"),
+                   replication_base_url=opt.get("osmosis_replication_base_url"),
+                   generator=opt.get("generator"),
+                   age_hours=_age_hours(ts),
+                   has_replication_timestamp=bool(ts))
+    except Exception as exc:  # noqa: BLE001
+        rec["header_error"] = type(exc).__name__
+        rec["has_replication_timestamp"] = False
+    return rec
+
+
+def survey_subregions(*, bucket: str | None = None, sample_per_tier: int = 3,
+                      stale_after_days: float = 14.0) -> dict[str, Any]:
+    """Inventory the country/state/county extracts in the object store.
+
+    ⚠️ **This tier has no data vintage.** Only the continents carry
+    ``osmosis_replication_timestamp``; the sub-regions are cut from them with
+    ``osmium extract``, which does not propagate it. They keep an
+    ``osmosis_replication_base_url`` - a promise of an update stream - with no
+    sequence number saying where to start, so nothing can apply those diffs and
+    nothing can state how old the data is. Verified by downloading whole small
+    objects, not just header probes, so this is the file's content and not a
+    truncation artifact.
+
+    The consequence for this report: sub-region currency is measured from the
+    object's LAST-MODIFIED time, which is a WEAKER signal than a replication
+    timestamp - it says when the file was written, not how old the data inside
+    it is. Every field derived from it is labelled ``mtime_`` so the two can
+    never be read as the same measurement.
+
+    Listing is one paginated call for the whole bucket (cheap). Headers are
+    SAMPLED per tier, because probing all ~3,900 would be that many ranged GETs
+    to establish something the sample already establishes.
+    """
+    bucket = bucket or os.environ.get("FW_OSM_EXTRACT_BUCKET", "") or DEFAULT_BUCKET
+    out: dict[str, Any] = {"store": "object-store", "bucket": bucket,
+                           "sample_per_tier": sample_per_tier,
+                           "stale_after_days": stale_after_days, "tiers": {}}
+    try:
+        client = _s3_client()
+        pages = client.get_paginator("list_objects_v2").paginate(Bucket=bucket)
+        objects = [o for page in pages for o in page.get("Contents", [])
+                   if o["Key"].endswith(".osm.pbf")]
+    except Exception as exc:  # noqa: BLE001
+        out["error"] = f"{type(exc).__name__}: {exc}"
+        return out
+
+    now = datetime.now(UTC)
+    by_tier: dict[str, list[dict[str, Any]]] = {}
+    for o in objects:
+        tier = DEPTH_TIERS.get(o["Key"].count("/"), "deeper")
+        by_tier.setdefault(tier, []).append(o)
+
+    total_stale = 0
+    for tier, objs in by_tier.items():
+        ages = [(now - o["LastModified"]).total_seconds() / 86400.0 for o in objs]
+        stale = [a for a in ages if a > stale_after_days]
+        total_stale += len(stale)
+        sample = objs[:: max(1, len(objs) // max(1, sample_per_tier))][:sample_per_tier]
+        probes = []
+        for o in sample:
+            rec = _probe_s3_header(client, bucket, o["Key"])
+            rec["key"] = o["Key"]
+            probes.append(rec)
+        with_ts = sum(1 for p in probes if p.get("has_replication_timestamp"))
+        out["tiers"][tier] = {
+            "count": len(objs),
+            "bytes": sum(o["Size"] for o in objs),
+            "mtime_oldest_days": max(ages) if ages else None,
+            "mtime_newest_days": min(ages) if ages else None,
+            "mtime_stale_count": len(stale),
+            "sampled": len(probes),
+            "sampled_with_replication_timestamp": with_ts,
+            "samples": probes,
+        }
+    out["total_objects"] = len(objects)
+    out["total_bytes"] = sum(o["Size"] for o in objects)
+    out["mtime_stale_count"] = total_stale
+    # A tier whose samples carry no replication timestamp cannot be aged from
+    # its content at all. Surfaced as a finding, not buried in the samples.
+    out["tiers_without_data_vintage"] = sorted(
+        t for t, v in out["tiers"].items()
+        if v["sampled"] and not v["sampled_with_replication_timestamp"])
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Overpass
 # --------------------------------------------------------------------------- #
@@ -291,6 +413,8 @@ def overpass_state(endpoints: list[str] | None = None) -> dict[str, Any]:
 def build_report(*, count_features: bool = False, local_dir: str = "",
                  include_object_store: bool = True,
                  include_overpass: bool = True,
+                 include_subregions: bool = False,
+                 subregion_stale_days: float = 14.0,
                  stale_after_hours: float = 48.0) -> dict[str, Any]:
     """The whole picture: both stores, Overpass, and a verdict.
 
@@ -310,6 +434,8 @@ def build_report(*, count_features: bool = False, local_dir: str = "",
     # Off when a caller has its own ProbeOverpass step: probing here as well
     # meant two probes at two different moments, and the report then disagreed
     # with itself ("2/3 usable" beside "1/3 usable" for the same run).
+    if include_subregions:
+        report["subregions"] = survey_subregions(stale_after_days=subregion_stale_days)
     report["overpass"] = overpass_state() if include_overpass else {
         "mirrors": [], "usable_count": 0, "total_count": 0, "not_probed": True}
 
@@ -340,6 +466,18 @@ def build_report(*, count_features: bool = False, local_dir: str = "",
                             else f"{report['overpass']['usable_count']}"
                                  f"/{report['overpass']['total_count']}"),
     }
+    sub = report.get("subregions") or {}
+    if sub and not sub.get("error"):
+        report["summary"]["subregion_objects"] = sub.get("total_objects")
+        report["summary"]["subregion_stale"] = sub.get("mtime_stale_count")
+        report["summary"]["subregion_tiers_without_vintage"] = sub.get(
+            "tiers_without_data_vintage", [])
+        # Deliberately a SEPARATE verdict, not folded into the headline. The
+        # sub-region tier is refreshed on its own schedule (fw svc osm-admin-regen)
+        # and is currently stale by design-drift, so folding it in would leave the
+        # top-level status permanently red - the exact way an alarm gets ignored.
+        report["subregion_status"] = "stale" if sub.get("mtime_stale_count") else "ok"
+
     # Exit-code semantics mirror `fw maint dead-letters` / `osm-watchdog`:
     # 0 healthy, 1 a real problem, 2 could-not-verify. Alarming when merely
     # unable to reach the tree would train the reader to ignore the alarm.
@@ -381,6 +519,40 @@ def _row(region: str, v: dict[str, Any], stale_h: float) -> str:
     return (f"<tr><td>{region}</td><td style='color:{colour};font-weight:600'>{state}</td>"
             f"<td>{size}</td><td>{v.get('replication_sequence') or '-'}</td>"
             f"<td class='dim'>{v.get('replication_timestamp') or '-'}</td>{counts}</tr>")
+
+
+def _subregion_html(sub: dict[str, Any] | None) -> str:
+    """The country/state/county tier - rendered ONLY from mtime, and said so."""
+    if not sub:
+        return ("<h2>Sub-regions</h2><p class='dim'>Not surveyed "
+                "(pass include_subregions).</p>")
+    if sub.get("error"):
+        return f"<h2>Sub-regions</h2><p class='dim'>Could not survey: {sub['error']}</p>"
+    rows = "".join(
+        f"<tr><td>{tier}</td><td>{v['count']:,}</td>"
+        f"<td>{v['bytes'] / 1e9:.1f} GB</td>"
+        f"<td>{v['mtime_oldest_days']:.1f} d</td>"
+        f"<td style='color:{'#c62828' if v['mtime_stale_count'] else '#2e7d32'};font-weight:600'>"
+        f"{v['mtime_stale_count']:,}</td>"
+        f"<td>{v['sampled_with_replication_timestamp']}/{v['sampled']}</td></tr>"
+        for tier, v in sorted(sub.get("tiers", {}).items(), key=lambda kv: -kv[1]["count"]))
+    missing = sub.get("tiers_without_data_vintage") or []
+    warn = ""
+    if missing:
+        warn = (f"<div class='note'><b>No data vintage for: {', '.join(missing)}.</b> "
+                "Only the continents carry <code>osmosis_replication_timestamp</code>; "
+                "sub-regions are cut from them with <code>osmium extract</code>, which does "
+                "not propagate it. They keep an <code>osmosis_replication_base_url</code> - "
+                "a promise of an update stream - with NO sequence number saying where to "
+                "start, so nothing can apply those diffs and nothing can state how old the "
+                "data is. Ages below are therefore the object's LAST-MODIFIED time: when the "
+                "file was written, not how old the data inside it is.</div>")
+    return f"""<h2>Sub-regions <span class="dim">({sub.get('total_objects', 0):,} objects,
+ {sub.get('total_bytes', 0) / 1e9:.1f} GB in {sub.get('bucket', '?')})</span></h2>
+{warn}
+<table><tr><th>tier</th><th>count</th><th>size</th><th>oldest (mtime)</th>
+<th>stale &gt;{sub.get('stale_after_days', 14):g}d</th><th>sampled w/ vintage</th></tr>
+{rows}</table>"""
 
 
 def render_report(report: dict[str, Any], *, dest: str = "") -> tuple[str, str]:
@@ -455,6 +627,7 @@ def render_report(report: dict[str, Any], *, dest: str = "") -> tuple[str, str]:
 <th>nodes</th><th>ways</th><th>relations</th></tr>
 {''.join(rows)}</table>
 
+{_subregion_html(report.get("subregions"))}
 <h2>Overpass mirrors</h2>
 <p class="dim">Currency and quota only. Whether a mirror holds every object is not
 observable from a client and is not claimed here.</p>

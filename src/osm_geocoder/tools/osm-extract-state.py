@@ -39,6 +39,9 @@ def main() -> int:
     ap.add_argument("--count-features", action="store_true",
                     help="EXPENSIVE: read every byte to count nodes/ways/relations")
     ap.add_argument("--no-object-store", action="store_true")
+    ap.add_argument("--subregions", action="store_true",
+                    help="also survey the country/state/county tier in the object store")
+    ap.add_argument("--subregion-stale-days", type=float, default=14.0)
     ap.add_argument("--no-overpass", action="store_true")
     ap.add_argument("--stale-after-hours", type=float, default=48.0)
     ap.add_argument("--html", default="", metavar="DIR", help="write HTML+JSON report here")
@@ -53,6 +56,8 @@ def main() -> int:
     rep = inv.build_report(count_features=a.count_features, local_dir=a.local_dir,
                            include_object_store=not a.no_object_store,
                            include_overpass=not a.no_overpass,
+                           include_subregions=a.subregions,
+                           subregion_stale_days=a.subregion_stale_days,
                            stale_after_hours=a.stale_after_hours)
     if a.json:
         json.dump(rep, sys.stdout, indent=2, sort_keys=True)
@@ -82,6 +87,21 @@ def main() -> int:
             print(f"\nMISSING: {', '.join(s['missing'])}")
         if s["stale"]:
             print(f"STALE (>{a.stale_after_hours:g}h): {', '.join(s['stale'])}")
+        sub = rep.get("subregions") or {}
+        if sub and not sub.get("error"):
+            print(f"\nSub-regions ({sub['total_objects']:,} objects, "
+                  f"{sub['total_bytes'] / 1e9:.1f} GB) - ages are LAST-MODIFIED, "
+                  f"not data vintage:")
+            for tier, v in sorted(sub["tiers"].items(), key=lambda kv: -kv[1]["count"]):
+                print(f"  {tier:22s} {v['count']:>6,}  {v['bytes'] / 1e9:>6.1f} GB  "
+                      f"oldest {v['mtime_oldest_days']:>5.1f}d  "
+                      f"stale {v['mtime_stale_count']:>6,}  "
+                      f"vintage {v['sampled_with_replication_timestamp']}/{v['sampled']}")
+            if sub.get("tiers_without_data_vintage"):
+                print(f"  NOTE: no data vintage for "
+                      f"{', '.join(sub['tiers_without_data_vintage'])} - these carry a "
+                      f"replication base_url but no sequence number, so their diffs "
+                      f"cannot be applied and their age is only the file's mtime.")
         print("\nOverpass mirrors:")
         for m in rep["overpass"].get("mirrors", []):
             lag = (f"{m['data_lag_hours']:.2f}h"
