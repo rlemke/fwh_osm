@@ -1,0 +1,208 @@
+// State of the self-hosted OSM region extracts, and of the Overpass alternative.
+//
+// Answers, for every region we are supposed to serve: is it THERE, how CURRENT
+// is it, how BIG is it, and (opt-in) how many features it holds - then the same
+// currency question for Overpass, so the two sources can be compared on the one
+// axis that actually differs between them.
+//
+// Backed by tools/_osm_tools/extract_inventory.py.
+//
+// Two cost tiers, and the difference is enormous:
+//   * header-only  - 0.26 s per file locally, 64 KB per file REMOTELY (a Range
+//                    request; the replication header sits in the first blob, so
+//                    a 40 GB extract is probed without downloading it). The
+//                    whole 100 GB fleet surveys in well under a minute.
+//   * feature counts - reads the ENTIRE file. Measured 710 s on one 40 GB
+//                    extract; a full-set scan once cost ~52 minutes to produce
+//                    two log numbers. So counts are OPT-IN, never the default.
+
+namespace osm.inventory {
+
+    /** One region's extract as observed in one store. `age_hours` is measured
+      * from the PBF's own osmosis_replication_timestamp, not from file mtime -
+      * a file can be rewritten without its data moving forward. */
+    schema ExtractState {
+        region: String,
+        present: Boolean,
+        size_bytes: Long,
+        replication_sequence: String,
+        replication_timestamp: String,
+        age_hours: Double
+    }
+
+    /** Survey EVERY expected region in one step (header-only unless
+      * `count_features`). Cheap enough that a per-region fan-out would cost
+      * more in step overhead than the work itself - see OsmExtractDeepReport
+      * for the tier where fanning out IS justified.
+      *
+      * ⚠️ Surveys the HTTP tree and the object store SEPARATELY and labels
+      * each. They are not interchangeable: the tree serves the 8 continents,
+      * while the object store additionally holds ~3,877 sub-regions. Reporting
+      * one as the other is how "the extracts are fine" gets said about the
+      * wrong set. */
+    event facet SurveyExtracts(
+        count_features: Boolean = false,
+        local_dir: String = "",
+        include_object_store: Boolean = true,
+        stale_after_hours: Double = 48.0
+    ) => (
+        report: Json,
+        regions: Json,
+        expected: Long,
+        present: Long,
+        missing_count: Long,
+        stale_count: Long,
+        oldest_age_hours: Double,
+        status: String
+    ) with Effect(kind = "external") with Cost(tier = "cheap")
+
+    /** One region, one store. Exists for the DEEP tier: with `count_features`
+      * this reads the whole extract, which is worth a step of its own so the
+      * dashboard shows per-region progress and a slow continent does not hide
+      * behind the others. */
+    event facet ProbeRegion(
+        region: String,
+        count_features: Boolean = false,
+        local_dir: String = ""
+    ) => (
+        region: String,
+        present: Boolean,
+        size_bytes: Long,
+        replication_sequence: String,
+        age_hours: Double,
+        node_count: Long,
+        way_count: Long,
+        relation_count: Long
+    ) with Effect(kind = "external") with Cost(tier = "expensive")
+
+    /** Overpass mirror state: does it answer, how far behind wall-clock is its
+      * DATA (/api/timestamp), and what quota does it advertise (/api/status).
+      *
+      * ⚠️ "Completeness" here is only what a client can establish from outside.
+      * Whether a mirror holds every object is NOT observable, and is not
+      * claimed. The two probes are reported separately because a mirror that
+      * serves /status but not /timestamp is not usable, and collapsing them
+      * into one flag reads as "reachable, with an error". */
+    event facet ProbeOverpass() => (
+        mirrors: Json,
+        usable: Long,
+        total: Long,
+        best_lag_hours: Double
+    ) with Effect(kind = "external") with Cost(tier = "cheap")
+
+    /** Render the survey as HTML + JSON and decide a verdict.
+      *
+      * ⚠️ Verdict follows the fleet's established exit-code semantics
+      * (`fw maint dead-letters`, `osm-watchdog`): "ok", "problem" for a real
+      * fault, and "unverified" when the tree could not be reached at all.
+      * Alarming merely because we are offline would train the reader to ignore
+      * the alarm, which is how a silent failure survives. */
+    event facet BuildStateReport(
+        survey: Json,
+        overpass: Json,
+        dest: String = "",
+        stale_after_hours: Double = 48.0
+    ) => (
+        status: String,
+        html_path: String,
+        json_path: String,
+        detail: String
+    ) with Effect(kind = "io") with Cost(tier = "cheap")
+
+    /** THE ROUTINE REPORT. Header-only, so it is safe to run on a schedule:
+      * every region in both stores plus every Overpass mirror, without
+      * downloading a single extract. */
+    workflow OsmExtractStateReport(
+        include_object_store: Boolean = true,
+        stale_after_hours: Double = 48.0,
+        local_dir: String = "",
+        dest: String = ""
+    ) => (
+        status: String,
+        html_path: String,
+        detail: String
+    ) andThen {
+        survey = SurveyExtracts(
+            count_features = false,
+            local_dir = $.local_dir,
+            include_object_store = $.include_object_store,
+            stale_after_hours = $.stale_after_hours
+        ) catch {
+            yield OsmExtractStateReport(status = "unverified", html_path = "",
+                detail = "extract survey failed")
+        }
+        overpass = ProbeOverpass() catch {
+            // A dead Overpass must NOT fail the extract report - the whole point
+            // is that our extracts do not depend on it.
+            yield OsmExtractStateReport(status = "partial", html_path = "",
+                detail = "extract survey ok; Overpass probe failed")
+        }
+        report = BuildStateReport(
+            survey = survey.report,
+            overpass = overpass.mirrors,
+            dest = $.dest,
+            stale_after_hours = $.stale_after_hours
+        ) catch {
+            yield OsmExtractStateReport(status = "failed", html_path = "",
+                detail = "report render failed")
+        }
+        yield OsmExtractStateReport(
+            status = report.status,
+            html_path = report.html_path,
+            detail = report.detail
+        )
+    }
+
+    /** THE DEEP REPORT - adds feature counts, which read every byte of every
+      * extract.
+      *
+      * ⚠️ Hours, not minutes: 710 s measured on ONE 40 GB extract. Run it
+      * deliberately, not on a timer. This is the tier where a per-region
+      * fan-out earns its step overhead - each region becomes a visible,
+      * independently retryable step, and `limit` bounds how many whole-file
+      * scans compete for disk at once.
+      *
+      * Fan-in needs NO `after` here: the report reads `regions.report`, and a
+      * reference already orders a step behind the fan-out - including every
+      * iteration, since a foreach parent goes terminal only when all its
+      * sub-blocks do. The validator rejects the redundant clause (AFTER_REDUNDANT),
+      * which is the right call: `after` is for a dependency with no value flow. */
+    workflow OsmExtractDeepReport(
+        local_dir: String = "",
+        width: Int = 2,
+        dest: String = ""
+    ) => (
+        status: String,
+        html_path: String,
+        detail: String
+    ) andThen {
+        regions = SurveyExtracts(
+            count_features = false,
+            local_dir = $.local_dir,
+            include_object_store = false
+        ) andThen foreach r in $.report {
+            probe = ProbeRegion(
+                region = $.r,
+                count_features = true,
+                local_dir = $$.local_dir
+            )
+        }
+        overpass = ProbeOverpass() catch {
+            yield OsmExtractDeepReport(status = "partial", html_path = "",
+                detail = "counts ok; Overpass probe failed")
+        }
+        report = BuildStateReport(
+            survey = regions.report,
+            overpass = overpass.mirrors,
+            dest = $.dest
+        ) catch {
+            yield OsmExtractDeepReport(status = "failed", html_path = "",
+                detail = "report render failed")
+        }
+        yield OsmExtractDeepReport(
+            status = report.status,
+            html_path = report.html_path,
+            detail = report.detail
+        )
+    }
+}

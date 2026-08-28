@@ -144,6 +144,7 @@ def register_all_registry_handlers(runner) -> None:
     from .filters.validation_handlers import register_handlers as reg_validation
     from .geocoding.geocoding_handlers import register_handlers as reg_geocoding
     from .graphhopper.graphhopper_handlers import register_handlers as reg_graphhopper
+    from .inventory.inventory_handlers import register_handlers as reg_inventory
     from .parks.park_handlers import register_handlers as reg_park
     from .planet.planet_handlers import register_handlers as reg_planet
     from .poi.poi_handlers import register_handlers as reg_poi
@@ -171,6 +172,7 @@ def register_all_registry_handlers(runner) -> None:
     reg_filter(runner)
     reg_geocoding(runner)
     reg_graphhopper(runner)
+    reg_inventory(runner)
     reg_gtfs(runner)
     reg_osmose(runner)
     reg_park(runner)
