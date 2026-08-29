@@ -138,10 +138,10 @@ namespace osm.planet {
         a "Washington County" don't collide). The N states run in PARALLEL across the
         runner fleet, so wall-clock ≈ the slowest single state, not the sum. Add
         runners to go faster. `strategy` "simple" suits many small interior regions. */
-    workflow BuildAdminFanout(prefix: String = "north-america/us", admin_level: Long = 6, strategy: String = "simple", base_url: String = "", bucket: String = "osm-extracts") => (published: [Long]) andThen {
-        children = osm.planet.ListExtracts(prefix = $.prefix, bucket = $.bucket) andThen foreach child in $.regions {
-            leaf = osm.planet.BuildAdminSet(source_region = $.child, admin_level = $$.admin_level, strategy = $$.strategy, base_url = $$.base_url, bucket = $$.bucket)
-            yield BuildAdminFanout(published = [leaf.published])
+    workflow BuildAdminFanout(prefix: String = "north-america/us", admin_level: Long = 6, strategy: String = "simple", base_url: String = "", bucket: String = "osm-extracts", osmfr_fallback: Boolean = true, refresh_after_days: Long = 0, force_refresh: Boolean = false, width: Int = 0) => (published: [Long]) andThen {
+        children = osm.planet.ListExtracts(prefix = $.prefix, bucket = $.bucket) andThen foreach child in $.regions limit $$.width {
+            leaf = osm.planet.BuildAdminSet(source_region = $.child, admin_level = $$.admin_level, strategy = $$.strategy, base_url = $$.base_url, bucket = $$.bucket, osmfr_fallback = $$.osmfr_fallback, refresh_after_days = $$.refresh_after_days, force_refresh = $$.force_refresh)
+            yield BuildAdminFanout(published += [leaf.published])
         }
     }
 }
