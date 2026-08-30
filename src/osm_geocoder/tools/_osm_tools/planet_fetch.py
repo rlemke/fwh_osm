@@ -20,6 +20,7 @@ import hashlib
 import os
 import subprocess
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -98,7 +99,13 @@ def fetch_planet(dest: str, *, mirror: str = PLANET_MIRROR, verify: bool = True,
         return PlanetFetch(str(dest_p), dest_p.stat().st_size, expected, True)
 
     log(f"downloading planet from {url} (resumable)")
-    _run(["curl", "-L", "-C", "-", "--retry", "5", "--retry-delay", "10", "-o", str(dest_p), url])
+    # Hold a fleet-wide download slot: the whole fleet shares one egress IP, and
+    # this is the largest single GET the system makes. The gate is a no-op when
+    # FW_MONGODB_URL is unset, so CLI and offline tests are unaffected.
+    from .download_gate import download_slot
+    with download_slot():
+        _run(["curl", "-L", "-C", "-", "--retry", "5", "--retry-delay", "10",
+              "-o", str(dest_p), url])
 
     actual = _md5(str(dest_p)) if verify else None
     if expected and actual and actual != expected:
@@ -133,7 +140,12 @@ def update_planet(planet_path: str, *, replication: str = PLANET_REPLICATION,
     if start is None:
         return PlanetUpdate("no sequence for timestamp", ts_iso, None, False)
 
-    tmp = str(Path(planet_path).with_name("_planet_update_tmp.osm.pbf"))
+    # PER-CALL temp name. A fixed one collided when two UpdatePlanet executions
+    # ran against the same tree — and the `finally: unlink(tmp)` below would then
+    # delete the OTHER execution's in-flight output. The watchdog manufactures
+    # exactly that overlap by reclaiming a task that is still running, so this is
+    # not hypothetical. Same lesson `_scratch_dir()` already encodes with a uuid.
+    tmp = str(Path(planet_path).with_name(f"_planet_update_tmp.{uuid.uuid4().hex}.osm.pbf"))
     try:
         newseq = server.apply_diffs_to_file(planet_path, tmp, start + 1, max_size=max_diff_mb * 1024)
     except Exception as exc:

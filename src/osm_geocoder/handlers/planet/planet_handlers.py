@@ -198,11 +198,53 @@ def _log(params: dict[str, Any]):
     return (lambda m: sl(m, level="info")) if sl else (lambda m: None)
 
 
+def _is_maintained_planet(path: str) -> bool:
+    """True when `path` is a usable planet this host already maintains.
+
+    Cheap ON PURPOSE — it reads the PBF *header* only. The alternative,
+    `fetch_planet`'s md5 comparison, is wrong here in two independent ways:
+
+    1. It cannot pass. `update_planet` advances this file past upstream by
+       applying replication diffs, so its md5 will NEVER equal the published
+       planet-latest.osm.pbf.md5 again. The check is guaranteed to report "not
+       cached" and re-download ~92 GB, forever.
+    2. It cannot finish. Measured 2026-08-30 on server3: hashing the mounted
+       planet runs at 27 MB/s, so a full pass takes ~57 min — nearly DOUBLE the
+       30-minute stuck-task timeout. Every attempt was reclaimed mid-hash, and
+       each reclaim started another concurrent hash of the same file.
+
+    A readable replication header means osmium can open it and we know its
+    vintage, which is the property we actually need. Freshness is UpdatePlanet's
+    job, not a checksum's.
+    """
+    if not os.path.exists(path):
+        return False
+    try:
+        import osmium.replication as _repl
+        return _repl.get_replication_header(path).timestamp is not None
+    except Exception:
+        return False
+
+
 def handle_download_planet(params: dict[str, Any]) -> dict[str, Any]:
     path = _planet_path(params.get("dest") or "")
+    log = _log(params)
+    force = bool(params.get("force"))
+
+    if not force and _is_maintained_planet(path):
+        size = os.path.getsize(path)
+        log(f"planet already present and readable ({size} bytes) — no transfer")
+        return {"planet_path": path, "size_mb": round(size / 1_000_000, 1), "was_cached": True}
+
     _require_free_space(path)
     verify = params.get("verify", True) is not False
-    res = fetch_planet(path, verify=verify, force=bool(params.get("force")), on_log=_log(params))
+    # Heartbeat + cancellation: an ~80 GB transfer is one blocking call with no
+    # loop to hook, so without a ticker the runtime declares it dead at 30 min and
+    # re-dispatches it WHILE IT IS STILL RUNNING — two curls resuming into the
+    # same path by offset. Observed five times on 2026-08-30 before dead-letter.
+    with cancellable(params.get("_cancellation_check")):
+        with _heartbeating(params, "downloading planet"):
+            res = fetch_planet(path, verify=verify, force=force, on_log=log)
     return {"planet_path": res.path, "size_mb": round(res.size_bytes / 1_000_000, 1),
             "was_cached": res.was_cached}
 
@@ -218,7 +260,11 @@ def handle_update_planet(params: dict[str, Any]) -> dict[str, Any]:
         max_diff_mb = int(params.get("max_diff_mb") or 4096)
     except (TypeError, ValueError):
         max_diff_mb = 4096
-    u = update_planet(path, max_diff_mb=max_diff_mb, on_log=_log(params))
+    # Same protection as the download: applying diffs to a 92 GB file is a single
+    # long blocking call, and a reclaim mid-apply would run two of them.
+    with cancellable(params.get("_cancellation_check")):
+        with _heartbeating(params, "applying replication diffs"):
+            u = update_planet(path, max_diff_mb=max_diff_mb, on_log=_log(params))
     return {"planet_path": path, "status": u.status, "advanced": u.advanced}
 
 
