@@ -322,6 +322,44 @@ def _resolve_extract_source(source_region: str, planet_path: str, on_log=None) -
     return cand
 
 
+def _extract_resume_skip(out: str, regions: list[dict], source: str, on_log=None):
+    """Split `regions` into (todo, skipped) by what is already cut and current.
+
+    The invariant is "an extract is valid if it is NEWER THAN THE SOURCE it was
+    cut from" — no refresh knob to tune, and self-correcting: the nightly
+    re-split advances the continent extract, which makes every derived state
+    stale automatically. That is strictly better than an age threshold, which
+    has to be guessed and then kept in step with the cadence by hand.
+
+    Why this exists: ExtractRegions had NO resume. Measured 2026-08-30, a run
+    reclaimed at 31 min restarted at batch 1/13 every time and never reached
+    batch 4 — while 40 of 51 states were already sitting complete on disk.
+
+    ⚠️ Zero-length outputs are NOT skipped. A killed osmium leaves truncated
+    files behind (25 of them were on this host), and skipping one would mean a
+    broken extract survives every future run and eventually gets published.
+    """
+    log = on_log or (lambda _m: None)
+    try:
+        src_mtime = os.path.getmtime(source)
+    except OSError:
+        return list(regions), []
+    todo, skipped = [], []
+    for r in regions:
+        dst = os.path.join(out, f"{r['key']}-latest.osm.pbf")
+        try:
+            st = os.stat(dst)
+        except OSError:
+            todo.append(r); continue
+        if st.st_size > 0 and st.st_mtime >= src_mtime:
+            skipped.append(r)
+        else:
+            todo.append(r)
+    if skipped:
+        log(f"resume: {len(skipped)} region(s) already cut from this source — {len(todo)} to build")
+    return todo, skipped
+
+
 def handle_extract_regions(params: dict[str, Any]) -> dict[str, Any]:
     log = _log(params)
     planet = _resolve_extract_source(
@@ -333,6 +371,14 @@ def handle_extract_regions(params: dict[str, Any]) -> dict[str, Any]:
     if not regions:
         raise ValueError("ExtractRegions: 'regions' is empty (run DownloadPolygons first)")
     regions = _localize_polys(regions, on_log=log)
+    all_regions = regions
+    if not params.get("force_rebuild"):
+        regions, _skipped = _extract_resume_skip(
+            params.get("out") or os.path.join(_PLANET_DIR, "www"), regions, planet, on_log=log)
+        if not regions:
+            log(f"resume: all {len(all_regions)} region(s) already current — nothing to cut")
+            return {"region_count": len(all_regions),
+                    "out": params.get("out") or os.path.join(_PLANET_DIR, "www")}
     out = params.get("out") or os.path.join(_PLANET_DIR, "www")
     base_url = _extract_base_url(params)
     strategy = params.get("strategy") or "complete_ways"
@@ -352,7 +398,9 @@ def handle_extract_regions(params: dict[str, Any]) -> dict[str, Any]:
             results = bootstrap_batched(source=planet, out=out, regions=regions,
                                         base_url=base_url, strategy=strategy,
                                         batch_size=batch_size, on_log=_log(params))
-    return {"region_count": len(results), "out": out}
+    # the FULL set, not just what this execution cut — a resumed run that built
+    # 11 of 51 has still delivered 51, and reporting 11 would read as a shortfall
+    return {"region_count": len(all_regions), "out": out}
 
 
 def _scratch_dir() -> str:

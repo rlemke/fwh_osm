@@ -57,7 +57,8 @@ namespace osm.planet {
         base_url: String = "",
         strategy: String = "complete_ways",
         batch_size: Long = 25,
-        source_region: String = ""
+        source_region: String = "",
+        force_rebuild: Boolean = false
     ) => (region_count: Long, out: String) with Effect(kind = "io") with Cost(tier = "expensive") with Requires(memory_gb = 10)
 
     /** Upload the extracted tree from `out` to the S3/MinIO `bucket`
