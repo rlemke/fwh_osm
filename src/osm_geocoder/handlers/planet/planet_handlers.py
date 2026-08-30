@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shutil
 import threading
 from typing import Any
 
@@ -105,6 +106,93 @@ def _planet_path(dest: str) -> str:
     return dest or os.path.join(_PLANET_DIR, "planet-latest.osm.pbf")
 
 
+def _publish_polys(regions: list[dict], on_log=None) -> list[dict]:
+    """Rewrite each region's `poly` to a PORTABLE URI on the durable backend.
+
+    A Region used to carry an absolute LOCAL path, which silently assumed every
+    step of BuildPlanetExtracts ran on one host. It does not: on 2026-08-29 the
+    same workflow put DownloadPolygons and DownloadPlanet on different machines
+    in both directions, so whichever host reached ExtractRegions was missing one
+    of its two inputs. Polys are small (one GeoJSON/.poly per region), so
+    publishing them costs little and makes the step boundary host-agnostic —
+    which is the platform's own contract: step payloads carry portable URIs any
+    runner can resolve.
+
+    The planet is deliberately NOT treated this way; see _resolve_planet.
+    Falls back to the local path when the backend is local, so single-host and
+    test runs are unchanged.
+    """
+    log = on_log or (lambda _m: None)
+    try:
+        from ...tools._osm_tools.storage import get_storage, cache_root
+        st = get_storage()
+        root = st.join(cache_root(), "planet-polys") if hasattr(st, "join") else None
+    except Exception as exc:                     # storage unavailable -> keep local
+        log(f"poly publish skipped ({type(exc).__name__}: {exc}); using local paths")
+        return regions
+    if not root or not str(root).startswith(("s3://", "hdfs://")):
+        return regions                           # local backend: paths already work
+    out: list[dict] = []
+    published = 0
+    for r in regions:
+        local = r.get("poly") or ""
+        if not local or str(local).startswith(("s3://", "hdfs://")):
+            out.append(r); continue
+        try:
+            dst = st.join(root, os.path.basename(local))
+            with open(local, "rb") as fh, st.open_write_binary(dst) as w:
+                shutil.copyfileobj(fh, w)
+            out.append({**r, "poly": dst}); published += 1
+        except Exception as exc:
+            log(f"poly publish failed for {local}: {type(exc).__name__}: {exc}; keeping local path")
+            out.append(r)
+    log(f"published {published}/{len(regions)} polygon(s) as portable URIs under {root}")
+    return out
+
+
+def _localize_polys(regions: list[dict], on_log=None) -> list[dict]:
+    """Bring any remote `poly` URI down to this host before osmium reads it."""
+    log = on_log or (lambda _m: None)
+    remote = [r for r in regions if str(r.get("poly") or "").startswith(("s3://", "hdfs://"))]
+    if not remote:
+        return regions
+    from ...tools._osm_tools.storage import get_storage
+    st = get_storage()
+    out = []
+    for r in regions:
+        poly = r.get("poly") or ""
+        out.append({**r, "poly": st.localize(poly)} if str(poly).startswith(("s3://", "hdfs://")) else r)
+    log(f"localized {len(remote)} remote polygon(s) to this host")
+    return out
+
+
+def _resolve_planet(passed: str, on_log=None) -> str:
+    """The planet is host-local BY NECESSITY, so resolve it per host.
+
+    ~80 GB through the object store would mean uploading it and downloading it
+    again — that is not portability, it is waste. osmium also needs a real local
+    file. So unlike the polys, a planet path from ANOTHER host is not fetched:
+    this host's own copy is used instead (osm-maintain keeps it current), and if
+    there is none we fail with a message that says which host and why, rather
+    than letting osmium fail on a missing file three frames down.
+    """
+    log = on_log or (lambda _m: None)
+    if passed and os.path.exists(passed):
+        return passed
+    own = _planet_path("")
+    if os.path.exists(own):
+        if passed and passed != own:
+            log(f"planet {passed!r} is not on this host; using local {own!r}")
+        return own
+    import socket
+    raise PermanentError(
+        f"no planet on this host ({socket.gethostname()}): neither {passed!r} (from an "
+        f"upstream step, possibly another machine) nor {own!r} exists. ExtractRegions "
+        f"must run where the planet lives — the host that maintains the self-hosted "
+        f"tree — because an ~80 GB file cannot sensibly cross the step boundary."
+    )
+
+
 def _log(params: dict[str, Any]):
     sl = params.get("_step_log")
     return (lambda m: sl(m, level="info")) if sl else (lambda m: None)
@@ -132,9 +220,10 @@ def handle_update_planet(params: dict[str, Any]) -> dict[str, Any]:
 def handle_download_polygons(params: dict[str, Any]) -> dict[str, Any]:
     dest = params.get("dest") or os.path.join(_PLANET_DIR, "polys")
     scope = params.get("scope") or "all"
-    regions = fetch_polygons(dest, scope=scope, on_log=_log(params))
-    return {"poly_dir": dest, "region_count": len(regions),
-            "regions": [{"key": r.key, "poly": r.poly} for r in regions]}
+    log = _log(params)
+    regions = fetch_polygons(dest, scope=scope, on_log=log)
+    out = _publish_polys([{"key": r.key, "poly": r.poly} for r in regions], on_log=log)
+    return {"poly_dir": dest, "region_count": len(regions), "regions": out}
 
 
 def handle_generate_polygons(params: dict[str, Any]) -> dict[str, Any]:
@@ -147,16 +236,19 @@ def handle_generate_polygons(params: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         admin_level = 2
     dest = params.get("dest") or os.path.join(_PLANET_DIR, f"boundary_polys/admin{admin_level}")
-    regions = generate_polygons(source, admin_level, dest, on_log=_log(params))
-    return {"poly_dir": dest, "region_count": len(regions),
-            "regions": [{"key": r.key, "poly": r.poly} for r in regions]}
+    log = _log(params)
+    regions = generate_polygons(source, admin_level, dest, on_log=log)
+    out = _publish_polys([{"key": r.key, "poly": r.poly} for r in regions], on_log=log)
+    return {"poly_dir": dest, "region_count": len(regions), "regions": out}
 
 
 def handle_extract_regions(params: dict[str, Any]) -> dict[str, Any]:
-    planet = _planet_path(params.get("planet_path") or "")
+    log = _log(params)
+    planet = _resolve_planet(params.get("planet_path") or "", on_log=log)
     regions = params.get("regions") or []
     if not regions:
         raise ValueError("ExtractRegions: 'regions' is empty (run DownloadPolygons first)")
+    regions = _localize_polys(regions, on_log=log)
     out = params.get("out") or os.path.join(_PLANET_DIR, "www")
     base_url = _extract_base_url(params)
     strategy = params.get("strategy") or "complete_ways"
