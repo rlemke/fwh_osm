@@ -208,7 +208,12 @@ def handle_download_planet(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_update_planet(params: dict[str, Any]) -> dict[str, Any]:
-    path = _planet_path(params.get("planet_path") or "")
+    # Same per-host resolution as ExtractRegions: this step receives a path from
+    # DownloadPlanet, which may have run on ANOTHER host. Passing it through
+    # unresolved meant applying diffs to a path that does not exist here — a
+    # silent no-op at best. Wiring the resolver into only one of the two planet
+    # consumers was the gap in the original portable-URI change.
+    path = _resolve_planet(params.get("planet_path") or "", on_log=_log(params))
     try:
         max_diff_mb = int(params.get("max_diff_mb") or 4096)
     except (TypeError, ValueError):
