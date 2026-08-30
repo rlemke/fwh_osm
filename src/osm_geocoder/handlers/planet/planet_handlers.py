@@ -340,8 +340,18 @@ def handle_extract_regions(params: dict[str, Any]) -> dict[str, Any]:
         batch_size = int(params.get("batch_size") or 25)
     except (TypeError, ValueError):
         batch_size = 25
-    results = bootstrap_batched(source=planet, out=out, regions=regions, base_url=base_url,
-                                strategy=strategy, batch_size=batch_size, on_log=_log(params))
+    # bootstrap_batched runs for HOURS (13 batches x ~13 min for the US states), and
+    # it is the same call handle_build_admin_set already wraps at its own call site.
+    # Unwrapped here, the stuck-task watchdog reclaimed it at 31 min WHILE IT WAS
+    # PUBLISHING — logging is not heartbeating — and every reclaim started another
+    # full execution from batch 1. Measured 2026-08-30: 7 states published, then
+    # SEVEN concurrent osmium passes at ~12 GiB each, and the VM OOM-killed them.
+    # The batch size was never the problem; the duplicate executions were.
+    with cancellable(params.get("_cancellation_check")):
+        with _heartbeating(params, f"extracting {len(regions)} region(s)"):
+            results = bootstrap_batched(source=planet, out=out, regions=regions,
+                                        base_url=base_url, strategy=strategy,
+                                        batch_size=batch_size, on_log=_log(params))
     return {"region_count": len(results), "out": out}
 
 
