@@ -41,7 +41,15 @@ namespace osm.planet {
 
     /** Split the planet into per-region PBFs — one osmium pass per `batch_size`
         regions to bound RAM (osmium holds a node-id set per region). Writes the
-        `<key>-latest.osm.pbf` + `<key>-updates/state.txt` tree under `out`. */
+        `<key>-latest.osm.pbf` + `<key>-updates/state.txt` tree under `out`.
+
+        `Requires(memory_gb = 10)` matches BuildAdminSet: same osmium work, same
+        `complete_ways` strategy, at PLANET scale over more regions, so it cannot
+        need less. Measured 2026-08-26/29 — BuildAdminSet peaked at 7.7 GB against
+        server3's 10.2 GB budget, and OOM'd on MaxPro's 7.75 GiB at Laender scale.
+        Without the floor MaxPro claims a job it cannot finish and only discovers
+        that after the planet download, which is hours of wasted work before the
+        retry lands where it should have started. */
     event facet ExtractRegions(
         planet_path: String,
         regions: [Region],
@@ -49,7 +57,7 @@ namespace osm.planet {
         base_url: String = "",
         strategy: String = "complete_ways",
         batch_size: Long = 25
-    ) => (region_count: Long, out: String) with Effect(kind = "io") with Cost(tier = "expensive")
+    ) => (region_count: Long, out: String) with Effect(kind = "io") with Cost(tier = "expensive") with Requires(memory_gb = 10)
 
     /** Upload the extracted tree from `out` to the S3/MinIO `bucket`
         (anonymous-read), so FW_GEOFABRIK_BASE_URL consumers can fetch them. */
