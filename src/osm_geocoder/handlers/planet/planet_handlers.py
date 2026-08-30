@@ -607,7 +607,15 @@ def handle_publish_extracts(params: dict[str, Any]) -> dict[str, Any]:
     """Upload a local extract tree to an S3/MinIO bucket (anonymous-read)."""
     out = params.get("out") or os.path.join(_PLANET_DIR, "www")
     bucket = params.get("bucket") or os.environ.get("FW_OSM_EXTRACT_BUCKET", "osm-extracts")
-    published = _publish_tree(_s3_client(params.get("endpoint")), out, bucket, _log(params))
+    # The LAST long blocking call on this path without a liveness signal. It
+    # uploads the whole extract tree — 12 GB for the 51 US states — and a
+    # reclaim mid-upload would run a second uploader over the same objects.
+    # Same omission as DownloadPlanet/UpdatePlanet (87b6902) and ExtractRegions
+    # (7909e94): the pattern is that every one of these was found only after it
+    # failed in production, so this one is fixed on inspection instead.
+    with cancellable(params.get("_cancellation_check")):
+        with _heartbeating(params, f"publishing the extract tree to {bucket}"):
+            published = _publish_tree(_s3_client(params.get("endpoint")), out, bucket, _log(params))
     return {"bucket": bucket, "published": published}
 
 
