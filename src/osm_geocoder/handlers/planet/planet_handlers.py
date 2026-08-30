@@ -293,9 +293,42 @@ def handle_generate_polygons(params: dict[str, Any]) -> dict[str, Any]:
     return {"poly_dir": dest, "region_count": len(regions), "regions": out}
 
 
+def _resolve_extract_source(source_region: str, planet_path: str, on_log=None) -> str:
+    """Cut from a CONTINENT extract when the caller names one, not the planet.
+
+    osmium reads the whole source per batch, and its memory scales with what it
+    must track across that source. US states only ever intersect north-america:
+    20 GB against the planet's 92 GB, so naming the region is ~4.4x less I/O AND
+    proportionally less RAM per region — which is what OOM-killed the 25-region
+    batch on 2026-08-30. tiger_fetch's own docstring already says the source is
+    "the planet, or the north-america continent extract for a cheaper pass"; this
+    just lets a caller say so.
+
+    Refuses rather than silently falling back to the planet: a caller that asked
+    for the cheap source and got the expensive one would look like it worked and
+    cost 4x, which is exactly the class of silent-wrong-default this file keeps
+    getting bitten by.
+    """
+    if not source_region:
+        return planet_path
+    log = on_log or (lambda _m: None)
+    cand = os.path.join(_PLANET_DIR, "www", f"{source_region}-latest.osm.pbf")
+    if not os.path.exists(cand):
+        raise PermanentError(
+            f"source_region={source_region!r} requested but {cand!r} is not on this host. "
+            f"Serve it into the planet tree first, or clear source_region to cut from the planet."
+        )
+    log(f"cutting from {source_region} ({os.path.getsize(cand)/1e9:.1f} GB) instead of the planet")
+    return cand
+
+
 def handle_extract_regions(params: dict[str, Any]) -> dict[str, Any]:
     log = _log(params)
-    planet = _resolve_planet(params.get("planet_path") or "", on_log=log)
+    planet = _resolve_extract_source(
+        (params.get("source_region") or "").strip(),
+        _resolve_planet(params.get("planet_path") or "", on_log=log),
+        on_log=log,
+    )
     regions = params.get("regions") or []
     if not regions:
         raise ValueError("ExtractRegions: 'regions' is empty (run DownloadPolygons first)")
