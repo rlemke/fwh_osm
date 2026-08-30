@@ -24,11 +24,81 @@ from ...tools._osm_tools.cancellation import cancellable, raise_if_cancelled
 from ...tools._osm_tools.planet_bootstrap import bootstrap_batched
 from ...tools._osm_tools.boundary_gen import generate_polygons
 
+try:                                  # the runtime marks this non-retryable;
+    from facetwork.runtime.errors import PermanentError   # fall back so the
+except Exception:                     # handler still imports standalone/tests
+    class PermanentError(RuntimeError):  # type: ignore[no-redef]
+        pass
+
 NAMESPACE = "osm.planet"
 
 # Defaults for empty-string params (env-overridable), so the workflow can run
 # with no arguments on a host that sets FW_PLANET_DIR / FW_S3_* .
-_PLANET_DIR = os.environ.get("FW_PLANET_DIR", "/Volumes/afl_data/osm-selfhost")
+#
+# ⚠️ The historical default is a HOST path. It is correct on a bare-metal runner
+# (osm-maintain / osm-replicate serve the self-hosted tree from exactly there) and
+# CATASTROPHIC inside a container, where it does not exist: os.makedirs happily
+# creates it in the container's WRITABLE LAYER, so an ~80 GB planet streams into
+# the Docker VM's overlay instead of the mounted data volume. On 2026-08-29 that
+# filled server3's 58 GB VM disk and took the fleet's MongoDB down with ENOSPC
+# (WiredTiger error 28 -> WT_PANIC -> fassert), while 3.6 TiB sat free on the
+# external volume bind-mounted at /scratch two directories away.
+#
+# So resolve it instead of assuming it: an explicit FW_PLANET_DIR always wins,
+# then the host path IF IT ACTUALLY EXISTS, then the mounted scratch. Existence is
+# the test because that is precisely what distinguishes the two environments.
+_HOST_PLANET_DIR = "/Volumes/afl_data/osm-selfhost"
+
+
+def _default_planet_dir() -> str:
+    explicit = os.environ.get("FW_PLANET_DIR")
+    if explicit:
+        return explicit
+    if os.path.isdir(_HOST_PLANET_DIR):
+        return _HOST_PLANET_DIR
+    scratch = os.environ.get("FW_LOCAL_SCRATCH")
+    if scratch and os.path.isdir(scratch):
+        return os.path.join(scratch, "osm-selfhost")
+    return _HOST_PLANET_DIR
+
+
+_PLANET_DIR = _default_planet_dir()
+
+#: Planet + delta working room, GB. The dump alone is ~80 GB and update_planet
+#: needs headroom beside it.
+_PLANET_FREE_GB = int(os.environ.get("FW_PLANET_MIN_FREE_GB", "150"))
+
+
+def _require_free_space(path: str, need_gb: int = _PLANET_FREE_GB) -> None:
+    """Refuse to start a multi-tens-of-GB download onto a filesystem too small.
+
+    The dest resolution above should keep this from ever firing, but the failure
+    it guards is shared-fate: filling a Docker VM disk does not just fail this
+    task, it kills every container storing data on that VM - MongoDB included.
+    A guard that fails ONE task is strictly better than one that takes the fleet
+    with it, so check the filesystem we are actually about to write to.
+
+    PermanentError, not a retry: no amount of retrying makes a disk bigger, and
+    burning the retry budget here just repeats the damage.
+    """
+    probe = path
+    while probe and not os.path.isdir(probe):
+        parent = os.path.dirname(probe)
+        if parent == probe:
+            break
+        probe = parent
+    try:
+        st = os.statvfs(probe or "/")
+    except OSError:
+        return                      # cannot tell - do not invent a verdict
+    free_gb = (st.f_bavail * st.f_frsize) / 1_000_000_000
+    if free_gb < need_gb:
+        raise PermanentError(
+            f"refusing to download the planet to {path!r}: only {free_gb:.1f} GB free "
+            f"on the filesystem holding {probe!r} (need {need_gb} GB). "
+            f"Set FW_PLANET_DIR to a large volume - inside a container the mounted "
+            f"data volume, NOT the container filesystem."
+        )
 
 
 def _planet_path(dest: str) -> str:
@@ -42,6 +112,7 @@ def _log(params: dict[str, Any]):
 
 def handle_download_planet(params: dict[str, Any]) -> dict[str, Any]:
     path = _planet_path(params.get("dest") or "")
+    _require_free_space(path)
     verify = params.get("verify", True) is not False
     res = fetch_planet(path, verify=verify, force=bool(params.get("force")), on_log=_log(params))
     return {"planet_path": res.path, "size_mb": round(res.size_bytes / 1_000_000, 1),
