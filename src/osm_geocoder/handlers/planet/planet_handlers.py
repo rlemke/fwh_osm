@@ -822,8 +822,23 @@ def _build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
             cost_state_dir=cost_dir, on_pass=_on_pass, on_log=log)
 
     shutil.rmtree(work, ignore_errors=True)
-    log(f"admin_level={admin_level} of {source_region}: {published['n']} extracts published")
-    return {"region_count": len(poly_regions), "published": published["n"]}
+    # Say BUILT and SKIPPED separately. Collapsing them made a total no-op read
+    # exactly like a full rebuild: on 2026-08-31 us-counties logged
+    # "227 extracts published" for texas while building ZERO — every county was
+    # skipped by resume (refresh_after_days had defaulted to 0 = never refresh)
+    # and the bucket still held a 35-day-old vintage. rc=0, green, useless.
+    # A refresh job that does nothing must not be indistinguishable from one
+    # that did everything.
+    skipped = len(poly_regions) - len(todo)
+    built = published["n"]
+    if skipped and not built:
+        log(f"admin_level={admin_level} of {source_region}: NOTHING BUILT — "
+            f"all {skipped} region(s) skipped as already-current "
+            f"(refresh_after_days={refresh_after_days}; 0 means never refresh)")
+    else:
+        log(f"admin_level={admin_level} of {source_region}: {built} built, "
+            f"{skipped} skipped as current ({len(poly_regions)} total)")
+    return {"region_count": len(poly_regions), "published": built}
 
 
 _DISPATCH = {
