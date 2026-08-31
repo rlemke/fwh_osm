@@ -523,18 +523,48 @@ def _regions_to_skip(published: dict[str, float], *, refresh_after_days: float,
     return set(published)                     # 0 = never refresh (the default)
 
 
-def _publish_tree(s3, out: str, bucket: str, log) -> int:
+def _publish_tree(s3, out: str, bucket: str, log, only_keys=None) -> int:
     """Upload a local ``<key>-latest.osm.pbf`` + ``<key>-updates/state.txt`` tree to
-    ``bucket`` (created anonymous-read). Returns the count published."""
+    ``bucket`` (created anonymous-read). Returns the count published.
+
+    ``only_keys`` restricts the upload to the regions this run actually produced.
+
+    ⚠️ It matters. Unrestricted, the glob over the default ``out`` (the served
+    tree) matched 59 files — the 51 US states AND all 8 CONTINENT extracts, ~95 GB
+    that the run never built. That is not merely wasteful: it OVERWRITES the
+    canonical continents in the bucket with whatever happens to sit on this host's
+    disk, and those two stores are deliberately not interchangeable. Measured
+    2026-08-30, it also failed outright — CompleteMultipartUpload returned
+    InvalidPart on the 38 GB europe object after the task was reclaimed mid-upload.
+
+    A zero-length file is never published: a killed osmium leaves truncated
+    outputs behind, and replacing a good remote extract with an empty one is the
+    worst outcome available here.
+    """
     import glob
     _ensure_public_bucket(s3, bucket)
-    published = 0
+    wanted = set(only_keys) if only_keys else None
+    published = skipped_foreign = skipped_empty = 0
     for pbf in sorted(glob.glob(os.path.join(out, "**", "*-latest.osm.pbf"), recursive=True)):
         key = os.path.relpath(pbf, out)[: -len("-latest.osm.pbf")]
+        if wanted is not None and key not in wanted:
+            skipped_foreign += 1
+            continue
+        try:
+            if os.path.getsize(pbf) == 0:
+                log(f"REFUSING to publish {key}: zero-length local file")
+                skipped_empty += 1
+                continue
+        except OSError:
+            continue
         _publish_one(s3, out, key, bucket)
         published += 1
         if published % 10 == 0:
             log(f"published {published} extracts")
+    if skipped_foreign:
+        log(f"scoped publish: {published} published, {skipped_foreign} file(s) outside this run left alone")
+    if skipped_empty:
+        log(f"⚠️ {skipped_empty} zero-length extract(s) NOT published")
     return published
 
 
@@ -615,7 +645,9 @@ def handle_publish_extracts(params: dict[str, Any]) -> dict[str, Any]:
     # failed in production, so this one is fixed on inspection instead.
     with cancellable(params.get("_cancellation_check")):
         with _heartbeating(params, f"publishing the extract tree to {bucket}"):
-            published = _publish_tree(_s3_client(params.get("endpoint")), out, bucket, _log(params))
+            keys = [r.get("key") for r in (params.get("regions") or []) if r.get("key")]
+            published = _publish_tree(_s3_client(params.get("endpoint")), out, bucket,
+                                      _log(params), only_keys=keys or None)
     return {"bucket": bucket, "published": published}
 
 

@@ -63,7 +63,7 @@ namespace osm.planet {
 
     /** Upload the extracted tree from `out` to the S3/MinIO `bucket`
         (anonymous-read), so FW_GEOFABRIK_BASE_URL consumers can fetch them. */
-    event facet PublishExtracts(out: String = "", bucket: String = "osm-extracts") => (bucket: String, published: Long) with Effect(kind = "io") with Cost(tier = "expensive")
+    event facet PublishExtracts(out: String = "", bucket: String = "osm-extracts", regions: [Region] = []) => (bucket: String, published: Long) with Effect(kind = "io") with Cost(tier = "expensive")
 
     /** End-to-end: download planet -> delta-update -> download all polygons ->
         extract per-region PBFs -> publish. Run on a schedule to keep the
@@ -91,7 +91,7 @@ namespace osm.planet {
             batch_size = $.batch_size,
             source_region = $.source_region
         )
-        pub = osm.planet.PublishExtracts(out = extract.out, bucket = $.bucket)
+        pub = osm.planet.PublishExtracts(out = extract.out, bucket = $.bucket, regions = polys.regions)
         yield BuildPlanetExtracts(region_count = extract.region_count, published = pub.published)
     }
 
