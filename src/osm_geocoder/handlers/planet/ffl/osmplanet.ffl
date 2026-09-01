@@ -129,11 +129,11 @@ namespace osm.planet {
         osmium export can't assemble (nested sub-relations, member ways beyond the
         source poly — e.g. Quebec/Nova Scotia/Nunavut) from a region-aware ready-made
         poly source: TIGER for US states (osmfr has none), osmfr for everywhere else. */
-    event facet BuildAdminSet(source_region: String, admin_level: Long = 4, base_url: String = "", strategy: String = "complete_ways", bucket: String = "osm-extracts", batch_size: Long = 0, osmfr_fallback: Boolean = true, refresh_after_days: Long = 0, force_refresh: Boolean = false) => (region_count: Long, published: Long) with Effect(kind = "io") with Cost(tier = "expensive") with Requires(memory_gb = 10)
+    event facet BuildAdminSet(source_region: String, admin_level: Long = 4, base_url: String = "", strategy: String = "complete_ways", bucket: String = "osm-extracts", batch_size: Long = 0, osmfr_fallback: Boolean = true, refresh_after_days: Long = 0, force_refresh: Boolean = false) => (region_count: Long, published: Long, unreproducible: Long) with Effect(kind = "io") with Cost(tier = "expensive") with Requires(memory_gb = 10)
 
     /** Distributed fleet run of a self-generated admin set — one BuildAdminSet
         task, so it executes atomically on a single fleet host. */
-    workflow BuildAdminSetWorkflow(source_region: String, admin_level: Long = 4, base_url: String = "", strategy: String = "complete_ways", bucket: String = "osm-extracts", batch_size: Long = 0, osmfr_fallback: Boolean = true, refresh_after_days: Long = 0, force_refresh: Boolean = false) => (region_count: Long, published: Long) andThen {
+    workflow BuildAdminSetWorkflow(source_region: String, admin_level: Long = 4, base_url: String = "", strategy: String = "complete_ways", bucket: String = "osm-extracts", batch_size: Long = 0, osmfr_fallback: Boolean = true, refresh_after_days: Long = 0, force_refresh: Boolean = false) => (region_count: Long, published: Long, unreproducible: Long) andThen {
         result = osm.planet.BuildAdminSet(source_region = $.source_region, admin_level = $.admin_level, base_url = $.base_url, strategy = $.strategy, bucket = $.bucket, batch_size = $.batch_size, osmfr_fallback = $.osmfr_fallback, refresh_after_days = $.refresh_after_days, force_refresh = $.force_refresh)
         yield BuildAdminSetWorkflow(region_count = result.region_count, published = result.published)
     }
@@ -149,11 +149,20 @@ namespace osm.planet {
         keys them north-america/us/<state>/<county> — nested, so the ~30 states with
         a "Washington County" don't collide). The N states run in PARALLEL across the
         runner fleet, so wall-clock ≈ the slowest single state, not the sum. Add
-        runners to go faster. `strategy` "simple" suits many small interior regions. */
-    workflow BuildAdminFanout(prefix: String = "north-america/us", admin_level: Long = 6, strategy: String = "simple", base_url: String = "", bucket: String = "osm-extracts", osmfr_fallback: Boolean = true, refresh_after_days: Long = 0, force_refresh: Boolean = false, width: Int = 0) => (published: [Long]) andThen {
+        runners to go faster. `strategy` "simple" suits many small interior regions. 
+
+        WARNING: `unreproducible` aggregates regions published under a child
+        prefix that this admin_level CANNOT regenerate - OSM has no boundary
+        relation for them, or one lacking the required ISO code. Measured
+        2026-08-31 across the 51 US states: 645 of 3167 counties, about a
+        fifth. They can never be refreshed by this path, so without this the
+        fan-out reports success while that share of the tier ages forever.
+        Aggregated so the total is ONE number, not 51 log lines nobody sums.
+        */
+    workflow BuildAdminFanout(prefix: String = "north-america/us", admin_level: Long = 6, strategy: String = "simple", base_url: String = "", bucket: String = "osm-extracts", osmfr_fallback: Boolean = true, refresh_after_days: Long = 0, force_refresh: Boolean = false, width: Int = 0) => (published: [Long], unreproducible: [Long]) andThen {
         children = osm.planet.ListExtracts(prefix = $.prefix, bucket = $.bucket) andThen foreach child in $.regions limit $$.width {
             leaf = osm.planet.BuildAdminSet(source_region = $.child, admin_level = $$.admin_level, strategy = $$.strategy, base_url = $$.base_url, bucket = $$.bucket, osmfr_fallback = $$.osmfr_fallback, refresh_after_days = $$.refresh_after_days, force_refresh = $$.force_refresh)
-            yield BuildAdminFanout(published += [leaf.published])
+            yield BuildAdminFanout(published += [leaf.published], unreproducible += [leaf.unreproducible])
         }
     }
 }

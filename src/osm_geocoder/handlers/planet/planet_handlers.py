@@ -786,6 +786,21 @@ def _build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
                                force_refresh=force_refresh)
     todo = [r for r in poly_regions if r["key"] not in already]
     stale = len(published_ages) - len(already)
+
+    # ⚠️ ORPHANS: published under this prefix but NOT produced by this run's
+    # boundary generation. These can never be refreshed by this path — no amount
+    # of force_refresh reaches them — because OSM has no admin_level relation for
+    # them (or one without the ISO code the filter requires). They are typically
+    # left over from an earlier build that used a different source, e.g. the
+    # Census TIGER county set.
+    #
+    # Measured 2026-08-31 across the 51 US states: OSM admin_level=6 yields 2,522
+    # of the 3,167 published counties, so 645 (20.4%) are orphans — alabama 57 of
+    # 67, texas 227 of 257, georgia 143 of 159. Until this was reported, every run
+    # looked complete while a fifth of the tier aged indefinitely, which is the
+    # same silent staleness that let the whole sub-region tier reach 36 days.
+    generated_keys = {r["key"] for r in poly_regions}
+    orphans = sorted(k for k in published_ages if k not in generated_keys)
     if force_refresh:
         log(f"force refresh: rebuilding all {len(poly_regions)} region(s)")
     elif refresh_after_days > 0:
@@ -831,6 +846,13 @@ def _build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
     # that did everything.
     skipped = len(poly_regions) - len(todo)
     built = published["n"]
+    if orphans:
+        oldest = max(published_ages[k] for k in orphans)
+        sample = ", ".join(k.rsplit("/", 1)[-1] for k in orphans[:3])
+        log(f"⚠️ {len(orphans)} published region(s) under {source_region} are NOT "
+            f"reproducible at admin_level={admin_level} — this path can never "
+            f"refresh them (oldest {oldest:.0f}d; e.g. {sample}"
+            f"{', …' if len(orphans) > 3 else ''})")
     if skipped and not built:
         log(f"admin_level={admin_level} of {source_region}: NOTHING BUILT — "
             f"all {skipped} region(s) skipped as already-current "
@@ -838,7 +860,10 @@ def _build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
     else:
         log(f"admin_level={admin_level} of {source_region}: {built} built, "
             f"{skipped} skipped as current ({len(poly_regions)} total)")
-    return {"region_count": len(poly_regions), "published": built}
+    # `unreproducible` is returned, not just logged, so a fan-out can aggregate the
+    # shortfall instead of each parent reporting it into a log nobody sums.
+    return {"region_count": len(poly_regions), "published": built,
+            "unreproducible": len(orphans)}
 
 
 _DISPATCH = {

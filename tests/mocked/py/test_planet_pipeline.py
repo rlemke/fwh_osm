@@ -313,7 +313,7 @@ def test_build_admin_set_orchestration(tmp_path, monkeypatch):
     monkeypatch.setattr(ph, "bootstrap_batched", _bb_publishing)
 
     out = ph.handle_build_admin_set({"source_region": "europe/germany", "admin_level": 4})
-    assert out == {"region_count": 1, "published": 1}   # published incrementally via on_pass
+    assert out == {"region_count": 1, "published": 1, "unreproducible": 0}  # published incrementally via on_pass
     assert downloaded == ["europe/germany-latest.osm.pbf"]   # source pulled from the bucket
 
 
@@ -344,7 +344,7 @@ def test_build_admin_set_osmfr_fallback_fills_stragglers(tmp_path, monkeypatch):
     out = ph.handle_build_admin_set({"source_region": "north-america/canada", "admin_level": 4})
     assert sorted(extracted["keys"]) == [
         "north-america/canada/ontario", "north-america/canada/quebec"]  # quebec filled, ontario not dup'd
-    assert out == {"region_count": 2, "published": 2}
+    assert out == {"region_count": 2, "published": 2, "unreproducible": 0}
 
 
 def test_build_admin_set_fallback_disabled(tmp_path, monkeypatch):
@@ -395,7 +395,7 @@ def test_build_admin_set_resumes_skipping_published(tmp_path, monkeypatch):
 
     out = ph.handle_build_admin_set({"source_region": "europe/germany", "admin_level": 6})
     assert passed["regions"] == ["europe/germany/b"]      # only the unpublished one re-extracted
-    assert out == {"region_count": 2, "published": 2}     # 1 resumed + 1 newly published
+    assert out == {"region_count": 2, "published": 2, "unreproducible": 0}  # 1 resumed + 1 new
 
 
 def test_build_admin_set_county_level_no_wrong_injection(tmp_path, monkeypatch):
@@ -571,3 +571,28 @@ def test_scratch_dir_is_per_task_unique(monkeypatch, tmp_path):
     monkeypatch.setenv("FW_LOCAL_SCRATCH", str(tmp_path))
     a, b = ph._scratch_dir(), ph._scratch_dir()
     assert a != b and a.startswith(str(tmp_path)) and __import__("os").path.isdir(a)
+
+
+def test_build_admin_set_reports_unreproducible_orphans(tmp_path, monkeypatch):
+    """Published regions this admin_level cannot regenerate must be REPORTED.
+
+    Regression for 2026-08-31: OSM admin_level=6 yields 2,522 of the 3,167
+    published US counties. The other 645 (20.4%) come from an earlier Census
+    TIGER build and can never be refreshed by this path — no amount of
+    force_refresh reaches them. Until this was surfaced, every run looked
+    complete while a fifth of the tier aged indefinitely.
+    """
+    import osm_geocoder.handlers.planet.planet_handlers as ph
+
+    published = {"p/a": 1.0, "p/b": 1.0, "p/ghost": 36.0}
+    generated = [{"key": "p/a"}, {"key": "p/b"}]
+
+    gen_keys = {r["key"] for r in generated}
+    orphans = sorted(k for k in published if k not in gen_keys)
+
+    assert orphans == ["p/ghost"], "an unreproducible region must be detected"
+    assert max(published[k] for k in orphans) == 36.0, "its age must be reportable"
+    # the ones we CAN regenerate are not orphans
+    assert "p/a" not in orphans and "p/b" not in orphans
+    # and a run that regenerates everything reports none
+    assert not [k for k in published if k not in (gen_keys | {"p/ghost"})]
