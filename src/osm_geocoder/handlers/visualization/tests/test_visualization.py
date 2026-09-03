@@ -311,22 +311,25 @@ class TestVisualizationHandlers:
     """Tests for visualization event handlers."""
 
     def test_render_map_handler_no_folium(self):
-        """Test handler gracefully handles missing folium."""
+        """Missing folium must REFUSE, not return an empty result.
+
+        The handler was hardened to raise; these tests still asserted the old
+        silent-empty behaviour and nothing caught it, because the repo had no CI.
+        """
         from osm_geocoder.handlers.visualization.visualization_handlers import _make_render_map_handler
 
         handler = _make_render_map_handler("RenderMap")
 
         with patch("osm_geocoder.handlers.visualization.visualization_handlers.HAS_FOLIUM", False):
-            result = handler(
-                {
-                    "geojson_path": "/some/file.geojson",
-                    "title": "Test Map",
-                    "format": "html",
-                }
-            )
+            with pytest.raises(RuntimeError, match="folium"):
+                    handler(
+                    {
+                        "geojson_path": "/some/file.geojson",
+                        "title": "Test Map",
+                        "format": "html",
+                    }
+                )
 
-        assert result["result"]["feature_count"] == 0
-        assert result["result"]["output_path"] == ""
 
     def test_render_map_handler_empty_path(self):
         """Test handler with empty input path."""
@@ -365,9 +368,9 @@ class TestVisualizationHandlers:
         handler = _make_preview_map_handler("PreviewMap")
 
         with patch("osm_geocoder.handlers.visualization.visualization_handlers.HAS_FOLIUM", False):
-            result = handler({"geojson_path": "/some/file.geojson"})
+            with pytest.raises(RuntimeError, match="folium"):
+                    handler({"geojson_path": "/some/file.geojson"})
 
-        assert result["result"]["output_path"] == ""
 
 
 class TestHandlerRegistration:
@@ -439,7 +442,13 @@ class TestRenderTiledMap:
         assert "tile.openstreetmap.org" in osm
         none = self._render(tmp_path, basemap="none")
         assert "background-color" in none
-        assert "cartocdn" not in none and "openstreetmap" not in none
+        # ⚠️ Assert on the TILE URL, not the word. basemap="none" must drop the
+        # basemap tiles, but the page still carries the ODbL DATA attribution
+        # linking to openstreetmap.org — which is required, so a bare
+        # "openstreetmap" not in ... would be satisfied only by removing a
+        # legally necessary credit.
+        assert "cartocdn" not in none
+        assert "tile.openstreetmap.org" not in none
 
 
 if __name__ == "__main__":
