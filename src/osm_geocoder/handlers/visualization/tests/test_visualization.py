@@ -214,7 +214,13 @@ class TestRenderMapHtml:
     def test_render_default_output_path(self, sample_geojson, tmp_path, monkeypatch):
         from osm_geocoder.handlers.visualization.map_renderer import render_map_html
 
+        # ⚠️ BOTH env vars, not just FW_LOCAL_OUTPUT_DIR. tests/mocked/py/conftest.py
+        # sets FW_OUTPUT_BASE from a SESSION-scoped monkeypatch, which stays in
+        # force for the rest of the session — including this file — and
+        # FW_OUTPUT_BASE outranks FW_LOCAL_OUTPUT_DIR. So this test passed on its
+        # own and failed in a full-suite run, which is what CI does.
         monkeypatch.setenv("FW_LOCAL_OUTPUT_DIR", str(tmp_path))
+        monkeypatch.setenv("FW_OUTPUT_BASE", str(tmp_path))
         # Reload the cached module-level variable
         import osm_geocoder.handlers.shared._output as _output_mod
 
