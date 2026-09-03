@@ -423,14 +423,29 @@ def _scratch_dir() -> str:
 
 
 def _s3_client(endpoint: str | None = None):
+    """The runtime's single S3 client construction.
+
+    ⚠️ Used rather than a local boto3.client() so there is ONE credential chain
+    and one MinIO config (s3v4 + path-style) in the codebase. This module still
+    needs the raw client — a ranged GET reads a multi-GB PBF's replication
+    header from its first 64 KB, and multipart transfer publishes planet
+    extracts — neither of which the StorageBackend interface covers.
+
+    ⚠️ The localhost/minioadmin defaults are passed EXPLICITLY, preserving this
+    module's historical behaviour exactly. A hardcoded credential default is a
+    smell — it silently targets a local store when the env is unset instead of
+    failing — but removing it changes behaviour for the live planet pipeline and
+    deserves its own deliberate step.
+    """
     try:
-        import boto3  # optional [s3] extra
-    except ImportError as exc:
+        from facetwork.runtime.storage import s3_client
+    except ImportError as exc:  # pragma: no cover
         raise RuntimeError("this facet needs boto3 (pip install '.[s3]')") from exc
-    return boto3.client(
-        "s3", endpoint_url=endpoint or os.environ.get("FW_S3_ENDPOINT", "http://localhost:9000"),
-        aws_access_key_id=os.environ.get("FW_S3_ACCESS_KEY", "minioadmin"),
-        aws_secret_access_key=os.environ.get("FW_S3_SECRET_KEY", "minioadmin"))
+    return s3_client(
+        endpoint or os.environ.get("FW_S3_ENDPOINT", "http://localhost:9000"),
+        access_key=os.environ.get("FW_S3_ACCESS_KEY", "minioadmin"),
+        secret_key=os.environ.get("FW_S3_SECRET_KEY", "minioadmin"),
+    )
 
 
 _TRANSFER = None
