@@ -79,3 +79,19 @@ if [ "$rc" -ne 0 ]; then
     exit "$rc"
 fi
 echo "=== [$(date '+%F %T')] osm-maintain done ==="
+
+# The re-split just rewrote every served continent, so the store status report is
+# now describing the previous tree. Refresh it, into the tree itself so it sits
+# next to the extracts it describes.
+#
+# Best-effort by design: this leg must NOT be able to turn a successful re-split
+# into a failed one. A missing `fw` (this wrapper also runs where the framework
+# repo is not checked out) is a skip, not an error.
+FW_BIN="${FW_BIN:-$HOME/facetwork/fw}"
+if [ -x "$FW_BIN" ]; then
+    if "$FW_BIN" svc osm-report --publish --tree-dir "$WWW" >/dev/null 2>&1; then
+        echo "    store status report refreshed"
+    else
+        echo "    store status report NOT refreshed — the re-split itself was fine"
+    fi
+fi
