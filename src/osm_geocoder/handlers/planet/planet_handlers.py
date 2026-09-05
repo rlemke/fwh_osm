@@ -489,26 +489,46 @@ def _publish_one(s3, out: str, key: str, bucket: str) -> None:
 
 
 def _published_region_ages(s3, bucket: str, prefix: str) -> dict[str, float]:
-    """Region key -> AGE IN DAYS of what is published under ``prefix/``.
+    """Region key -> AGE IN DAYS of the IMMEDIATE CHILDREN of ``prefix``.
 
     Ages, not a bare key set, because "already published" answers two different
     questions and they need different answers: *resume* (this run published it
     minutes ago — skip) and *refresh* (July published it — rebuild).
+
+    ⚠️ IMMEDIATE CHILDREN ONLY. This used to return every ``-latest.osm.pbf``
+    under the prefix at any depth, which is not the set this run is responsible
+    for — a run builds ONE tier. Everything deeper then failed to match
+    ``generated_keys`` and was counted as unreproducible, and it also inflated
+    the stale count that decides how much work there is.
+
+    Measured 2026-09-04, both numbers meaningless:
+      europe        @2 -> "422 NOT reproducible" (there are 48 countries; the
+                          other 415 are German Kreise at admin_level 6)
+      north-america @2 -> "3269 NOT reproducible" and "2573 fresh, 698 stale"
+                          (there are 9 countries; the rest are 51 states and
+                          3,167 counties, two and three tiers down)
+    The per-state county numbers were right all along because those prefixes
+    have nothing below them — which is exactly why the bug survived.
     """
     import datetime as _dt
 
     ages: dict[str, float] = {}
     now = _dt.datetime.now(_dt.timezone.utc)
+    base = prefix.strip("/")
+    child_depth = base.count("/") + 1
+    suffix = "-latest.osm.pbf"
     try:
         paginator = s3.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=bucket, Prefix=f"{prefix.strip('/')}/"):
+        for page in paginator.paginate(Bucket=bucket, Prefix=f"{base}/"):
             for o in page.get("Contents", []):
                 k = o["Key"]
-                if not k.endswith("-latest.osm.pbf"):
+                if not k.endswith(suffix):
                     continue
+                key = k[: -len(suffix)]
+                if key.count("/") != child_depth:
+                    continue          # a grandchild belongs to a different tier
                 lm = o.get("LastModified")
-                age = (now - lm).total_seconds() / 86400 if lm else 0.0
-                ages[k[: -len("-latest.osm.pbf")]] = age
+                ages[key] = (now - lm).total_seconds() / 86400 if lm else 0.0
     except Exception:
         pass
     return ages

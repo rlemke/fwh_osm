@@ -596,3 +596,66 @@ def test_build_admin_set_reports_unreproducible_orphans(tmp_path, monkeypatch):
     assert "p/a" not in orphans and "p/b" not in orphans
     # and a run that regenerates everything reports none
     assert not [k for k in published if k not in (gen_keys | {"p/ghost"})]
+
+
+def test_published_ages_counts_only_the_tier_being_built():
+    """⚠️ A run builds ONE tier, so only the prefix's IMMEDIATE children are its
+    responsibility. Listing every descendant made everything deeper look
+    unreproducible and inflated the stale count that decides how much work
+    there is.
+
+    Measured 2026-09-04: europe@2 reported "422 NOT reproducible" when it has
+    48 countries — the other 415 are German Kreise at admin_level 6.
+    north-america@2 reported "3269 NOT reproducible" and "2573 fresh, 698
+    stale" against 9 countries, 51 states and 3,167 counties.
+    """
+    import datetime as dt
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+
+    now = dt.datetime.now(dt.timezone.utc)
+    keys = [
+        "europe/germany-latest.osm.pbf",              # child   — counted
+        "europe/france-latest.osm.pbf",               # child   — counted
+        "europe/germany/alb-donau-kreis-latest.osm.pbf",   # grandchild — not
+        "europe/germany/altenburger-land-latest.osm.pbf",  # grandchild — not
+        "europe/germany-updates/state.txt",           # not a pbf — not
+    ]
+
+    class _Pager:
+        def paginate(self, **_kw):
+            return [{"Contents": [{"Key": k, "LastModified": now} for k in keys]}]
+
+    class _S3:
+        def get_paginator(self, _name):
+            return _Pager()
+
+    ages = ph._published_region_ages(_S3(), "b", "europe")
+    assert set(ages) == {"europe/germany", "europe/france"}
+
+    # ...and one tier down, the grandchildren ARE the children.
+    ages = ph._published_region_ages(_S3(), "b", "europe/germany")
+    assert set(ages) == {"europe/germany/alb-donau-kreis",
+                         "europe/germany/altenburger-land"}
+
+
+def test_published_ages_is_unchanged_for_a_leaf_tier():
+    """The per-state county numbers were right all along — those prefixes have
+    nothing below them, which is exactly why the bug survived. Pin that the fix
+    does not disturb them."""
+    import datetime as dt
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+
+    now = dt.datetime.now(dt.timezone.utc)
+    keys = ["north-america/us/wyoming/albany-latest.osm.pbf",
+            "north-america/us/wyoming/carbon-latest.osm.pbf"]
+
+    class _Pager:
+        def paginate(self, **_kw):
+            return [{"Contents": [{"Key": k, "LastModified": now} for k in keys]}]
+
+    class _S3:
+        def get_paginator(self, _name):
+            return _Pager()
+
+    ages = ph._published_region_ages(_S3(), "b", "north-america/us/wyoming")
+    assert len(ages) == 2
