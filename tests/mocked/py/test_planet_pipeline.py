@@ -536,9 +536,99 @@ def test_handler_dispatch_routes_and_rejects_unknown():
         "osm.planet.DownloadPolygons", "osm.planet.GenerateRegionPolygons",
         "osm.planet.ExtractRegions", "osm.planet.PublishExtracts",
         "osm.planet.BuildAdminSet", "osm.planet.ListExtracts",
+        "osm.planet.RequireFresh",
     }
     with pytest.raises(ValueError):
         ph.handle({"_facet_name": "osm.planet.Nope"})
+
+
+
+# --- sub-national tier is not pinned to the planet host (2026-09-13) ---
+
+class _FakeS3:
+    """Records what was asked for and writes a stub file, so these tests never
+    touch a real bucket."""
+    def __init__(self):
+        self.asked = None
+    def download_file(self, bucket, key, dst, Callback=None):
+        self.asked = (bucket, key)
+        with open(dst, "wb") as fh:
+            fh.write(b"\0" * 2048)
+
+
+def test_source_region_falls_back_to_the_bucket(tmp_path, monkeypatch):
+    """A named region that is not in this host's tree is FETCHED, not refused.
+
+    Until 2026-09-13 this raised, so `source_region` only ever meant "the copy in
+    MY served tree" — which exists on one machine. That pinned the US state tier
+    to the planet host despite its source being a 20 GB continent extract every
+    host can read from the object store."""
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+    monkeypatch.setattr(ph, "_PLANET_DIR", str(tmp_path / "no-tree-here"))
+    monkeypatch.setattr(ph, "_scratch_dir", lambda: str(tmp_path))
+    s3 = _FakeS3()
+    out = ph._resolve_extract_source("north-america", "", params={},
+                                     bucket="osm-extracts", s3=s3)
+    assert s3.asked == ("osm-extracts", "north-america-latest.osm.pbf")
+    assert out.startswith(str(tmp_path)) and os.path.exists(out)
+
+
+def test_source_region_prefers_a_local_copy_over_the_bucket(tmp_path, monkeypatch):
+    """Downloading what is already on disk would be pure waste."""
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+    www = tmp_path / "www"
+    www.mkdir(parents=True)
+    local = www / "north-america-latest.osm.pbf"
+    local.write_bytes(b"\0" * 4096)
+    monkeypatch.setattr(ph, "_PLANET_DIR", str(tmp_path))
+    s3 = _FakeS3()
+    out = ph._resolve_extract_source("north-america", "", params={},
+                                     bucket="osm-extracts", s3=s3)
+    assert out == str(local)
+    assert s3.asked is None, "must not download when the region is already local"
+
+
+def test_source_region_refuses_rather_than_silently_using_the_planet(tmp_path, monkeypatch):
+    """No bucket to fetch from => raise. Falling back to the planet would look
+    like it worked and cost ~4.4x the I/O — the silent-wrong-default class this
+    file keeps getting bitten by."""
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+    monkeypatch.setattr(ph, "_PLANET_DIR", str(tmp_path / "nothing"))
+    with pytest.raises(Exception):
+        ph._resolve_extract_source("north-america", "/some/planet.pbf", params={})
+
+
+def test_no_source_region_is_unchanged():
+    """The legacy path must be bit-for-bit unaffected."""
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+    assert ph._resolve_extract_source("", "/planet.pbf") == "/planet.pbf"
+
+
+def test_extract_regions_does_not_touch_the_planet_when_a_region_is_named(tmp_path, monkeypatch):
+    """The planet must be resolved LAZILY.
+
+    It used to be an eager argument, so _resolve_planet — which RAISES on a host
+    with no planet — ran even when a continent had been named and the planet was
+    never going to be read. That one eager evaluation is what pinned the tier."""
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+    called = {"planet": False}
+
+    def _boom(*a, **k):
+        called["planet"] = True
+        raise AssertionError("_resolve_planet must not be called for a named region")
+
+    monkeypatch.setattr(ph, "_resolve_planet", _boom)
+    monkeypatch.setattr(ph, "_resolve_extract_source",
+                        lambda *a, **k: str(tmp_path / "src.pbf"))
+    monkeypatch.setattr(ph, "_s3_client", lambda *a, **k: _FakeS3())
+    monkeypatch.setattr(ph, "bootstrap_batched",
+                        lambda **k: [], raising=False)
+    try:
+        ph.handle_extract_regions({"source_region": "north-america", "regions": [],
+                                   "out": str(tmp_path)})
+    except Exception:
+        pass                      # only the planet-resolution question matters here
+    assert called["planet"] is False
 
 
 def test_county_slug_strips_admin_type(tmp_path, monkeypatch):

@@ -14,6 +14,7 @@ runner's global execution timeout), like the other cache/download handlers.
 from __future__ import annotations
 
 import contextlib
+import datetime
 import os
 import shutil
 import threading
@@ -293,7 +294,9 @@ def handle_generate_polygons(params: dict[str, Any]) -> dict[str, Any]:
     return {"poly_dir": dest, "region_count": len(regions), "regions": out}
 
 
-def _resolve_extract_source(source_region: str, planet_path: str, on_log=None) -> str:
+def _resolve_extract_source(source_region: str, planet_path: str, on_log=None, *,
+                            params: dict | None = None, bucket: str = "",
+                            s3=None) -> str:
     """Cut from a CONTINENT extract when the caller names one, not the planet.
 
     osmium reads the whole source per batch, and its memory scales with what it
@@ -313,13 +316,52 @@ def _resolve_extract_source(source_region: str, planet_path: str, on_log=None) -
         return planet_path
     log = on_log or (lambda _m: None)
     cand = os.path.join(_PLANET_DIR, "www", f"{source_region}-latest.osm.pbf")
-    if not os.path.exists(cand):
+    if os.path.exists(cand):
+        log(f"cutting from local {source_region} ({os.path.getsize(cand)/1e9:.1f} GB) "
+            f"instead of the planet")
+        return cand
+
+    # Not in the local tree — fetch it from the OBJECT STORE.
+    #
+    # ⚠️ This is what unpins the sub-national tier from the planet host. Until
+    # 2026-09-13 this raised here, so  only ever meant "the copy in
+    # MY served tree" — which exists on exactly one machine. US states therefore
+    # ran only where the planet lives, despite never needing the planet: their
+    # source is the 20 GB north-america extract, which every host can read from
+    # the bucket. A continent is ~20 GB against the planet's 92 GB and, unlike the
+    # planet, it is a normal artifact the store already holds for every tier below
+    # it. _resolve_planet's "an ~80 GB file cannot sensibly cross the step
+    # boundary" is true of the PLANET and was over-applied to its children.
+    if s3 is None or not bucket:
         raise PermanentError(
-            f"source_region={source_region!r} requested but {cand!r} is not on this host. "
-            f"Serve it into the planet tree first, or clear source_region to cut from the planet."
+            f"source_region={source_region!r} requested but {cand!r} is not on this host "
+            f"and no bucket was supplied to fetch it from. Pass `bucket`, serve it into "
+            f"the planet tree, or clear source_region to cut from the planet."
         )
-    log(f"cutting from {source_region} ({os.path.getsize(cand)/1e9:.1f} GB) instead of the planet")
-    return cand
+    key = f"{source_region}-latest.osm.pbf"
+    work = _scratch_dir()
+    dst = os.path.join(work, f"{source_region.replace('/', '__')}.osm.pbf")
+    if os.path.exists(dst) and os.path.getsize(dst) > 0:
+        log(f"reusing already-localised {source_region} ({os.path.getsize(dst)/1e9:.1f} GB)")
+        return dst
+
+    def _abort_if_cancelled(_bytes: int) -> None:
+        # Same contract as BuildAdminSet's fetch: boto3 calls this per chunk, and
+        # raising aborts the transfer. Without it a terminate leaves a multi-GB
+        # download running — the longest uninterruptible stretch in this path.
+        raise_if_cancelled()
+
+    log(f"cutting from {source_region}: downloading s3://{bucket}/{key}")
+    try:
+        with _heartbeating(params or {}, f"downloading {source_region}"):
+            s3.download_file(bucket, key, dst, Callback=_abort_if_cancelled)
+    except Exception as exc:
+        raise PermanentError(
+            f"source_region={source_region!r} is neither on this host nor readable at "
+            f"s3://{bucket}/{key} ({exc}). The parent tier has not been published yet."
+        ) from exc
+    log(f"cutting from {source_region} ({os.path.getsize(dst)/1e9:.1f} GB) instead of the planet")
+    return dst
 
 
 def _extract_resume_skip(out: str, regions: list[dict], source: str, on_log=None):
@@ -362,11 +404,23 @@ def _extract_resume_skip(out: str, regions: list[dict], source: str, on_log=None
 
 def handle_extract_regions(params: dict[str, Any]) -> dict[str, Any]:
     log = _log(params)
-    planet = _resolve_extract_source(
-        (params.get("source_region") or "").strip(),
-        _resolve_planet(params.get("planet_path") or "", on_log=log),
-        on_log=log,
-    )
+    source_region = (params.get("source_region") or "").strip()
+    # ⚠️ Resolve the planet ONLY when there is no source_region. This used to be
+    # an eager argument, so _resolve_planet ran even when the caller had named a
+    # continent and the planet was never going to be read — and it RAISES
+    # ("ExtractRegions must run where the planet lives") on any host without one.
+    # That single eager evaluation is what pinned the whole sub-national tier to
+    # the planet host: `source_region` was already plumbed through, already
+    # documented as "~4.4x less I/O", and could never take effect anywhere else.
+    if source_region:
+        planet = _resolve_extract_source(
+            source_region, "", on_log=log, params=params,
+            bucket=(params.get("bucket")
+                    or os.environ.get("FW_OSM_EXTRACT_BUCKET", "osm-extracts")),
+            s3=_s3_client(params.get("endpoint")),
+        )
+    else:
+        planet = _resolve_planet(params.get("planet_path") or "", on_log=log)
     regions = params.get("regions") or []
     if not regions:
         raise ValueError("ExtractRegions: 'regions' is empty (run DownloadPolygons first)")
@@ -901,6 +955,87 @@ def _build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
             "unreproducible": len(orphans)}
 
 
+
+def handle_require_fresh(params: dict[str, Any]) -> dict[str, Any]:
+    """Fail unless every named bucket artifact is younger than ``max_age_days``.
+
+    ⚠️ THIS GUARD ALREADY EXISTED — in ``scripts/lib/svc/_osm_admin_scope.py``,
+    i.e. OUTSIDE the runtime. It therefore protected exactly one caller, the
+    `fw svc osm-admin-regen` CLI. A dashboard run, a direct submit, or a composed
+    workflow cut from whatever the bucket happened to hold, with no guard at all.
+    Expressing it as a facet puts the chain's correctness property inside the
+    chain, where every caller gets it.
+
+    Why it matters, in the words of the chain it protects: each tier is cut from
+    the tier above, READ OUT OF THE OBJECT STORE. Building on a stale parent
+    stamps children with a fresh write time over month-old data — and sub-regions
+    carry no replication timestamp, so mtime is the only age signal anything has.
+    Nothing downstream can detect it afterwards.
+
+    ⚠️ Raises on stale AND on "could not tell". A freshness check that passes
+    when it cannot list the bucket is worse than no check: it converts an
+    unknown into a green light. The CLI version is explicit about this too —
+    exit 2 means could-not-check, and it is not success.
+    """
+    patterns = params.get("patterns") or []
+    if isinstance(patterns, str):
+        patterns = [patterns]
+    bucket = params.get("bucket") or os.environ.get("FW_OSM_EXTRACT_BUCKET", "osm-extracts")
+    max_age = float(params.get("max_age_days") or 14)
+    log = _log(params)
+
+    # A region name is accepted as shorthand for its extract key, so a caller can
+    # pass the same list it fans out over (["europe", ...]) rather than restating
+    # it as filenames. Explicit patterns still work unchanged.
+    suffix = "-latest.osm.pbf"
+    wanted = [p if p.endswith(suffix) else f"{p}{suffix}" for p in patterns]
+    if not wanted:
+        return {"checked": 0, "stale": 0, "oldest_days": 0.0}
+
+    s3 = _s3_client(params.get("endpoint"))
+    seen: dict[str, float] = {}
+    missing: list[str] = []
+    now = datetime.datetime.now(datetime.timezone.utc)
+    # ⚠️ HEAD per key, NOT a bucket listing. This store holds ~14,400 objects and
+    # a gate that paginates all of them to find 6 takes minutes — between EVERY
+    # pair of tiers, while the thing it guards is idle. HEAD is O(patterns) and
+    # gives the same LastModified. (The CLI version lists because its patterns
+    # are globs; these are exact keys, so it does not have to.)
+    for key in wanted:
+        try:
+            head = s3.head_object(Bucket=bucket, Key=key)
+        except Exception as exc:
+            if "404" in str(exc) or "NoSuchKey" in str(exc) or "Not Found" in str(exc):
+                missing.append(key)
+                continue
+            raise RuntimeError(
+                f"RequireFresh could not stat {key!r} in {bucket!r} ({exc}). Refusing "
+                f"rather than assuming fresh — an unverifiable source is not a fresh one."
+            ) from exc
+        seen[key] = (now - head["LastModified"]).total_seconds() / 86400.0
+
+    if missing:
+        raise RuntimeError(
+            f"RequireFresh: {len(missing)} source(s) absent from {bucket!r}: "
+            f"{', '.join(sorted(missing)[:6])}. The parent tier has not been built."
+        )
+
+    stale = {k: d for k, d in seen.items() if d > max_age}
+    oldest = max(seen.values()) if seen else 0.0
+    for k in sorted(seen, key=lambda x: -seen[x]):
+        log(f"  {k}  {seen[k]:.1f} days old"
+            + ("  STALE" if k in stale else ""))
+    if stale:
+        raise RuntimeError(
+            f"RequireFresh: {len(stale)} of {len(seen)} source(s) older than "
+            f"{max_age:g} days (oldest {oldest:.1f}d): "
+            f"{', '.join(sorted(stale))}. Refresh the parent tier first — building "
+            f"on these would stamp children with a fresh mtime over stale data."
+        )
+    log(f"freshness OK: {len(seen)} source(s), oldest {oldest:.1f}d (limit {max_age:g}d)")
+    return {"checked": len(seen), "stale": 0, "oldest_days": round(oldest, 2)}
+
+
 _DISPATCH = {
     f"{NAMESPACE}.DownloadPlanet": handle_download_planet,
     f"{NAMESPACE}.UpdatePlanet": handle_update_planet,
@@ -910,6 +1045,7 @@ _DISPATCH = {
     f"{NAMESPACE}.PublishExtracts": handle_publish_extracts,
     f"{NAMESPACE}.BuildAdminSet": handle_build_admin_set,
     f"{NAMESPACE}.ListExtracts": handle_list_extracts,
+    f"{NAMESPACE}.RequireFresh": handle_require_fresh,
 }
 
 

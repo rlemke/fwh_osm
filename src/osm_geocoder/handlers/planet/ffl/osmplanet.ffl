@@ -51,13 +51,14 @@ namespace osm.planet {
         that after the planet download, which is hours of wasted work before the
         retry lands where it should have started. */
     event facet ExtractRegions(
-        planet_path: String,
+        planet_path: String = "",
         regions: [Region],
         out: String = "",
         base_url: String = "",
         strategy: String = "complete_ways",
         batch_size: Long = 25,
         source_region: String = "",
+        bucket: String = "osm-extracts",
         force_rebuild: Boolean = false
     ) => (region_count: Long, out: String) with Effect(kind = "io") with Cost(tier = "expensive") with Requires(memory_gb = 10)
 
@@ -165,4 +166,133 @@ namespace osm.planet {
             yield BuildAdminFanout(published += [leaf.published], unreproducible += [leaf.unreproducible])
         }
     }
+
+
+    /** Assert that every `patterns` artifact in the bucket is younger than
+        `max_age_days`, and FAIL the step otherwise.
+
+        This is the guard that used to live only in `_osm_admin_scope.py`, i.e.
+        outside the runtime — so it protected the `fw svc osm-admin-regen` path
+        and nothing else. Any other caller (a dashboard run, a direct submit, a
+        composed workflow like RefreshChain below) cut from whatever the bucket
+        happened to hold. Expressing it as a facet puts the chain's correctness
+        property inside the chain. */
+    event facet RequireFresh(
+        patterns: [String],
+        bucket: String = "osm-extracts",
+        max_age_days: Long = 14
+    ) => (checked: Long, stale: Long, oldest_days: Double)
+        with Effect(kind = "io") with Cost(tier = "free")
+
+    /** THE top-level entry point: planet -> continents -> countries -> US states,
+        in one submission, with the ordering and placement rules the chain has
+        always had but that a human had to enforce by hand.
+
+        Three things are expressed here rather than in an operator's head:
+
+        1. ORDER. Each tier is cut from the tier above, read out of the OBJECT
+           STORE - so no value flows between them and the compiler cannot see the
+           edge. `after` is exactly that: the invisible dependency. Building a
+           tier from a stale parent stamps children with a fresh write time over
+           month-old data, and sub-regions carry no replication timestamp, so
+           nothing downstream could ever detect it.
+
+        2. PLACEMENT. The planet steps carry `Requires(dataset_planet_gb = 80)`.
+           The 92 GB master exists on ONE host, while every osm runner in the
+           fleet advertises its handler - so without this any of them could claim
+           the work and then try to fetch 92 GB. Runners advertise a dataset
+           dimension only when they can actually stat the file (see
+           base_runner.measured_resources), and an unadvertised dimension makes a
+           runner DECLINE, so this routes to the planet host without naming it.
+
+        3. FRESHNESS. RequireFresh gates the country tier on the continents this
+           same run just published, so a partial upstream failure stops the chain
+           instead of silently propagating.
+
+        Left deliberately OUT: the 3,167-way county tier. It is a separate
+        submission (BuildAdminFanout) because it has frozen before and wants its
+        own `foreach limit`. */
+    workflow RefreshChain(
+        bucket: String = "osm-extracts",
+        strategy: String = "complete_ways",
+        batch_size: Long = 2,
+        country_regions: [String] = ["europe", "africa", "asia", "australia-oceania", "south-america", "central-america"],
+        country_width: Int = 2,
+        max_age_days: Long = 14,
+        osmfr_fallback: Boolean = false,
+        refresh_after_days: Long = 0,
+        force_refresh: Boolean = false
+    ) => (continents: Long, countries: [Long]) andThen {
+
+        planet = osm.planet.DownloadPlanet() with Requires(dataset_planet_gb = 80)
+        updated = osm.planet.UpdatePlanet(planet_path = planet.planet_path) with Requires(dataset_planet_gb = 80)
+        polys = osm.planet.DownloadPolygons(scope = "continents")
+        extract = osm.planet.ExtractRegions(
+            planet_path = updated.planet_path,
+            regions = polys.regions,
+            strategy = $.strategy,
+            batch_size = $.batch_size
+        ) with Requires(dataset_planet_gb = 80)
+        pub = osm.planet.PublishExtracts(out = extract.out, bucket = $.bucket)
+
+        gate = osm.planet.RequireFresh(
+            patterns = $.country_regions,
+            bucket = $.bucket,
+            max_age_days = $.max_age_days
+        ) andThen foreach c in $$.country_regions limit $$.country_width {
+            set = osm.planet.BuildAdminSet(
+                source_region = $.c,
+                admin_level = 2,
+                strategy = $$.strategy,
+                bucket = $$.bucket,
+                osmfr_fallback = $$.osmfr_fallback,
+                refresh_after_days = $$.refresh_after_days,
+                force_refresh = $$.force_refresh
+            )
+            yield RefreshChain(countries += [set.published])
+        }
+
+        yield RefreshChain(continents = pub.published)
+    }
+
+
+    /** Cut a tier from a CONTINENT held in the object store — the planet is never
+        touched, so this runs ANYWHERE with enough scratch.
+
+        This is `BuildPlanetExtracts` minus its first two steps. Those two —
+        DownloadPlanet and UpdatePlanet — are the only reason the US state tier
+        was pinned to the one host holding the 92 GB master, even though its
+        actual source is the 20 GB north-america extract and its own notes say so
+        ("~4.4x less I/O AND proportionally less RAM per region"). The planet was
+        downloaded and updated first purely because the workflow bundled it.
+
+        Splitting it costs nothing in correctness: `source_region` already existed
+        on ExtractRegions, the resolver now fetches that region from the bucket
+        when it is not in the local tree, and every tier below the continents
+        reads the object store anyway. It buys the state tier the whole fleet
+        instead of one machine. */
+    workflow BuildRegionExtracts(
+        source_region: String = "north-america",
+        scope: String = "subnational",
+        polys_dest: String = "",
+        out: String = "",
+        base_url: String = "",
+        strategy: String = "complete_ways",
+        batch_size: Long = 4,
+        bucket: String = "osm-extracts"
+    ) => (region_count: Long, published: Long) andThen {
+        polys = osm.planet.DownloadPolygons(dest = $.polys_dest, scope = $.scope)
+        extract = osm.planet.ExtractRegions(
+            regions = polys.regions,
+            out = $.out,
+            base_url = $.base_url,
+            strategy = $.strategy,
+            batch_size = $.batch_size,
+            source_region = $.source_region,
+            bucket = $.bucket
+        )
+        pub = osm.planet.PublishExtracts(out = extract.out, bucket = $.bucket)
+        yield BuildRegionExtracts(region_count = extract.region_count, published = pub.published)
+    }
+
 }
