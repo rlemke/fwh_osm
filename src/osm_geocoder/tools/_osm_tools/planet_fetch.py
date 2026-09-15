@@ -20,6 +20,7 @@ import hashlib
 import os
 import subprocess
 import urllib.request
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -139,6 +140,41 @@ def update_planet(planet_path: str, *, replication: str = PLANET_REPLICATION,
         return PlanetUpdate(f"unreachable: {type(exc).__name__}", ts_iso, None, False)
     if start is None:
         return PlanetUpdate("no sequence for timestamp", ts_iso, None, False)
+
+    # ⚠️ REFUSE TO START A SECOND CONCURRENT UPDATE.
+    #
+    # The uuid temp name below makes an overlap non-destructive, but it does not
+    # make it cheap: each execution copies the whole planet (92 GB here). Measured
+    # 2026-09-14, that difference cost a night. A memory-starved host wedged its
+    # runner, the 120s dead-server reaper reclaimed the task, the reclaimed
+    # execution started a FRESH 92 GB copy, and the earlier one was never stopped.
+    # Four ran at once, each at ~2.7 MB/s (~9.4h to finish), competing for exactly
+    # the memory whose exhaustion caused the wedge. Every recovery attempt made it
+    # worse, and the run reported progress throughout.
+    #
+    # Delivery is at-least-once with no fencing token, so a duplicate execution is
+    # ALLOWED by contract and handler idempotency is required. This is that
+    # idempotency: cheap to be correct, expensive to be redundant.
+    #
+    # A temp file still growing means a live writer -- refuse, and let the retry
+    # find the planet already advanced. One that has stopped growing is debris
+    # from a killed execution: remove it, because nothing else ever did (6.6 GB of
+    # it was recovered by hand).
+    _now, _stale_s = time.time(), 600
+    for _old in Path(planet_path).parent.glob("_planet_update_tmp.*.osm.pbf"):
+        try:
+            _age = _now - _old.stat().st_mtime
+        except OSError:
+            continue
+        if _age < _stale_s:
+            log(f"planet update skipped — another update is in flight "
+                f"({_old.name}, written {_age:.0f}s ago)")
+            return PlanetUpdate("concurrent update in flight", ts_iso, None, False)
+        log(f"removing abandoned planet temp {_old.name} ({_age / 3600:.1f}h old)")
+        try:
+            _old.unlink()
+        except OSError:
+            pass
 
     # PER-CALL temp name. A fixed one collided when two UpdatePlanet executions
     # ran against the same tree — and the `finally: unlink(tmp)` below would then

@@ -199,3 +199,72 @@ def test_advance_yields_an_int_sequence_not_a_tuple(tmp_path, monkeypatch):
     assert isinstance(upd.new_sequence, int), f"tuple leaked out: {upd.new_sequence!r}"
     # The comparison that used to explode must now just work.
     assert upd.new_sequence > MASTER_SEQ
+
+
+# ---------------------------------------------------------------------------
+# Concurrent planet updates
+#
+# ⚠️ Measured 2026-09-14. A memory-starved host wedged its runner; the 120s
+# dead-server reaper reclaimed the task; the reclaimed execution started a FRESH
+# 92 GB copy while the earlier one kept running. Four ran concurrently, each at
+# ~2.7 MB/s, competing for the memory whose exhaustion caused the wedge. The uuid
+# temp name kept the planet intact but did nothing to stop the duplicate work.
+# ---------------------------------------------------------------------------
+
+def _planet_with_header(tmp_path, monkeypatch):
+    """A planet file whose header parses, with replication stubbed out."""
+    import datetime
+    from osm_geocoder.tools._osm_tools import planet_fetch as pf
+
+    planet = tmp_path / "planet-latest.osm.pbf"
+    planet.write_bytes(b"pbf")
+
+    class _H:
+        timestamp = datetime.datetime(2026, 9, 1, tzinfo=datetime.timezone.utc)
+        sequence = 5000
+        url = "https://planet.openstreetmap.org/replication/day"
+    monkeypatch.setattr(pf._repl, "get_replication_header", lambda _p: _H())
+
+    applied = []
+
+    class _Server:
+        def __init__(self, *a, **k): pass
+        def timestamp_to_sequence(self, _ts): return 5000
+        def apply_diffs_to_file(self, src, dst, start, max_size=None):
+            applied.append(dst)
+            open(dst, "wb").write(b"updated")
+            return 5001
+    monkeypatch.setattr(pf, "ReplicationServer", _Server)
+    return pf, planet, applied
+
+
+def test_update_planet_refuses_while_another_update_is_in_flight(tmp_path, monkeypatch):
+    """A temp file still being written means a live writer. Refusing is what
+    stops a reclaim from starting a second full-planet copy."""
+    pf, planet, applied = _planet_with_header(tmp_path, monkeypatch)
+    inflight = tmp_path / "_planet_update_tmp.deadbeef.osm.pbf"
+    inflight.write_bytes(b"partial")          # mtime = now => a live writer
+
+    out = pf.update_planet(str(planet))
+
+    assert applied == [], "started a second full copy while one was in flight"
+    assert "concurrent" in out.status
+    assert out.advanced is False
+    assert inflight.exists(), "must not touch the other execution's output"
+
+
+def test_update_planet_removes_abandoned_temp_and_proceeds(tmp_path, monkeypatch):
+    """A temp that stopped growing is debris from a killed execution. Nothing
+    else ever cleaned these up — 6.6 GB of them was recovered by hand."""
+    import os, time
+    pf, planet, applied = _planet_with_header(tmp_path, monkeypatch)
+    abandoned = tmp_path / "_planet_update_tmp.0ff8eedb.osm.pbf"
+    abandoned.write_bytes(b"debris")
+    old = time.time() - 7200                   # 2h stale
+    os.utime(abandoned, (old, old))
+
+    out = pf.update_planet(str(planet))
+
+    assert not abandoned.exists(), "abandoned temp was not cleaned up"
+    assert len(applied) == 1, "should have proceeded with the update"
+    assert out.advanced is True
