@@ -749,3 +749,75 @@ def test_published_ages_is_unchanged_for_a_leaf_tier():
 
     ages = ph._published_region_ages(_S3(), "b", "north-america/us/wyoming")
     assert len(ages) == 2
+
+
+def _publish_env(tmp_path, monkeypatch):
+    """PublishExtracts against a fake bucket, rooted at an empty local tree."""
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+    uploaded = []
+
+    class FakeS3:
+        def upload_file(self, src, bucket, key, **kwargs):
+            uploaded.append(key)
+        def put_object(self, **kwargs):
+            pass
+        def head_bucket(self, **kwargs):
+            pass
+    monkeypatch.setattr(ph, "_s3_client", lambda ep=None: FakeS3())
+    monkeypatch.setattr(ph, "_ensure_public_bucket", lambda s3, b: None)
+    monkeypatch.setattr(ph, "_publish_one",
+                        lambda s3, out, key, bucket: uploaded.append(key))
+    return ph, uploaded
+
+
+def test_publish_extracts_fails_when_this_host_has_none_of_them(tmp_path, monkeypatch):
+    """⚠️ The cross-host handoff bug. The extracts are LOCAL files written by an
+    earlier step; a task reclaimed onto a different runner globs an empty `out`,
+    uploads nothing, and USED TO RETURN {"published": 0} as success — the
+    us-states tier came back ~36% refreshed with every step green.
+
+    Asking for three regions with an empty tree must ERROR and name them."""
+    import pytest
+    ph, uploaded = _publish_env(tmp_path, monkeypatch)
+    regions = [{"key": f"north-america/us/{s}"} for s in ("texas", "utah", "ohio")]
+
+    with pytest.raises(RuntimeError) as exc:
+        ph.handle_publish_extracts({"out": str(tmp_path), "regions": regions})
+
+    assert uploaded == []                                  # nothing was published
+    msg = str(exc.value)
+    assert "0 of 3" in msg                                 # says how far short it fell
+    for s in ("texas", "utah", "ohio"):
+        assert s in msg                                    # NAMES what is missing
+
+
+def test_publish_extracts_fails_on_a_partial_publish(tmp_path, monkeypatch):
+    """Publishing SOME of the requested regions is still a failure — a run that
+    silently drops a subset is exactly the 36% outcome, just less obvious."""
+    import pytest
+    ph, uploaded = _publish_env(tmp_path, monkeypatch)
+    (tmp_path / "north-america" / "us").mkdir(parents=True)
+    (tmp_path / "north-america" / "us" / "texas-latest.osm.pbf").write_text("pbf")
+    regions = [{"key": f"north-america/us/{s}"} for s in ("texas", "utah")]
+
+    with pytest.raises(RuntimeError) as exc:
+        ph.handle_publish_extracts({"out": str(tmp_path), "regions": regions})
+
+    assert uploaded == ["north-america/us/texas"]          # the one it had DID go up
+    assert "1 of 2" in str(exc.value)
+    assert "utah" in str(exc.value)
+
+
+def test_publish_extracts_succeeds_when_every_region_is_present(tmp_path, monkeypatch):
+    """The guard must not fire on the healthy path."""
+    ph, uploaded = _publish_env(tmp_path, monkeypatch)
+    d = tmp_path / "north-america" / "us"
+    d.mkdir(parents=True)
+    for s in ("texas", "utah"):
+        (d / f"{s}-latest.osm.pbf").write_text("pbf")
+    regions = [{"key": f"north-america/us/{s}"} for s in ("texas", "utah")]
+
+    out = ph.handle_publish_extracts({"out": str(tmp_path), "regions": regions})
+
+    assert out["published"] == 2
+    assert sorted(uploaded) == ["north-america/us/texas", "north-america/us/utah"]

@@ -612,7 +612,7 @@ def _regions_to_skip(published: dict[str, float], *, refresh_after_days: float,
     return set(published)                     # 0 = never refresh (the default)
 
 
-def _publish_tree(s3, out: str, bucket: str, log, only_keys=None) -> int:
+def _publish_tree(s3, out: str, bucket: str, log, only_keys=None) -> tuple[int, list[str]]:
     """Upload a local ``<key>-latest.osm.pbf`` + ``<key>-updates/state.txt`` tree to
     ``bucket`` (created anonymous-read). Returns the count published.
 
@@ -629,10 +629,18 @@ def _publish_tree(s3, out: str, bucket: str, log, only_keys=None) -> int:
     A zero-length file is never published: a killed osmium leaves truncated
     outputs behind, and replacing a good remote extract with an empty one is the
     worst outcome available here.
+
+    Returns ``(published, missing)``. ⚠️ ``missing`` is load-bearing: the extracts
+    are LOCAL files produced by an earlier step, so a task that retried onto a
+    different runner globs an empty ``out`` and publishes nothing. Returning only
+    a count made that indistinguishable from "there was nothing to do", and the
+    caller reported SUCCESS having published nothing — measured on the us-states
+    tier, which came back ~36% refreshed with every step green.
     """
     import glob
     _ensure_public_bucket(s3, bucket)
     wanted = set(only_keys) if only_keys else None
+    seen: set[str] = set()
     published = skipped_foreign = skipped_empty = 0
     for pbf in sorted(glob.glob(os.path.join(out, "**", "*-latest.osm.pbf"), recursive=True)):
         key = os.path.relpath(pbf, out)[: -len("-latest.osm.pbf")]
@@ -647,6 +655,7 @@ def _publish_tree(s3, out: str, bucket: str, log, only_keys=None) -> int:
         except OSError:
             continue
         _publish_one(s3, out, key, bucket)
+        seen.add(key)
         published += 1
         if published % 10 == 0:
             log(f"published {published} extracts")
@@ -654,7 +663,11 @@ def _publish_tree(s3, out: str, bucket: str, log, only_keys=None) -> int:
         log(f"scoped publish: {published} published, {skipped_foreign} file(s) outside this run left alone")
     if skipped_empty:
         log(f"⚠️ {skipped_empty} zero-length extract(s) NOT published")
-    return published
+    # A requested key is missing whether it was absent from this host's disk or
+    # present but zero-length -- either way it did NOT reach the bucket, which is
+    # the only thing the caller can act on.
+    missing = sorted(wanted - seen) if wanted is not None else []
+    return published, missing
 
 
 # Last-resort in-cluster default. Prefer the deployment's configured endpoint:
@@ -735,8 +748,24 @@ def handle_publish_extracts(params: dict[str, Any]) -> dict[str, Any]:
     with cancellable(params.get("_cancellation_check")):
         with _heartbeating(params, f"publishing the extract tree to {bucket}"):
             keys = [r.get("key") for r in (params.get("regions") or []) if r.get("key")]
-            published = _publish_tree(_s3_client(params.get("endpoint")), out, bucket,
-                                      _log(params), only_keys=keys or None)
+            published, missing = _publish_tree(_s3_client(params.get("endpoint")), out, bucket,
+                                               _log(params), only_keys=keys or None)
+    # ⚠️ A publish that published none of what it was ASKED for is a failure, not
+    # a no-op. The extracts are local files written by an earlier step, so a task
+    # reclaimed onto a different runner finds an empty `out`, uploads nothing, and
+    # used to return {"published": 0} as SUCCESS -- the us-states tier came back
+    # ~36% refreshed with every step green and nothing to point at. Raised rather
+    # than returned so the step errors: this is retryable on purpose (the files DO
+    # exist, on whichever host built them, and a retry can land there), where a
+    # PermanentError would dead-letter and throw that chance away.
+    if missing:
+        shown = ", ".join(missing[:8]) + (f" (+{len(missing) - 8} more)" if len(missing) > 8 else "")
+        raise RuntimeError(
+            f"PublishExtracts published {published} of {len(keys)} requested extract(s); "
+            f"{len(missing)} were not on this host: {shown}. This runner's local tree "
+            f"({out}) does not hold them -- the step that builds them ran elsewhere, or "
+            f"this task was reclaimed after that step completed."
+        )
     return {"bucket": bucket, "published": published}
 
 
