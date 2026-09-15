@@ -233,7 +233,13 @@ namespace osm.planet {
             strategy = $.strategy,
             batch_size = $.batch_size
         ) with Requires(dataset_planet_gb = 80)
-        pub = osm.planet.PublishExtracts(out = extract.out, bucket = $.bucket)
+        /* ⚠️ Pinned to the SAME dimension as ExtractRegions above, and that is
+           load-bearing rather than tidiness. PublishExtracts uploads the LOCAL
+           tree that ExtractRegions just wrote, so the two must run on one host.
+           Unpinned, this step could be claimed anywhere -- and a host with an
+           empty `out` uploaded nothing while reporting success, which is how the
+           us-states tier came back ~36% refreshed with every step green. */
+        pub = osm.planet.PublishExtracts(out = extract.out, bucket = $.bucket) with Requires(dataset_planet_gb = 80)
 
         gate = osm.planet.RequireFresh(
             patterns = $.country_regions,
