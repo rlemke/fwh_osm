@@ -217,7 +217,15 @@ namespace osm.planet {
         strategy: String = "complete_ways",
         batch_size: Long = 2,
         country_regions: [String] = ["europe", "africa", "asia", "australia-oceania", "south-america", "central-america"],
-        country_width: Int = 2,
+        /* Concurrent country regions. Raised 2 -> 4 on 2026-09-15 after the
+           first post-move run: FOUR hosts clear the country tier's 10 GB memory
+           floor (MaxPro 31.3, beelink01 30.5, macmini02 30.7, server3 23.4), so
+           four slots can land one per host. ⚠️ The floor is a claim-time FILTER,
+           not a reservation -- advertised capacity is static per process and does
+           not account for what a runner is already doing, so a much higher width
+           could still stack several cuts on one host. 4 is sized to the number of
+           capable hosts on purpose. */
+        country_width: Int = 4,
         max_age_days: Long = 14,
         osmfr_fallback: Boolean = false,
         refresh_after_days: Long = 0,
