@@ -46,6 +46,37 @@ subst() {
         "$1"
 }
 
+# ⚠️ Linux hosts get cron, not launchd. This installer was macOS-only, and that
+# stopped being a footnote on 2026-09-15 when the OSM role moved to a Linux box:
+# the nightly re-split could not be installed on the host that now holds the
+# planet, so it simply had no home. osm-watchdog alarms when the re-split goes
+# stale, which is the only reason the gap was visible at all.
+#
+# The static server is NOT installed here on Linux — use
+# `fw svc osm-extracts --install --container`, which gives nginx (and therefore
+# HTTP Range on multi-GB PBFs, which python's http.server has never had).
+#
+# The cron line is tagged `# fw-timer:<label>` to match the convention in
+# facetwork's scripts/lib/_helpers/_timer.sh, so `fw svc ... --status` and a
+# human reading `crontab -l` see one consistent format. Deliberately not a
+# dependency on that repo: this installer must work from a bare checkout.
+if [ "$(uname)" != "Darwin" ]; then
+    LABEL="com.facetwork.osm-maintain"
+    TAG="# fw-timer:$LABEL"
+    LINE="${MAINTAIN_MINUTE} ${MAINTAIN_HOUR} * * * ${WRAPPER} ${CONFIG} >> ${HOMEDIR}/maintain.log 2>&1  ${TAG}"
+    TMPCRON="$(mktemp)"
+    crontab -l 2>/dev/null | grep -vF "$TAG" | grep -v '^$' > "$TMPCRON" || true
+    printf '%s\n' "$LINE" >> "$TMPCRON"
+    crontab "$TMPCRON" && rm -f "$TMPCRON"
+    echo "installed (cron): $LABEL — ${MAINTAIN_HOUR}:$(printf '%02d' "${MAINTAIN_MINUTE}") daily"
+    echo "  wrapper: ${WRAPPER}"
+    echo "  log:     ${HOMEDIR}/maintain.log"
+    echo
+    echo "static server: NOT installed here — run"
+    echo "  fw svc osm-extracts --install --container --root ${WWW}"
+    exit 0
+fi
+
 for svc in com.facetwork.osm-extract-server com.facetwork.osm-maintain; do
     subst "$HERE/$svc.plist.template" > "$LA/$svc.plist"
     launchctl bootout "$DOMAIN/$svc" 2>/dev/null || true
