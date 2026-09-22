@@ -24,21 +24,9 @@ one cache layout at ``$FW_DATA_ROOT/cache/osm/html/``.
 from __future__ import annotations
 
 import os
-import re
 
+from ..shared.cache_region import region_from_cache
 from ..shared.pbf_convert import html_render
-
-
-_GEOFABRIK_REGION_RE = re.compile(
-    r"https?://download\.geofabrik\.de/(.+)-latest\.[^/]+$"
-)
-
-
-def _extract_region_path(url: str) -> str:
-    m = _GEOFABRIK_REGION_RE.match(url)
-    if m:
-        return m.group(1)
-    return url
 
 
 def _to_html_map_cache(result: html_render.RenderResult) -> dict:
@@ -72,7 +60,7 @@ def render_html_map_handler(payload: dict) -> dict:
     """
     cache = payload.get("cache", {}) or {}
     step_log = payload.get("_step_log")
-    region = _extract_region_path(cache.get("url", ""))
+    region = region_from_cache(cache)
     if step_log:
         step_log(f"RenderHtmlMap: {region}")
     try:

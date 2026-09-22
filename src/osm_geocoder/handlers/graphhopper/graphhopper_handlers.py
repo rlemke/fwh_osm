@@ -25,36 +25,15 @@ handlers share one code path and one cache layout at
 from __future__ import annotations
 
 import os
-import re
 from typing import Any
 
+from ..shared.cache_region import region_from_cache
 from ..shared.pbf_convert import graphhopper
-
-
-# Reuse the handler-side Geofabrik-URL → region-path parser. Duplicated
-# deliberately to avoid an import cycle with operations_handlers.
-_GEOFABRIK_REGION_RE = re.compile(
-    r"https?://download\.geofabrik\.de/(.+)-latest\.[^/]+$"
-)
-
-
-def _extract_region_path(url: str) -> str:
-    """Strip a Geofabrik download URL to its region path.
-
-    E.g. ``https://download.geofabrik.de/africa/algeria-latest.osm.pbf``
-    returns ``africa/algeria``. Falls back to the raw URL if the pattern
-    doesn't match — the library will surface a clear "no pbf manifest
-    entry" error for that case.
-    """
-    m = _GEOFABRIK_REGION_RE.match(url)
-    if m:
-        return m.group(1)
-    return url
 
 
 def _region_and_profile(payload: dict) -> tuple[str, str]:
     cache = payload.get("cache", {}) or {}
-    region = _extract_region_path(cache.get("url", ""))
+    region = region_from_cache(cache)
     profile = payload.get("profile") or "car"
     return region, profile
 
@@ -131,7 +110,8 @@ def validate_graph_handler(payload: dict) -> dict:
         step_log(f"ValidateGraph: {graph_dir}")
     valid = False
     if graph_dir:
-        from _osm_tools.storage import Storage as _Storage, get_storage as _get_storage
+        from _osm_tools.storage import Storage as _Storage
+        from _osm_tools.storage import get_storage as _get_storage
 
         try:
             valid = _get_storage().exists(_Storage.join(graph_dir, "nodes"))
