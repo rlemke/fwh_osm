@@ -63,6 +63,8 @@ def detect_bypasses(
 
     segment_index = SegmentIndex(graph)
     flags: dict[int, str] = {}
+    stats: dict[str, int] = {}
+    pairs_examined = 0
 
     for _name, lon, lat, pop, place_type in settlements:
         settlement_type = _classify_settlement(place_type, pop)
@@ -72,12 +74,30 @@ def detect_bypasses(
         # Find entry/exit nodes
         entry_exit = _find_entry_exit_nodes(graph, lon, lat, r_outer)
         if len(entry_exit) < 2:
+            stats["settlement: <2 entry/exit nodes on a road of sufficient class"] = (
+                stats.get("settlement: <2 entry/exit nodes on a road of sufficient class", 0) + 1
+            )
             continue
 
-        # Pair by angular separation (>90°)
-        pairs = _pair_by_angle(entry_exit, lon, lat)
+        # Pair by angular separation (>90°).
+        # ⚠️ This used to call `_pair_by_angle`, a STUB that returned [] on
+        # every call — its own comment said it "will be called from
+        # detect_bypasses with proper context", but detect_bypasses called the
+        # stub, never the real `_pair_entry_exit_by_angle` right beneath it,
+        # which needs `node_coords`. So bypass detection could not return a
+        # bypass for ANY region, ever: every settlement fell out here, before a
+        # single route was requested. Measured 2026-09-23 on Washington — 2,198
+        # settlements, 0 entry/exit pairs examined, 0 bypasses, and the step
+        # still reported success in 3m41s of work that was all index-building.
+        pairs = _pair_entry_exit_by_angle(entry_exit, lon, lat, graph.node_coords)
+        if not pairs:
+            stats["settlement: no entry/exit pair >90 deg apart"] = (
+                stats.get("settlement: no entry/exit pair >90 deg apart", 0) + 1
+            )
+            continue
 
         for entry_node, exit_node in pairs:
+            pairs_examined += 1
             bypass_edges, thru_edges = _check_bypass_pair(
                 graph,
                 entry_node,
@@ -88,6 +108,7 @@ def detect_bypasses(
                 graph_dir,
                 profile,
                 segment_index,
+                stats,
             )
             for eid in bypass_edges:
                 if eid not in flags:
@@ -96,7 +117,15 @@ def detect_bypasses(
                 if eid not in flags:
                     flags[eid] = "thru_town"
 
-    log.info("Detected bypass flags on %d edges", len(flags))
+    log.info(
+        "Detected bypass flags on %d edges (%d settlements, %d entry/exit pairs examined)",
+        len(flags), len(settlements), pairs_examined,
+    )
+    if stats:
+        log.info(
+            "Bypass rejections by reason: %s",
+            ", ".join(f"{k} = {v}" for k, v in sorted(stats.items(), key=lambda kv: -kv[1])),
+        )
     return flags
 
 
@@ -310,22 +339,6 @@ def _find_entry_exit_nodes(
     return entry_nodes
 
 
-def _pair_by_angle(
-    nodes: list[int],
-    center_lon: float,
-    center_lat: float,
-) -> list[tuple[int, int]]:
-    """Pair entry/exit nodes by angular separation (>90°) around center.
-
-    Returns pairs suitable for bypass testing.
-    """
-    # This method is used by detect_bypasses but we need graph.node_coords
-    # We'll compute angles and pair nodes with >90° separation
-    # Since we don't have graph reference here, we accept node IDs
-    # and pair all combinations with sufficient angular separation
-    return []  # Will be called from detect_bypasses with proper context
-
-
 def _pair_entry_exit_by_angle(
     nodes: list[int],
     center_lon: float,
@@ -369,16 +382,29 @@ def _check_bypass_pair(
     graph_dir: str,
     profile: str,
     segment_index: SegmentIndex,
+    stats: dict[str, int] | None = None,
 ) -> tuple[set[int], set[int]]:
     """Check if a bypass exists for an entry/exit pair.
+
+    Every rejection is tallied into ``stats`` by reason. A bypass count of 0 is
+    otherwise unexplainable — and indistinguishable from the step not running
+    at all, which is exactly what it did for as long as the cities file was
+    empty (it returned ``{}`` immediately). Measured 2026-09-23 on Washington:
+    the step does 3m41s of real routing and still reports 0, so the breakdown
+    below is the only way to tell a correct 0 from a mis-tuned threshold.
 
     Returns (bypass_edge_ids, thru_town_edge_ids).
     """
     bypass_edges: set[int] = set()
     thru_edges: set[int] = set()
 
-    if not HAS_REQUESTS:
+    def _reject(reason: str) -> tuple[set[int], set[int]]:
+        if stats is not None:
+            stats[reason] = stats.get(reason, 0) + 1
         return bypass_edges, thru_edges
+
+    if not HAS_REQUESTS:
+        return _reject("no requests library")
 
     # P_fast: unconstrained fastest route
     coords_fast, time_fast = _route_pair_with_time(
@@ -389,7 +415,7 @@ def _check_bypass_pair(
         profile,
     )
     if not coords_fast or time_fast <= 0:
-        return bypass_edges, thru_edges
+        return _reject("no fastest route between entry/exit")
 
     # P_thru: approximate route through town center by adding center as waypoint
     # Find the nearest node to center for waypoint routing
@@ -402,7 +428,7 @@ def _check_bypass_pair(
             center_node = nid
 
     if center_node is None:
-        return bypass_edges, thru_edges
+        return _reject("no graph node within r_core of the centre")
 
     # Route entry → center → exit
     _c1, time_thru_1 = _route_pair_with_time(
@@ -420,13 +446,13 @@ def _check_bypass_pair(
         profile,
     )
     if time_thru_1 <= 0 or time_thru_2 <= 0:
-        return bypass_edges, thru_edges
+        return _reject("no route through the centre")
 
     time_thru = time_thru_1 + time_thru_2
 
     # Check bypass criteria (spec §9)
     if time_fast > BYPASS_TIME_RATIO * time_thru:
-        return bypass_edges, thru_edges
+        return _reject("gate 1: fastest route not >=15% quicker than through-town")
 
     # Check P_fast spends <20% within r_core
     core_count = 0
@@ -436,7 +462,7 @@ def _check_bypass_pair(
             core_count += 1
     core_fraction = core_count / len(coords_fast) if coords_fast else 1.0
     if core_fraction > BYPASS_CORE_FRACTION_MAX:
-        return bypass_edges, thru_edges
+        return _reject("gate 2: fastest route stays inside the core")
 
     # Check FC advantage
     fast_edges = segment_index.snap_route(coords_fast)
@@ -450,7 +476,7 @@ def _check_bypass_pair(
     thru_fc_avg = _avg_fc_score(graph, thru_edge_set)
 
     if fast_fc_avg < thru_fc_avg + BYPASS_FC_ADVANTAGE:
-        return bypass_edges, thru_edges
+        return _reject("gate 3: no road-class advantage")
 
     # Mark edges
     bypass_edges = fast_edges
