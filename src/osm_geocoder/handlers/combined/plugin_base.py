@@ -65,6 +65,28 @@ class PluginResult:
     error: str | None = None
 
 
+def plugin_output(result: PluginResult | dict | None) -> tuple[str, int]:
+    """Read ``(output_path, feature_count)`` from a plugin result, either shape.
+
+    ``CombinedScanResult.results`` holds these DATACLASSES in-process, but the
+    identical structure arrives as plain dicts once a handler has round-tripped
+    it through JSON (``combined_handlers`` does exactly that). Callers kept
+    reaching for ``.get("output_path")``, which works on the dict form and
+    raises ``AttributeError: 'PluginResult' object has no attribute 'get'`` on
+    the in-process one.
+
+    Measured 2026-09-22: that broke every ``osm.POIs`` facet (Cities, Towns,
+    Suburbs, Villages, Hamlets, Countries, POI, GeoOSMCache) — each re-raises,
+    so they fail at runtime — and it silently emptied the low-zoom builder's
+    city extraction. One accessor so a caller cannot pick the wrong shape.
+    """
+    if result is None:
+        return "", 0
+    if isinstance(result, dict):
+        return result.get("output_path", "") or "", int(result.get("feature_count", 0) or 0)
+    return getattr(result, "output_path", "") or "", int(getattr(result, "feature_count", 0) or 0)
+
+
 class ExtractorPlugin(ABC):
     """Abstract base for combined-scan extractor plugins.
 

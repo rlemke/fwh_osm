@@ -14,6 +14,7 @@ import os
 from datetime import UTC, datetime
 
 from ..combined.combined_handler import HAS_OSMIUM, combined_scan
+from ..combined.plugin_base import plugin_output
 from ..shared.output_cache import cached_result, save_result_meta
 
 log = logging.getLogger(__name__)
@@ -62,16 +63,15 @@ def _make_poi_handler(facet_name: str, return_param: str, place_type: str, min_p
 
         try:
             scan_result = combined_scan(pbf_path, ["population"])
-            pop_result = scan_result.results.get("population")
+            output_path, _ = plugin_output(scan_result.results.get("population"))
 
-            if not pop_result or not pop_result.get("output_path"):
+            if not output_path:
                 if step_log:
                     step_log(
                         f"{facet_name}: no population data from combined scan", level="warning"
                     )
                 return {return_param: _empty_cache(cache)}
 
-            output_path = pop_result["output_path"]
 
             # Filter for the specific place type if not "all"
             if place_type != "all":

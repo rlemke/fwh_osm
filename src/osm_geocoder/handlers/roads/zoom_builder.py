@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 from facetwork.config import get_output_base
 
 from ..combined.combined_handler import combined_scan
+from ..combined.plugin_base import plugin_output
 from ..shared._output import ensure_dir, open_output, read_storage_json
 
 _LOCAL_OUTPUT = get_output_base()
@@ -265,8 +266,7 @@ def _ensure_cities_file(
             heartbeat=heartbeat,
             cancel_check=cancel_check,
         )
-        pop = scan.results.get("population") or {}
-        src = pop.get("output_path")
+        src, _ = plugin_output(scan.results.get("population"))
         if src:
             features = read_storage_json(src).get("features", []) or []
     except Exception as exc:  # noqa: BLE001 — degradation, reported below
