@@ -18,7 +18,8 @@ log = logging.getLogger(__name__)
 
 from facetwork.config import get_output_base
 
-from ..shared._output import ensure_dir, open_output
+from ..combined.combined_handler import combined_scan
+from ..shared._output import ensure_dir, open_output, read_storage_json
 
 _LOCAL_OUTPUT = get_output_base()
 
@@ -84,7 +85,9 @@ def build_zoom_layers(
 
     # Determine cities path (look for existing cities GeoJSON)
     cities_path = str(out / "cities.geojson")
-    _ensure_cities_file(pbf_path, cities_path)
+    city_count = _ensure_cities_file(
+        pbf_path, cities_path, output_dir=str(out), heartbeat=heartbeat, cancel_check=check_cancel
+    )
 
     # 1. Build logical edge graph from PBF
     log.info("Step 1: Building logical graph from %s", pbf_path)
@@ -209,22 +212,78 @@ def build_zoom_layers(
         anchors_by_zoom,
         total_route_count,
         output_dir,
+        city_count,
         time.time() - t0,
     )
 
     return result, metrics
 
 
-def _ensure_cities_file(pbf_path: str, cities_path: str) -> None:
-    """Ensure a cities GeoJSON file exists. Create empty one if needed."""
-    p = Path(cities_path)
-    if p.exists():
-        return
+def _ensure_cities_file(
+    pbf_path: str,
+    cities_path: str,
+    output_dir: str = "",
+    heartbeat: Callable[[str], None] | None = None,
+    cancel_check: Callable[[], None] | None = None,
+) -> int:
+    """Ensure a cities GeoJSON exists at ``cities_path``; return how many it holds.
 
-    # Create empty cities GeoJSON as fallback
+    ⚠️ This used to write an EMPTY FeatureCollection and return — satisfying its
+    own name with nothing. The consequences were invisible: ``build_anchors``
+    finds no city over the population threshold and tops the set up with
+    high-degree graph nodes ("Sparse anchor set (0) for z2"), so OD pairs are
+    sampled between arbitrary junctions instead of population centres, and
+    ``detect_bypasses``/``detect_rings`` return ``{}`` outright on an empty
+    cities file — the bypass/ring flags were empty in every run ever made.
+
+    It now extracts places from the PBF with the same single-pass scan the
+    ``osm.POIs.Cities`` facet uses (the ``population`` plugin emits exactly the
+    Point + ``properties.population`` shape ``build_anchors`` reads), so no
+    caller has to supply a file the pipeline never produced. The scan is a full
+    PBF pass, hence heartbeat/cancel-aware; it runs once per output dir because
+    an existing file short-circuits.
+
+    A failed extraction is a DEGRADATION, not a failure: the caller still gets a
+    usable (topology-only) run. It returns 0 and says so loudly rather than
+    leaving the caller to infer it from an anchor log line.
+    """
+    if Path(cities_path).exists():
+        try:
+            existing = read_storage_json(cities_path)
+            return len(existing.get("features", []))
+        except (OSError, json.JSONDecodeError):
+            return 0
+
+    features: list[dict] = []
+    try:
+        if heartbeat is not None:
+            heartbeat("extracting cities from the PBF")
+        scan = combined_scan(
+            pbf_path,
+            ["population"],
+            output_dir=output_dir or str(Path(cities_path).parent),
+            heartbeat=heartbeat,
+            cancel_check=cancel_check,
+        )
+        pop = scan.results.get("population") or {}
+        src = pop.get("output_path")
+        if src:
+            features = read_storage_json(src).get("features", []) or []
+    except Exception as exc:  # noqa: BLE001 — degradation, reported below
+        log.warning("Could not extract cities from %s: %s", pbf_path, exc)
+
+    if not features:
+        log.warning(
+            "No cities extracted from %s — anchors will be high-degree graph nodes and "
+            "bypass/ring detection will be empty. This is a WEAKER run, not a failed one.",
+            pbf_path,
+        )
+
     ensure_dir(cities_path)
     with open_output(cities_path, "w") as f:
-        json.dump({"type": "FeatureCollection", "features": []}, f)
+        json.dump({"type": "FeatureCollection", "features": features}, f)
+    log.info("Cities file: %d place(s) at %s", len(features), cities_path)
+    return len(features)
 
 
 def _export_results(
@@ -237,6 +296,7 @@ def _export_results(
     anchors_by_zoom: dict[int, list[int]],
     total_route_count: int,
     output_dir: str,
+    city_count: int,
     elapsed_seconds: float,
 ) -> tuple[dict, dict]:
     """Export all pipeline results to files."""
@@ -285,7 +345,12 @@ def _export_results(
         "backbone_edges": backbone_count,
         "bypass_edges": bypass_count,
         "ring_edges": ring_count,
-        "city_count": len(anchors_by_zoom.get(2, [])),
+        # Cities actually loaded from the cities file — NOT the z2 anchor count,
+        # which this used to report. That conflated "50 cities" with "50
+        # high-degree nodes standing in for cities" in every run made before
+        # the extraction above existed. The anchor counts remain below.
+        "city_count": city_count,
+        "cities_source": "extracted" if city_count else "none (topology-only anchors)",
         "anchor_counts": json.dumps(anchor_counts),
         "pair_counts": json.dumps(pair_counts),
         "route_count": total_route_count,

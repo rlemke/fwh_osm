@@ -552,8 +552,18 @@ def _make_build_zoom_layers_handler(facet_name: str):
                 check_cancel=ctx.raise_if_cancelled,
             )
             if step_log:
+                # A run with no cities is WEAKER, not failed: anchors fall back
+                # to high-degree graph nodes and bypass/ring detection returns
+                # nothing. Say so where the run is read, not only in the log.
+                if not metrics.get("city_count"):
+                    step_log(
+                        f"{facet_name}: no cities extracted from the PBF — anchors are "
+                        "high-degree graph nodes and bypass/ring flags will be empty",
+                        level="warning",
+                    )
                 step_log(
-                    f"{facet_name}: built zoom layers ({result.get('selected_edges', 0)} edges selected)",
+                    f"{facet_name}: built zoom layers ({result.get('selected_edges', 0)} edges "
+                    f"selected, {metrics.get('city_count', 0)} cities)",
                     level="success",
                 )
             rv = {"result": result, "metrics": metrics}
