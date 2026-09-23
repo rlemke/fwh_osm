@@ -10,6 +10,7 @@ import logging
 import os
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -31,10 +32,9 @@ from .zoom_graph import HAS_OSMIUM, RoadGraph, build_logical_graph
 from .zoom_sbs import (
     HAS_REQUESTS,
     SegmentIndex,
-    accumulate_votes,
     build_anchors,
     normalize_sbs,
-    route_batch_parallel,
+    route_and_accumulate,
     sample_od_pairs,
     save_anchors,
     save_sbs,
@@ -53,8 +53,14 @@ def build_zoom_layers(
     min_population: int = 50_000,
     output_dir: str = "",
     max_concurrent: int = 16,
+    heartbeat: Callable[[str], None] | None = None,
+    check_cancel: Callable[[], None] | None = None,
 ) -> tuple[dict, dict]:
     """Orchestrate the full Low-Zoom roads pipeline.
+
+    ``heartbeat``/``check_cancel`` are threaded into the long loops (routing and
+    vote accumulation) and called at every step boundary; without them a
+    state-sized region outlives the stuck-task watchdog and gets reclaimed.
 
     Args:
         cache: OSMCache dict with 'path' key pointing to PBF file.
@@ -82,6 +88,8 @@ def build_zoom_layers(
 
     # 1. Build logical edge graph from PBF
     log.info("Step 1: Building logical graph from %s", pbf_path)
+    if heartbeat is not None:
+        heartbeat("step 1")
     graph_path = str(out / "logical_graph.json")
 
     if not HAS_OSMIUM or not pbf_path:
@@ -96,6 +104,8 @@ def build_zoom_layers(
 
     # 2. Build anchor sets per zoom
     log.info("Step 2: Building anchor sets")
+    if heartbeat is not None:
+        heartbeat("step 2")
     anchors_by_zoom: dict[int, list[int]] = {}
     for z in range(2, 8):
         anchors_by_zoom[z] = build_anchors(road_graph, cities_path, z)
@@ -110,18 +120,26 @@ def build_zoom_layers(
 
     for z in range(2, 7):  # z2..z6 (z7 reuses z6)
         log.info("  SBS for zoom %d", z)
+        if check_cancel is not None:
+            check_cancel()
+        if heartbeat is not None:
+            heartbeat(f"step 3: SBS zoom {z}")
         pairs = sample_od_pairs(anchors_by_zoom[z], z, road_graph)
 
         if HAS_REQUESTS and graph_dir:
-            routes = route_batch_parallel(
+            # Stream: snap each route as it completes, retain none (see
+            # route_and_accumulate for the 25 GB measurement behind this).
+            bc, routed = route_and_accumulate(
                 pairs,
                 road_graph.node_coords,
                 graph_dir,
                 profile,
+                segment_index,
                 max_concurrent,
+                heartbeat=heartbeat,
+                check_cancel=check_cancel,
             )
-            total_route_count += len(routes)
-            bc = accumulate_votes(routes, segment_index)
+            total_route_count += routed
         else:
             bc = {}
             log.info("  Skipping routing (no requests lib or graphDir)")
@@ -134,6 +152,8 @@ def build_zoom_layers(
 
     # 4. Detect bypasses and rings
     log.info("Step 4: Detecting bypasses and rings")
+    if heartbeat is not None:
+        heartbeat("step 4")
     if HAS_REQUESTS and graph_dir:
         bypass_flags = detect_bypasses(road_graph, cities_path, graph_dir, profile)
         ring_flags = detect_rings(road_graph, cities_path, graph_dir, profile)
@@ -146,14 +166,20 @@ def build_zoom_layers(
 
     # 5. Compute per-zoom scores
     log.info("Step 5: Computing scores")
+    if heartbeat is not None:
+        heartbeat("step 5")
     scores = compute_scores(road_graph, sbs_by_zoom, bypass_flags, ring_flags)
 
     # 6. Build cell budgets
     log.info("Step 6: Building cell budgets")
+    if heartbeat is not None:
+        heartbeat("step 6")
     budgets = build_cell_budgets(road_graph, anchors_by_zoom)
 
     # 7. Budgeted selection + backbone repair
     log.info("Step 7: Selecting edges")
+    if heartbeat is not None:
+        heartbeat("step 7")
     selected_by_zoom = select_edges(
         road_graph,
         scores,
@@ -165,10 +191,14 @@ def build_zoom_layers(
 
     # 8. Enforce monotonic reveal → assign minZoom
     log.info("Step 8: Enforcing monotonic reveal")
+    if heartbeat is not None:
+        heartbeat("step 8")
     assignments = enforce_monotonic_reveal(selected_by_zoom)
 
     # 9. Export
     log.info("Step 9: Exporting results")
+    if heartbeat is not None:
+        heartbeat("step 9")
     result, metrics = _export_results(
         road_graph,
         assignments,

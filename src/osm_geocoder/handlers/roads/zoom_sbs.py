@@ -10,6 +10,7 @@ import math
 import os
 import random
 from collections import defaultdict
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 log = logging.getLogger(__name__)
@@ -75,11 +76,19 @@ class SegmentIndex:
 
     CELL_SIZE = 0.005  # ~500m in degrees
 
+    # Memo grid for snap_route: routes overlap heavily (every long route rides
+    # the same backbone), so the same coordinate is snapped thousands of times.
+    # 1e-4 deg ≈ 11 m at these latitudes, well inside the 50 m tolerance.
+    SNAP_MEMO_SCALE = 10_000
+
     def __init__(self, graph: RoadGraph) -> None:
         self._graph = graph
         self._grid: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
         # grid cell → list of (edge_id, segment_index)
         self._edge_segments: dict[int, list[tuple[float, float, float, float]]] = {}
+        self._snap_memo: dict[tuple[int, int], int] = {}
+        self.snap_hits = 0
+        self.snap_misses = 0
         self._build_index()
 
     def _cell(self, lon: float, lat: float) -> tuple[int, int]:
@@ -129,9 +138,23 @@ class SegmentIndex:
     def snap_route(self, route_coords: list[list[float]], tolerance_m: float = 50.0) -> set[int]:
         """Snap route coordinates to logical edge IDs within tolerance."""
         matched_edges: set[int] = set()
+        memo = self._snap_memo
+        scale = self.SNAP_MEMO_SCALE
+        last_key: tuple[int, int] | None = None
 
         for coord in route_coords:
             lon, lat = coord[0], coord[1]
+            key = (int(lon * scale), int(lat * scale))
+            if key == last_key:
+                continue
+            last_key = key
+            hit = memo.get(key)
+            if hit is not None:
+                self.snap_hits += 1
+                if hit >= 0:
+                    matched_edges.add(hit)
+                continue
+            self.snap_misses += 1
             cx, cy = self._cell(lon, lat)
 
             best_dist = tolerance_m
@@ -150,6 +173,7 @@ class SegmentIndex:
                             best_dist = d
                             best_eid = eid
 
+            memo[key] = best_eid
             if best_eid >= 0:
                 matched_edges.add(best_eid)
 
@@ -372,19 +396,36 @@ def _route_pair_with_time(
     return None, 0.0
 
 
+# How often the long loops report liveness. Both loops are minutes-to-hours at
+# the pipeline's own sampling sizes (zoom 5 alone routes ~114k pairs), and the
+# stuck-task watchdog reaps a task after FW_STUCK_TIMEOUT_MS (30 min) with no
+# heartbeat — measured 2026-09-22: zoom 3's vote accumulation alone exceeded it,
+# the task was reclaimed, and a second runner started the same job from scratch
+# while the first kept burning a core. Step logs do NOT count as progress.
+HEARTBEAT_EVERY = 500
+
+
 def route_batch_parallel(
     pairs: list[tuple[int, int]],
     node_coords: dict[int, tuple[float, float]],
     graph_dir: str,
     profile: str,
     max_concurrent: int = 16,
+    heartbeat: Callable[[str], None] | None = None,
+    check_cancel: Callable[[], None] | None = None,
 ) -> dict[tuple[int, int], list[list[float]]]:
-    """Route all OD pairs in parallel using ThreadPoolExecutor."""
+    """Route all OD pairs in parallel using ThreadPoolExecutor.
+
+    ``heartbeat(message)`` is called every HEARTBEAT_EVERY completed pairs and
+    ``check_cancel()`` between them; a cancellation raised there abandons the
+    pending routes (the pool is shut down with its queue cancelled).
+    """
     if not HAS_REQUESTS:
         log.warning("requests not available, skipping routing")
         return {}
 
     results: dict[tuple[int, int], list[list[float]]] = {}
+    total = len(pairs)
 
     with ThreadPoolExecutor(max_workers=max_concurrent) as pool:
         futures = {
@@ -392,36 +433,135 @@ def route_batch_parallel(
             for a, b in pairs
         }
         done = 0
-        for future in as_completed(futures):
-            pair = futures[future]
-            done += 1
-            if done % 1000 == 0:
-                log.info("Routed %d / %d pairs", done, len(pairs))
-            try:
-                coords = future.result()
-                if coords:
-                    results[pair] = coords
-            except Exception:
-                pass
+        try:
+            for future in as_completed(futures):
+                pair = futures[future]
+                done += 1
+                if done % 1000 == 0:
+                    log.info("Routed %d / %d pairs", done, total)
+                if done % HEARTBEAT_EVERY == 0:
+                    if check_cancel is not None:
+                        check_cancel()
+                    if heartbeat is not None:
+                        heartbeat(f"routed {done:,}/{total:,} pairs")
+                try:
+                    coords = future.result()
+                    if coords:
+                        results[pair] = coords
+                except Exception:
+                    pass
+        except BaseException:
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
 
-    log.info("Completed routing: %d / %d pairs succeeded", len(results), len(pairs))
+    log.info("Completed routing: %d / %d pairs succeeded", len(results), total)
+    if heartbeat is not None:
+        heartbeat(f"routed {len(results):,}/{total:,} pairs")
     return results
+
+
+def route_and_accumulate(
+    pairs: list[tuple[int, int]],
+    node_coords: dict[int, tuple[float, float]],
+    graph_dir: str,
+    profile: str,
+    segment_index: SegmentIndex,
+    max_concurrent: int = 16,
+    heartbeat: Callable[[str], None] | None = None,
+    check_cancel: Callable[[], None] | None = None,
+    submit_window: int = 4096,
+) -> tuple[dict[int, int], int]:
+    """Route OD pairs and snap each route to logical edges AS IT COMPLETES.
+
+    Streaming counterpart of ``route_batch_parallel`` + ``accumulate_votes``,
+    which retain every route's full coordinate list for a zoom before snapping
+    any. With only a MINIMUM pair distance, a state's zoom-5 sample (~100k
+    pairs) is dominated by cross-state routes of ~2,000 points each, and that
+    retained set is what killed the runner: measured 2026-09-22 on Washington,
+    the kernel OOM-killed the process at 25.5 GB resident after 59,000 routes.
+    Here nothing is kept past the snap, and at most ``submit_window`` futures
+    are outstanding, so peak memory is the graph plus what is in flight.
+
+    Returns ``(votes, routed_count)``.
+    """
+    bc: dict[int, int] = defaultdict(int)
+    if not HAS_REQUESTS:
+        log.warning("requests not available, skipping routing")
+        return dict(bc), 0
+
+    total = len(pairs)
+    routed = 0
+    done = 0
+
+    def _consume(fut) -> None:
+        nonlocal routed, done
+        done += 1
+        try:
+            coords = fut.result()
+        except Exception:
+            coords = None
+        if coords:
+            routed += 1
+            for eid in segment_index.snap_route(coords):
+                bc[eid] += 1
+        if done % 1000 == 0:
+            log.info("Routed+snapped %d / %d pairs (memo hits %d, misses %d)", done, total,
+                     segment_index.snap_hits, segment_index.snap_misses)
+        if done % HEARTBEAT_EVERY == 0:
+            if check_cancel is not None:
+                check_cancel()
+            if heartbeat is not None:
+                heartbeat(f"routed {done:,}/{total:,} pairs")
+
+    with ThreadPoolExecutor(max_workers=max_concurrent) as pool:
+        pending: set = set()
+        it = iter(pairs)
+        try:
+            for a, b in it:
+                pending.add(pool.submit(_route_pair, a, b, node_coords, graph_dir, profile))
+                if len(pending) >= submit_window:
+                    finished = next(as_completed(pending))
+                    pending.discard(finished)
+                    _consume(finished)
+            for finished in as_completed(pending):
+                _consume(finished)
+        except BaseException:
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
+
+    log.info("Completed routing: %d / %d pairs succeeded", routed, total)
+    log.info("Accumulated votes on %d edges from %d routes", len(bc), routed)
+    if heartbeat is not None:
+        heartbeat(f"routed {routed:,}/{total:,} pairs")
+    return dict(bc), routed
 
 
 def accumulate_votes(
     routes: dict[tuple[int, int], list[list[float]]],
     segment_index: SegmentIndex,
+    heartbeat: Callable[[str], None] | None = None,
+    check_cancel: Callable[[], None] | None = None,
 ) -> dict[int, int]:
     """Accumulate betweenness centrality votes from routed paths.
 
-    For each route, snap to logical edges and increment vote count.
+    For each route, snap to logical edges and increment vote count. Heartbeats
+    every HEARTBEAT_EVERY routes (see route_batch_parallel for why).
     """
     bc: dict[int, int] = defaultdict(int)
+    total = len(routes)
 
-    for (_a, _b), coords in routes.items():
+    for n, ((_a, _b), coords) in enumerate(routes.items(), 1):
         matched = segment_index.snap_route(coords)
         for eid in matched:
             bc[eid] += 1
+        if n % HEARTBEAT_EVERY == 0:
+            if check_cancel is not None:
+                check_cancel()
+            if heartbeat is not None:
+                heartbeat(f"snapped {n:,}/{total:,} routes")
+            if n % 2000 == 0:
+                log.info("Snapped %d / %d routes (memo hits %d, misses %d)", n, total,
+                         segment_index.snap_hits, segment_index.snap_misses)
 
     log.info("Accumulated votes on %d edges from %d routes", len(bc), len(routes))
     return dict(bc)

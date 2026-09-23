@@ -11,11 +11,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from facetwork.config import get_output_base
+from facetwork.runtime.handler_context import HandlerCancelled, HandlerContext
 
 from ..shared._output import ensure_dir, open_output, read_storage_json
 from ..shared.output_cache import cached_result, save_result_meta, with_output_cache
 from .zoom_builder import (
-    _empty_metrics,
     _empty_result,
     build_zoom_layers,
 )
@@ -536,6 +536,11 @@ def _make_build_zoom_layers_handler(facet_name: str):
             step_log(f"{facet_name}: running full pipeline to {output_dir}")
         log.info("%s running full pipeline to %s", facet_name, output_dir)
 
+        # Liveness + cooperative cancellation: a state-sized region routes and
+        # snaps ~280k pairs and outlives the stuck-task watchdog otherwise
+        # (step logs alone do not count as progress).
+        ctx = HandlerContext.from_payload(payload)
+
         try:
             result, metrics = build_zoom_layers(
                 cache=cache,
@@ -543,6 +548,8 @@ def _make_build_zoom_layers_handler(facet_name: str):
                 min_population=min_population,
                 output_dir=output_dir,
                 max_concurrent=max_concurrent,
+                heartbeat=lambda msg: ctx.heartbeat(progress_message=msg),
+                check_cancel=ctx.raise_if_cancelled,
             )
             if step_log:
                 step_log(
@@ -552,6 +559,12 @@ def _make_build_zoom_layers_handler(facet_name: str):
             rv = {"result": result, "metrics": metrics}
             save_result_meta(qualified, cache, {"min_population": min_population}, rv)
             return rv
+        except HandlerCancelled:
+            # A clean stop (run terminated / task reclaimed / watchdog): not a
+            # failure, no retry — let the runner record it as cancelled.
+            if step_log:
+                step_log(f"{facet_name}: cancelled ({ctx.cancellation_reason})", level="warning")
+            raise
         except Exception as exc:
             log.error("Failed to build zoom layers: %s", exc)
             if step_log:
