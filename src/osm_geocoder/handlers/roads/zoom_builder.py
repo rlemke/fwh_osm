@@ -184,6 +184,7 @@ def build_zoom_layers(
     log.info("Step 7: Selecting edges")
     if heartbeat is not None:
         heartbeat("step 7")
+    backbone_by_zoom: dict[int, set[int]] = {}
     selected_by_zoom = select_edges(
         road_graph,
         scores,
@@ -191,6 +192,7 @@ def build_zoom_layers(
         anchors_by_zoom,
         bypass_flags,
         ring_flags,
+        backbone_out=backbone_by_zoom,
     )
 
     # 8. Enforce monotonic reveal → assign minZoom
@@ -214,6 +216,7 @@ def build_zoom_layers(
         total_route_count,
         output_dir,
         city_count,
+        backbone_by_zoom,
         time.time() - t0,
     )
 
@@ -297,18 +300,32 @@ def _export_results(
     total_route_count: int,
     output_dir: str,
     city_count: int,
+    backbone_by_zoom: dict[int, set[int]],
     elapsed_seconds: float,
 ) -> tuple[dict, dict]:
     """Export all pipeline results to files."""
     out = Path(output_dir)
 
+    # Edges the backbone repair added at ANY zoom. Hardcoded 0 until
+    # 2026-09-23, alongside a per-edge "backbone" flag hardcoded False — so
+    # this one of the three advertised flags had never been emitted.
+    backbone_edges: set[int] = set()
+    for _z, eids in (backbone_by_zoom or {}).items():
+        backbone_edges |= eids
+
     # CSV export: segment_scores.csv
     csv_path = str(out / "segment_scores.csv")
-    _export_csv(graph, assignments, scores, sbs_by_zoom, bypass_flags, ring_flags, csv_path)
+    _export_csv(
+        graph, assignments, scores, sbs_by_zoom, bypass_flags, ring_flags,
+        backbone_edges, csv_path,
+    )
 
     # JSONL export: edge_importance.jsonl
     jsonl_path = str(out / "edge_importance.jsonl")
-    _export_jsonl(graph, assignments, scores, sbs_by_zoom, bypass_flags, ring_flags, jsonl_path)
+    _export_jsonl(
+        graph, assignments, scores, sbs_by_zoom, bypass_flags, ring_flags,
+        backbone_edges, jsonl_path,
+    )
 
     # Per-zoom GeoJSON (cumulative)
     for z in range(2, 8):
@@ -321,7 +338,7 @@ def _export_results(
         zoom_dist[z] += 1
 
     total_selected = len(assignments)
-    backbone_count = 0
+    backbone_count = len(backbone_edges)
     bypass_count = len([f for f in bypass_flags.values() if f == "bypass"])
     ring_count = len(ring_flags)
 
@@ -389,6 +406,7 @@ def _export_csv(
     sbs_by_zoom: dict[int, dict[int, float]],
     bypass_flags: dict[int, str],
     ring_flags: dict[int, bool],
+    backbone_edges: set[int],
     path: str,
 ) -> None:
     """Export per-edge data to CSV."""
@@ -433,7 +451,7 @@ def _export_csv(
                 "lengthM": round(edge.length_m, 1),
                 "fc": edge.fc,
                 "minZoom": assignments[eid],
-                "backbone": False,
+                "backbone": eid in backbone_edges,
                 "isBypass": bypass_flags.get(eid) == "bypass",
                 "isRing": ring_flags.get(eid, False),
                 "isLegacyThruTown": bypass_flags.get(eid) == "thru_town",
@@ -456,6 +474,7 @@ def _export_jsonl(
     sbs_by_zoom: dict[int, dict[int, float]],
     bypass_flags: dict[int, str],
     ring_flags: dict[int, bool],
+    backbone_edges: set[int],
     path: str,
 ) -> None:
     """Export per-edge data to JSON Lines."""
@@ -477,7 +496,7 @@ def _export_jsonl(
                 "scores": {z: round(scores.get(z, {}).get(eid, 0.0), 4) for z in range(2, 8)},
                 "sbs": {z: round(sbs_by_zoom.get(z, {}).get(eid, 0.0), 4) for z in range(2, 8)},
                 "flags": {
-                    "backbone": False,
+                    "backbone": eid in backbone_edges,
                     "isBypass": bypass_flags.get(eid) == "bypass",
                     "isRing": ring_flags.get(eid, False),
                     "isLegacyThruTown": bypass_flags.get(eid) == "thru_town",

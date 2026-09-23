@@ -258,8 +258,16 @@ def select_edges(
     anchors_by_zoom: dict[int, list[int]],
     bypass_flags: dict[int, str] | None = None,
     ring_flags: dict[int, bool] | None = None,
+    backbone_out: dict[int, set[int]] | None = None,
 ) -> dict[int, set[int]]:
     """Budgeted greedy selection with backbone repair (spec §8).
+
+    ``backbone_out``, when given, is filled with ``{zoom: edges added by
+    backbone repair}``. The repair has always run, but its result was unioned
+    into the selection and then dropped — so the ``backbone`` flag the exports
+    advertise was a hardcoded ``False`` on every edge of every file, and the
+    ``backbone_edges`` metric a hardcoded 0. An out-param rather than a changed
+    return type: the ``SelectEdges`` facet handler calls this too.
 
     Returns:
         Dict[zoom_level, set of selected edge_ids]
@@ -322,6 +330,8 @@ def select_edges(
         # Backbone connectivity repair (spec §8.2)
         backbone_added = _backbone_repair(graph, selected, anchors, edge_cells)
         selected |= backbone_added
+        if backbone_out is not None:
+            backbone_out[z] = set(backbone_added)
 
         # Sparse region floor (spec §8.3)
         min_km = MIN_KM.get(z, 10.0)
