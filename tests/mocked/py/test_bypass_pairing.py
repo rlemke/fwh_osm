@@ -64,3 +64,60 @@ def test_rejections_are_tallied_by_reason():
     src = Path(zd.__file__).read_text()
     assert "Bypass rejections by reason" in src
     assert "entry/exit pairs examined" in src
+
+
+def test_detection_phases_are_heartbeat_and_cancel_aware(monkeypatch, tmp_path):
+    """Detection is SILENT and long — three routing calls per entry/exit pair
+    over thousands of settlements. Without a heartbeat the stuck-task watchdog
+    reclaims a run whose handler is at 96% CPU (measured 2026-09-23, caught
+    12 minutes before the reclaim only because the phase was being watched)."""
+    import json as _json
+
+    cities = tmp_path / "cities.geojson"
+    cities.write_text(_json.dumps({"type": "FeatureCollection", "features": [
+        {"type": "Feature",
+         "properties": {"place": "city", "name": f"C{i}", "population": 200_000},
+         "geometry": {"type": "Point", "coordinates": [-122.0 + i * 0.5, 47.0]}}
+        for i in range(60)
+    ]}))
+    monkeypatch.setattr(zd, "DETECT_HEARTBEAT_EVERY", 5)
+    monkeypatch.setattr(zd, "HAS_REQUESTS", False)  # no routing; we want the loop only
+
+    g = _tiny_graph()
+    beats: list[str] = []
+    zd.detect_bypasses(g, str(cities), "gd", "car", heartbeat=beats.append)
+    assert any(b.startswith("bypasses:") for b in beats), "bypass loop must report liveness"
+
+    beats.clear()
+    zd.detect_rings(g, str(cities), "gd", "car", heartbeat=beats.append)
+    assert any(b.startswith("rings:") for b in beats), "ring loop must report liveness"
+
+    calls = {"n": 0}
+
+    def cancel():
+        calls["n"] += 1
+        raise Cancelled()
+
+    try:
+        zd.detect_bypasses(g, str(cities), "gd", "car", check_cancel=cancel)
+    except Cancelled:
+        pass
+    assert calls["n"] >= 1, "cancellation must be checked inside the settlement loop"
+
+
+class Cancelled(Exception):
+    pass
+
+
+def _tiny_graph():
+    from osm_geocoder.handlers.roads.zoom_graph import LogicalEdge, RoadGraph
+    g = RoadGraph()
+    for i in range(3):
+        g.add_edge(LogicalEdge(edge_id=i, from_node=i, to_node=i + 1, osm_way_ids=[i],
+                               coords=[(-122.0 + i * 0.01, 47.0), (-122.0 + (i + 1) * 0.01, 47.0)],
+                               length_m=1000.0, fc="primary", fc_score=0.5, ref="", name="",
+                               maxspeed=50, lanes=2, bridge=False, tunnel=False,
+                               oneway=False, surface_unpaved=False))
+        g.node_coords[i] = (-122.0 + i * 0.01, 47.0)
+    g.node_coords[3] = (-122.0 + 0.03, 47.0)
+    return g

@@ -8,6 +8,7 @@ import json
 import logging
 import math
 from collections import defaultdict
+from collections.abc import Callable
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +28,9 @@ SETTLEMENT_RADII: dict[str, float] = {
 }
 
 R_OUTER_FACTOR = 2.5
+
+# How often the settlement loops report liveness (see detect_bypasses).
+DETECT_HEARTBEAT_EVERY = 25
 
 # Minimum FC for bypass entry/exit edges
 MIN_BYPASS_FC_SCORE = 0.45  # tertiary or above
@@ -50,8 +54,18 @@ def detect_bypasses(
     cities_path: str,
     graph_dir: str,
     profile: str,
+    heartbeat: Callable[[str], None] | None = None,
+    check_cancel: Callable[[], None] | None = None,
 ) -> dict[int, str]:
     """Detect bypass roads around settlements.
+
+    ⚠️ Heartbeat-aware because this phase is SILENT and long: it issues three
+    routing calls per entry/exit pair, and on a state-sized region that is
+    thousands of settlements. Measured 2026-09-23 on Washington, immediately
+    after the pairing stub was fixed so the step began doing real work: the
+    task emitted nothing between "step 4" and the end, and the 30-minute
+    stuck-task watchdog was on course to reclaim a run whose handler was at
+    96% CPU. Step logs are not progress; only the heartbeat is.
 
     Returns:
         Dict mapping edge_id to bypass type: "bypass" or "thru_town".
@@ -66,7 +80,12 @@ def detect_bypasses(
     stats: dict[str, int] = {}
     pairs_examined = 0
 
-    for _name, lon, lat, pop, place_type in settlements:
+    for n, (_name, lon, lat, pop, place_type) in enumerate(settlements, 1):
+        if n % DETECT_HEARTBEAT_EVERY == 0:
+            if check_cancel is not None:
+                check_cancel()
+            if heartbeat is not None:
+                heartbeat(f"bypasses: {n:,}/{len(settlements):,} settlements")
         settlement_type = _classify_settlement(place_type, pop)
         r_core = SETTLEMENT_RADII.get(settlement_type, 1_500.0)
         r_outer = r_core * R_OUTER_FACTOR
@@ -134,8 +153,13 @@ def detect_rings(
     cities_path: str,
     graph_dir: str,
     profile: str,
+    heartbeat: Callable[[str], None] | None = None,
+    check_cancel: Callable[[], None] | None = None,
 ) -> dict[int, bool]:
     """Detect ring roads around large settlements.
+
+    Heartbeat-aware for the same reason as ``detect_bypasses``: it routes
+    ``RING_SAMPLE_PAIRS`` pairs per city and reports nothing until it ends.
 
     Returns:
         Dict mapping edge_id to True for ring road edges.
@@ -154,7 +178,11 @@ def detect_rings(
     segment_index = SegmentIndex(graph)
     ring_edges: dict[int, bool] = {}
 
-    for name, lon, lat, pop, _pt in large_cities:
+    for n, (name, lon, lat, pop, _pt) in enumerate(large_cities, 1):
+        if check_cancel is not None:
+            check_cancel()
+        if heartbeat is not None:
+            heartbeat(f"rings: {n:,}/{len(large_cities):,} cities")
         # Urban boundary radius (spec §10)
         b_radius_m = min(25_000.0, (8 + math.sqrt(pop / 50_000)) * 1_000)
         r_core = SETTLEMENT_RADII.get("city", 3_000.0)

@@ -159,8 +159,14 @@ def build_zoom_layers(
     if heartbeat is not None:
         heartbeat("step 4")
     if HAS_REQUESTS and graph_dir:
-        bypass_flags = detect_bypasses(road_graph, cities_path, graph_dir, profile)
-        ring_flags = detect_rings(road_graph, cities_path, graph_dir, profile)
+        bypass_flags = detect_bypasses(
+            road_graph, cities_path, graph_dir, profile,
+            heartbeat=heartbeat, check_cancel=check_cancel,
+        )
+        ring_flags = detect_rings(
+            road_graph, cities_path, graph_dir, profile,
+            heartbeat=heartbeat, check_cancel=check_cancel,
+        )
     else:
         bypass_flags = {}
         ring_flags = {}
