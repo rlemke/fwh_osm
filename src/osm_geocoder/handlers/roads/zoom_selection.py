@@ -332,16 +332,20 @@ def select_edges(
         # Class floor for this zoom (see MIN_FC_BY_ZOOM).
         fc_floor = FC_SCORES.get(MIN_FC_BY_ZOOM.get(z, "unclassified"), 0.0) - 1e-9
 
-        # Skeleton classes first and in full, charging their cells but never
-        # blocked by them, so the backbone is revealed connected.
+        # Skeleton classes first and in full, so the backbone is revealed
+        # connected rather than budget-truncated.
+        #
+        # ⚠️ It does NOT charge the cell budget. It did in the first cut of
+        # this, on the reasoning that lower classes should see the space the
+        # backbone occupies — and the measurement refuted that: with the
+        # skeleton charged, zooms 6 and 7 admitted NOTHING new (every edge
+        # selected there was a backbone-repair edge, 463/463 and 354/354), so
+        # reveal stopped dead after z3. The budget's job is capping
+        # DISCRETIONARY density; mandatory structural content is not
+        # discretionary, and making it compete starves everything after it.
         for edge in graph.edges:
-            if edge.fc not in SKELETON_FCS or edge.fc_score < fc_floor:
-                continue
-            selected.add(edge.edge_id)
-            cells = edge_cells.get(edge.edge_id, set())
-            edge_km = edge.length_m / 1000.0
-            for cell in cells:
-                cell_used_km[cell] += edge_km / max(1, len(cells))
+            if edge.fc in SKELETON_FCS and edge.fc_score >= fc_floor:
+                selected.add(edge.edge_id)
 
         # Greedy selection (spec §8.1)
         for eid, _score in candidates:
@@ -371,7 +375,7 @@ def select_edges(
                     cell_used_km[cell] += km_per_cell
 
         # Backbone connectivity repair (spec §8.2)
-        backbone_added = _backbone_repair(graph, selected, anchors, edge_cells)
+        backbone_added = _backbone_repair(graph, selected, anchors, edge_cells, fc_floor)
         selected |= backbone_added
         if backbone_out is not None:
             backbone_out[z] = set(backbone_added)
@@ -419,6 +423,7 @@ def _backbone_repair(
     selected: set[int],
     anchors: list[int],
     edge_cells: dict[int, set[str]],
+    fc_floor: float = 0.0,
 ) -> set[int]:
     """Ensure backbone connectivity between anchors via selected edges.
 
@@ -469,8 +474,25 @@ def _backbone_repair(
                     continue
                 path_edges = graph.shortest_path(anchor, other_anchor)
                 if path_edges:
-                    added.update(path_edges)
-                    break
+                    # ⚠️ Subject to the zoom's class floor. This was the THIRD
+                    # path by which a below-floor road reached a zoom it does
+                    # not belong at, after the greedy pass and the sparse-region
+                    # top-up. Measured 2026-09-24 on Washington: of the 10,198
+                    # edges at zoom 2, 2,227 were not motorway — 313 of them
+                    # tertiary — and every one arrived here, which the (newly
+                    # honest) `backbone` flag made provable.
+                    #
+                    # A path that needs a lower class to complete is not a
+                    # backbone at this zoom: dropping it leaves those anchors
+                    # unjoined, which is the truthful picture of a network whose
+                    # arterials genuinely do not connect them.
+                    eligible = [
+                        eid for eid in path_edges
+                        if (e := graph.edge_by_id.get(eid)) and e.fc_score >= fc_floor
+                    ]
+                    if len(eligible) == len(path_edges):
+                        added.update(path_edges)
+                        break
 
     if added:
         log.info("Backbone repair added %d edges", len(added))

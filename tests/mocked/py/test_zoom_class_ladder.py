@@ -82,19 +82,42 @@ def test_the_skeleton_survives_a_zero_budget():
     assert {g.edge_by_id[e].fc for e in sel[2]} == {"motorway"}
 
 
-def test_skeleton_charges_the_cells_it_uses():
-    """It is exempt from the budget, not invisible to it — otherwise lower
-    classes would be handed space the backbone already occupies.
+def test_the_skeleton_does_not_charge_the_budget():
+    """It is mandatory structural content, not discretionary density.
 
-    `anchor_count: 0` switches off the sparse-region top-up, which would
-    otherwise admit them regardless of budget (by design — see MIN_KM)."""
+    The first cut charged it, reasoning that lower classes should see the space
+    the backbone occupies. The measurement refuted that: with it charged,
+    Washington's zooms 6 and 7 admitted NOTHING new — every edge selected there
+    was a backbone-repair edge (463/463 and 354/354) — so reveal stopped dead
+    after z3 and the map was not gradual at all.
+    """
     g = _graph()
     scores = {z: {e.edge_id: 1.0 for e in g.edges} for z in range(2, 8)}
-    # 2 km of budget: the motorway+trunk skeleton (1 km each) consumes it exactly
-    budgets = {z: {"flat": {"budget_km": 2.0, "anchor_count": 0}} for z in range(2, 8)}
+    # 1 km of budget: enough for exactly one non-skeleton edge, and only if the
+    # motorway+trunk skeleton (2 km) did not spend it first.
+    budgets = {z: {"flat": {"budget_km": 1.0, "anchor_count": 0}} for z in range(2, 8)}
     sel = zs.select_edges(g, scores, budgets, {z: [] for z in range(2, 8)})
-    assert {g.edge_by_id[e].fc for e in sel[4]} == {"motorway", "trunk"}, \
-        "primary must not be admitted on budget the skeleton already spent"
+    assert "primary" in {g.edge_by_id[e].fc for e in sel[4]}, \
+        "the skeleton must not consume the budget that lower classes need"
+
+
+def test_backbone_repair_cannot_smuggle_in_a_lower_class():
+    """The third path a below-floor road took to a zoom it does not belong at,
+    after the greedy pass and the sparse top-up. Measured on Washington: all
+    2,227 non-motorway edges at zoom 2 arrived this way."""
+    g = _graph()
+    # anchors at both ends force repair to look for a connecting path
+    anchors = {z: [0, len(FCS)] for z in range(2, 8)}
+    scores = {z: {e.edge_id: 1.0 for e in g.edges} for z in range(2, 8)}
+    budgets = {z: {"flat": {"budget_km": 0.0, "anchor_count": 0}} for z in range(2, 8)}
+    backbone: dict[int, set[int]] = {}
+    sel = zs.select_edges(g, scores, budgets, anchors, backbone_out=backbone)
+    for z, eids in backbone.items():
+        floor = FC_SCORES[zs.MIN_FC_BY_ZOOM[z]] - 1e-9
+        for eid in eids:
+            assert g.edge_by_id[eid].fc_score >= floor, \
+                f"backbone put {g.edge_by_id[eid].fc} into zoom {z}"
+    assert {g.edge_by_id[e].fc for e in sel[2]} == {"motorway"}
 
 
 def test_the_sparse_floor_cannot_smuggle_in_a_lower_class():
