@@ -148,8 +148,15 @@ class RoadGraph:
         """Return all edges incident to node_id."""
         return [self.edge_by_id[eid] for eid in self.adj.get(node_id, [])]
 
-    def shortest_path(self, a: int, b: int) -> list[int]:
-        """Dijkstra shortest path returning list of edge IDs."""
+    def shortest_path(self, a: int, b: int, min_fc_score: float = 0.0) -> list[int]:
+        """Dijkstra shortest path returning list of edge IDs.
+
+        ``min_fc_score`` restricts the search to edges of at least that
+        functional-class score, so a path returned under it is class-compliant
+        BY CONSTRUCTION. Backbone repair needs that: filtering afterwards means
+        rejecting the path and searching again from the next anchor, which on
+        Washington turned one selection pass into ~7 minutes per zoom.
+        """
         if a == b:
             return []
         dist: dict[int, float] = {a: 0.0}
@@ -164,6 +171,8 @@ class RoadGraph:
                 continue
             for eid in self.adj.get(u, []):
                 e = self.edge_by_id[eid]
+                if e.fc_score < min_fc_score:
+                    continue
                 v = e.to_node if e.from_node == u else e.from_node
                 nd = d + e.length_m
                 if nd < dist.get(v, float("inf")):

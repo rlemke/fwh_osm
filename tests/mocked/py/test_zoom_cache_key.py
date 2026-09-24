@@ -36,10 +36,13 @@ def test_changing_the_skeleton_changes_the_fingerprint(monkeypatch):
 
 def test_changing_score_weights_or_budgets_changes_the_fingerprint(monkeypatch):
     before = recipe_fingerprint()
-    monkeypatch.setitem(zs.W_SB, 2, 0.1)
+    # Derive the perturbation from the CURRENT value — a literal can silently
+    # become a no-op when the constant is retuned to match it, which is exactly
+    # what happened when BASE_KM[2] was recalibrated to 1.0.
+    monkeypatch.setitem(zs.W_SB, 2, zs.W_SB[2] + 0.1)
     assert recipe_fingerprint() != before
     monkeypatch.undo()
-    monkeypatch.setitem(zs.BASE_KM, 2, 1.0)
+    monkeypatch.setitem(zs.BASE_KM, 2, zs.BASE_KM[2] + 1.0)
     assert recipe_fingerprint() != before
 
 

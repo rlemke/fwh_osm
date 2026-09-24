@@ -33,24 +33,39 @@ W_SPECIAL: dict[int, float] = {
     7: 0.04,
 }
 
-# Base budget per cell in km (spec §6)
+# Base budget per cell in km (spec §6), calibrated to the H3 cell it is spent in.
+#
+# ⚠️ These were 80/160/260/420/650/900 km — for a resolution-7 hexagon of
+# ~5.2 km2. That is 15-170 km of road per 5 km2, i.e. denser than Manhattan,
+# so the budget could not bind: measured 2026-09-24 on Washington, whose 23,752
+# cells hold a MEDIAN of 2.7 km of road each, it bound in 30 cells at z2 and in
+# ZERO cells from z4 down. The mechanism was inert.
+#
+# It went unnoticed because `h3` is not installed in the runner image, so
+# `build_cell_budgets` fell back to `_flat_budgets` — ONE cell for the entire
+# region — and that single statewide budget (260 km at z4, against 91,899 km of
+# road) is what actually limited selection. The adaptive per-cell budget of
+# spec 6 had never run at all.
 BASE_KM: dict[int, float] = {
-    2: 80.0,
-    3: 160.0,
-    4: 260.0,
-    5: 420.0,
-    6: 650.0,
-    7: 900.0,
+    2: 1.0,
+    3: 1.5,
+    4: 2.5,
+    5: 4.0,
+    6: 7.0,
+    7: 12.0,
 }
 
-# Sparse region floor km (spec §8.3)
+# Sparse region floor km (spec §8.3) — same recalibration as BASE_KM above.
+# At 10-180 km per 5.2 km2 cell this floor exceeded the road that EXISTS in a
+# typical cell, so it padded almost every cell to its limit with whatever
+# scored highest, which is how tertiary roads reached continental zooms.
 MIN_KM: dict[int, float] = {
-    2: 10.0,
-    3: 20.0,
-    4: 40.0,
-    5: 70.0,
-    6: 120.0,
-    7: 180.0,
+    2: 0.2,
+    3: 0.3,
+    4: 0.5,
+    5: 0.8,
+    6: 1.5,
+    7: 2.5,
 }
 
 # Functional-class floor per zoom: an edge of a lower class is not a candidate
@@ -472,7 +487,11 @@ def _backbone_repair(
             for other_anchor in anchors:
                 if other_anchor == anchor or other_anchor in visited:
                     continue
-                path_edges = graph.shortest_path(anchor, other_anchor)
+                # Search the ELIGIBLE SUBGRAPH: a path found here is
+                # class-compliant by construction, so the first one is usable.
+                # Filtering afterwards meant rejecting a path and searching
+                # again from the next anchor — ~7 min per zoom on Washington.
+                path_edges = graph.shortest_path(anchor, other_anchor, fc_floor)
                 if path_edges:
                     # ⚠️ Subject to the zoom's class floor. This was the THIRD
                     # path by which a below-floor road reached a zoom it does
@@ -486,13 +505,8 @@ def _backbone_repair(
                     # backbone at this zoom: dropping it leaves those anchors
                     # unjoined, which is the truthful picture of a network whose
                     # arterials genuinely do not connect them.
-                    eligible = [
-                        eid for eid in path_edges
-                        if (e := graph.edge_by_id.get(eid)) and e.fc_score >= fc_floor
-                    ]
-                    if len(eligible) == len(path_edges):
-                        added.update(path_edges)
-                        break
+                    added.update(path_edges)
+                    break
 
     if added:
         log.info("Backbone repair added %d edges", len(added))
