@@ -17,7 +17,7 @@ try:
 except ImportError:
     HAS_H3 = False
 
-from .zoom_graph import RoadGraph, _haversine_m
+from .zoom_graph import FC_SCORES, RoadGraph, _haversine_m
 
 # Weight schedule (spec §7)
 W_SB: dict[int, float] = {2: 0.75, 3: 0.70, 4: 0.65, 5: 0.60, 6: 0.55, 7: 0.50}
@@ -52,6 +52,33 @@ MIN_KM: dict[int, float] = {
     6: 120.0,
     7: 180.0,
 }
+
+# Functional-class floor per zoom: an edge of a lower class is not a candidate
+# at that zoom AT ALL. Without it, score alone decides what appears, and score
+# is 75% sampled betweenness at z2 — so a tertiary street that happens to carry
+# sampled routes outranks an interstate segment that does not.
+#
+# Measured 2026-09-24 on Washington: zoom 2 drew 340 tertiary and 589 secondary
+# edges beside just 541 of the state's 8,027 motorway edges. Every class
+# appeared at once (the thing progressive reveal exists to prevent) while the
+# interstates appeared only as 6.7% fragments, so the tiers were visually
+# indistinguishable.
+MIN_FC_BY_ZOOM: dict[int, str] = {
+    2: "motorway",       # interstates only — the continental skeleton
+    3: "trunk",          # + intercity routes between major populated places
+    4: "primary",
+    5: "secondary",
+    6: "tertiary",
+    7: "unclassified",
+}
+
+# Classes revealed COMPLETE at the zoom they become eligible, exempt from the
+# per-cell budget (they still CHARGE it, so lower classes see the space they
+# consumed). A skeleton that is budget-truncated reads as a broken network
+# rather than a sparse one: 6.7% of a state's motorway mileage drawn as
+# disconnected stubs is worse than drawing none of it. The budget's job is
+# capping local density, not deciding which roads form the backbone.
+SKELETON_FCS: frozenset[str] = frozenset({"motorway", "trunk"})
 
 # H3 resolution for cell budgets (~1.2km edge, ~5.2 km² area)
 H3_RESOLUTION = 7
@@ -302,10 +329,26 @@ def select_edges(
 
         selected: set[int] = set()
 
+        # Class floor for this zoom (see MIN_FC_BY_ZOOM).
+        fc_floor = FC_SCORES.get(MIN_FC_BY_ZOOM.get(z, "unclassified"), 0.0) - 1e-9
+
+        # Skeleton classes first and in full, charging their cells but never
+        # blocked by them, so the backbone is revealed connected.
+        for edge in graph.edges:
+            if edge.fc not in SKELETON_FCS or edge.fc_score < fc_floor:
+                continue
+            selected.add(edge.edge_id)
+            cells = edge_cells.get(edge.edge_id, set())
+            edge_km = edge.length_m / 1000.0
+            for cell in cells:
+                cell_used_km[cell] += edge_km / max(1, len(cells))
+
         # Greedy selection (spec §8.1)
         for eid, _score in candidates:
             edge = graph.edge_by_id.get(eid)
             if not edge:
+                continue
+            if edge.fc_score < fc_floor or eid in selected:
                 continue
 
             edge_km = edge.length_m / 1000.0
@@ -338,14 +381,22 @@ def select_edges(
         for cell, budget_info in z_budgets.items():
             if budget_info.get("anchor_count", 0) > 0:
                 if cell_used_km.get(cell, 0) < min_km:
-                    # Find highest-scoring unselected edges in this cell
+                    # Find highest-scoring unselected edges in this cell.
+                    # ⚠️ Subject to the SAME class floor as the greedy pass. This
+                    # top-up exists so a sparse cell is not blank — but at a
+                    # continental zoom a rural cell SHOULD hold nothing but the
+                    # interstate crossing it, and padding it to 10 km with
+                    # whatever local road scored highest is precisely how
+                    # tertiary and unclassified roads reached zoom 2. Measured
+                    # 2026-09-24: this path, not the greedy pass, put most of
+                    # them there, because rural cells are the common case.
                     for eid, _score in candidates:
                         if eid in selected:
                             continue
                         cells = edge_cells.get(eid, set())
                         if cell in cells:
                             edge = graph.edge_by_id.get(eid)
-                            if edge:
+                            if edge and edge.fc_score >= fc_floor:
                                 selected.add(eid)
                                 edge_km = edge.length_m / 1000.0
                                 cell_used_km[cell] += edge_km / max(1, len(cells))
