@@ -18,6 +18,7 @@ from ..shared.output_cache import cached_result, save_result_meta, with_output_c
 from .zoom_builder import (
     _empty_result,
     build_zoom_layers,
+    recipe_fingerprint,
 )
 from .zoom_detection import (
     detect_bypasses,
@@ -527,8 +528,19 @@ def _make_build_zoom_layers_handler(facet_name: str):
         max_concurrent = payload.get("max_concurrent", 16)
         step_log = payload.get("_step_log")
 
-        # Dynamic cache check (min_population comes from payload)
-        hit = cached_result(qualified, cache, {"min_population": min_population}, step_log)
+        # Everything that changes the OUTPUT must be in the key, not just the
+        # one param that happens to come from the payload: the destination
+        # (a cached result carries its own output_dir and paths), the routing
+        # graph the betweenness was sampled against, and a fingerprint of the
+        # algorithm's tunables. See build_zoom_layers.recipe_fingerprint.
+        cache_params = {
+            "min_population": min_population,
+            "output_dir": output_dir,
+            "graph_dir": (gh_config or {}).get("graphDir", ""),
+            "profile": (gh_config or {}).get("profile", "car"),
+            "recipe": recipe_fingerprint(),
+        }
+        hit = cached_result(qualified, cache, cache_params, step_log)
         if hit is not None:
             return hit
 
@@ -567,7 +579,7 @@ def _make_build_zoom_layers_handler(facet_name: str):
                     level="success",
                 )
             rv = {"result": result, "metrics": metrics}
-            save_result_meta(qualified, cache, {"min_population": min_population}, rv)
+            save_result_meta(qualified, cache, cache_params, rv)
             return rv
         except HandlerCancelled:
             # A clean stop (run terminated / task reclaimed / watchdog): not a

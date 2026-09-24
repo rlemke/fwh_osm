@@ -5,6 +5,7 @@ scoring, selection, and export into a complete pipeline.
 """
 
 import csv
+import hashlib
 import json
 import logging
 import os
@@ -47,6 +48,59 @@ from .zoom_selection import (
     enforce_monotonic_reveal,
     select_edges,
 )
+
+
+def recipe_fingerprint() -> str:
+    """Short hash of every tunable that changes what this pipeline selects.
+
+    ⚠️ The output cache keys on the handler's declared params, and
+    BuildZoomLayers declared only ``min_population`` — so a cached result was
+    served to any later run of the same region, whatever else had changed.
+    Measured repeatedly on 2026-09-23/24: a run into a NEW output_base came
+    back with the old run's ``output_dir``, and every algorithm change had to
+    be forced through by bumping ``min_population`` by 1. A hollow result is
+    indistinguishable from a correct one to a key that cannot see the
+    difference.
+
+    Hashing the constants means retuning the ladder, the score weights, the
+    budgets or the sampling automatically invalidates what they produced.
+    """
+    from .zoom_detection import (
+        BYPASS_CORE_FRACTION_MAX,
+        BYPASS_FC_ADVANTAGE,
+        BYPASS_TIME_RATIO,
+        RING_MIN_POPULATION,
+        SETTLEMENT_RADII,
+    )
+    from .zoom_sbs import (
+        ANCHOR_POP_THRESHOLDS,
+        ANCHOR_TARGETS,
+        DEFAULT_K_PAIRS,
+        MIN_PAIR_DISTANCE_KM,
+    )
+    from .zoom_selection import (
+        BASE_KM,
+        MIN_FC_BY_ZOOM,
+        MIN_KM,
+        SKELETON_FCS,
+        W_FC,
+        W_SB,
+    )
+
+    recipe = json.dumps(
+        {
+            "min_fc_by_zoom": MIN_FC_BY_ZOOM,
+            "skeleton": sorted(SKELETON_FCS),
+            "w_sb": W_SB, "w_fc": W_FC,
+            "base_km": BASE_KM, "min_km": MIN_KM,
+            "anchor_pop": ANCHOR_POP_THRESHOLDS, "anchor_targets": ANCHOR_TARGETS,
+            "k_pairs": DEFAULT_K_PAIRS, "min_pair_km": MIN_PAIR_DISTANCE_KM,
+            "bypass": [BYPASS_TIME_RATIO, BYPASS_CORE_FRACTION_MAX, BYPASS_FC_ADVANTAGE],
+            "settlement_radii": SETTLEMENT_RADII, "ring_min_pop": RING_MIN_POPULATION,
+        },
+        sort_keys=True, default=str,
+    )
+    return hashlib.sha256(recipe.encode()).hexdigest()[:12]
 
 
 def build_zoom_layers(
