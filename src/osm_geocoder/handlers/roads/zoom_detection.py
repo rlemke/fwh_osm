@@ -76,6 +76,8 @@ def detect_bypasses(
         return {}
 
     segment_index = SegmentIndex(graph)
+    boundary_index = _BoundaryEdgeIndex(graph)
+    node_index = _NodeIndex(graph.node_coords)
     flags: dict[int, str] = {}
     stats: dict[str, int] = {}
     pairs_examined = 0
@@ -91,7 +93,8 @@ def detect_bypasses(
         r_outer = r_core * R_OUTER_FACTOR
 
         # Find entry/exit nodes
-        entry_exit = _find_entry_exit_nodes(graph, lon, lat, r_outer)
+        center_node = node_index.nearest_within(lon, lat, r_core)
+        entry_exit = _find_entry_exit_nodes(boundary_index, lon, lat, r_outer)
         if len(entry_exit) < 2:
             stats["settlement: <2 entry/exit nodes on a road of sufficient class"] = (
                 stats.get("settlement: <2 entry/exit nodes on a road of sufficient class", 0) + 1
@@ -127,6 +130,7 @@ def detect_bypasses(
                 graph_dir,
                 profile,
                 segment_index,
+                center_node,
                 stats,
             )
             for eid in bypass_edges:
@@ -333,8 +337,91 @@ def _classify_settlement(place_type: str, population: int) -> str:
     return "village"
 
 
+class _BoundaryEdgeIndex:
+    """Grid of the edges that could cross a settlement's boundary circle.
+
+    ⚠️ Replaces a full scan of every edge in the region PER SETTLEMENT — an
+    O(edges x settlements) cost. Measured 2026-09-24 on Washington: 117,916
+    edges x 2,198 settlements is ~259M haversine evaluations, and it dominated
+    bypass detection at 0.62 settlements/s (~56 min), against ~17 min for all
+    79k routing calls the same phase makes. The geometry, not the router, was
+    the expense.
+
+    Exact rather than approximate: an edge crosses the circle only if one of
+    its endpoints is INSIDE it, so every crossing edge is reachable from a cell
+    within r_outer of the centre. The identical haversine test then runs on
+    that shortlist, so the result is unchanged.
+    """
+
+    CELL_DEG = 0.02  # ~2.2 km of latitude; r_outer here is 1.75-7.5 km
+
+    def __init__(self, graph: RoadGraph) -> None:
+        self._grid: dict[tuple[int, int], list[tuple]] = defaultdict(list)
+        for edge in graph.edges:
+            if edge.fc_score < MIN_BYPASS_FC_SCORE:
+                continue
+            from_coord = graph.node_coords.get(edge.from_node)
+            to_coord = graph.node_coords.get(edge.to_node)
+            if not from_coord or not to_coord:
+                continue
+            entry = (edge, from_coord, to_coord)
+            for lon, lat in (from_coord, to_coord):
+                self._grid[(int(lon / self.CELL_DEG), int(lat / self.CELL_DEG))].append(entry)
+
+    def near(self, center_lon: float, center_lat: float, radius_m: float):
+        """Yield each candidate edge once, with its endpoint coordinates."""
+        d_lat = radius_m / 111_320.0
+        d_lon = radius_m / max(1.0, 111_320.0 * math.cos(math.radians(center_lat)))
+        nx = int(d_lon / self.CELL_DEG) + 1
+        ny = int(d_lat / self.CELL_DEG) + 1
+        cx = int(center_lon / self.CELL_DEG)
+        cy = int(center_lat / self.CELL_DEG)
+        seen: set[int] = set()
+        for x in range(cx - nx, cx + nx + 1):
+            for y in range(cy - ny, cy + ny + 1):
+                for entry in self._grid.get((x, y), ()):
+                    if entry[0].edge_id not in seen:
+                        seen.add(entry[0].edge_id)
+                        yield entry
+
+
+class _NodeIndex:
+    """Grid of every graph node, for "nearest node within r" lookups.
+
+    ⚠️ Replaces a scan of ALL node_coords, which ran once per entry/exit PAIR
+    even though its inputs (the settlement centre and r_core) vary only per
+    SETTLEMENT. Measured 2026-09-24 on Washington: 95,062 nodes x 26,459 pairs
+    = 2.5 BILLION haversine evaluations, ~28 minutes — the dominant cost of
+    bypass detection, ahead of the 79k routing calls it exists to set up.
+    Hoisting the call to the settlement loop removes 92% of it by itself; the
+    grid removes the rest.
+    """
+
+    CELL_DEG = 0.02
+
+    def __init__(self, node_coords: dict[int, tuple[float, float]]) -> None:
+        self._grid: dict[tuple[int, int], list[tuple[int, float, float]]] = defaultdict(list)
+        for nid, (lon, lat) in node_coords.items():
+            self._grid[(int(lon / self.CELL_DEG), int(lat / self.CELL_DEG))].append((nid, lon, lat))
+
+    def nearest_within(self, lon: float, lat: float, radius_m: float) -> int | None:
+        d_lat = radius_m / 111_320.0
+        d_lon = radius_m / max(1.0, 111_320.0 * math.cos(math.radians(lat)))
+        nx = int(d_lon / self.CELL_DEG) + 1
+        ny = int(d_lat / self.CELL_DEG) + 1
+        cx, cy = int(lon / self.CELL_DEG), int(lat / self.CELL_DEG)
+        best_id, best_d = None, radius_m
+        for x in range(cx - nx, cx + nx + 1):
+            for y in range(cy - ny, cy + ny + 1):
+                for nid, nlon, nlat in self._grid.get((x, y), ()):
+                    d = _haversine_m(nlon, nlat, lon, lat)
+                    if d < best_d:
+                        best_d, best_id = d, nid
+        return best_id
+
+
 def _find_entry_exit_nodes(
-    graph: RoadGraph,
+    index: "_BoundaryEdgeIndex",
     center_lon: float,
     center_lat: float,
     r_outer: float,
@@ -343,16 +430,7 @@ def _find_entry_exit_nodes(
     entry_nodes: list[int] = []
     seen_nodes: set[int] = set()
 
-    for edge in graph.edges:
-        if edge.fc_score < MIN_BYPASS_FC_SCORE:
-            continue
-
-        # Check if edge crosses r_outer boundary
-        from_coord = graph.node_coords.get(edge.from_node)
-        to_coord = graph.node_coords.get(edge.to_node)
-        if not from_coord or not to_coord:
-            continue
-
+    for edge, from_coord, to_coord in index.near(center_lon, center_lat, r_outer):
         d_from = _haversine_m(from_coord[0], from_coord[1], center_lon, center_lat)
         d_to = _haversine_m(to_coord[0], to_coord[1], center_lon, center_lat)
 
@@ -410,6 +488,7 @@ def _check_bypass_pair(
     graph_dir: str,
     profile: str,
     segment_index: SegmentIndex,
+    center_node: int | None,
     stats: dict[str, int] | None = None,
 ) -> tuple[set[int], set[int]]:
     """Check if a bypass exists for an entry/exit pair.
@@ -445,16 +524,10 @@ def _check_bypass_pair(
     if not coords_fast or time_fast <= 0:
         return _reject("no fastest route between entry/exit")
 
-    # P_thru: approximate route through town center by adding center as waypoint
-    # Find the nearest node to center for waypoint routing
-    center_node = None
-    best_dist = float("inf")
-    for nid, (nlon, nlat) in graph.node_coords.items():
-        d = _haversine_m(nlon, nlat, center_lon, center_lat)
-        if d < best_dist and d < r_core:
-            best_dist = d
-            center_node = nid
-
+    # P_thru: approximate route through town center by adding center as waypoint.
+    # center_node is computed ONCE PER SETTLEMENT by the caller — it depends
+    # only on the centre and r_core, and recomputing it per pair cost 2.5
+    # billion haversine evaluations on Washington (see _NodeIndex).
     if center_node is None:
         return _reject("no graph node within r_core of the centre")
 
