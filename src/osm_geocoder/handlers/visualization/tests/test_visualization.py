@@ -417,12 +417,25 @@ class TestRenderTiledMap:
         )
         return (out / "index.html").read_text()
 
-    def test_default_basemap_is_dark_no_labels(self, tmp_path):
+    def test_default_basemap_is_dark_and_keyless(self, tmp_path):
+        """⚠️ This used to assert CARTO subdomains — pinning a basemap that
+        CARTO began enforcing API keys on in Aug 2026, watermarking every
+        unauthenticated tile "API KEY REQUIRED". The published gallery was
+        migrated off CARTO on 2026-09-04; this renderer was not, and kept
+        producing watermarked maps until a user reported one on 2026-09-24.
+
+        "dark" is now keyless OSM raster darkened with MapLibre's own paint
+        properties, so the look survives without a key that can be revoked.
+        """
         html = self._render(tmp_path)
-        assert "dark_nolabels" in html
-        assert "tile.openstreetmap.org" not in html  # full-colour OSM not the default
-        # CARTO round-robins a..d subdomains (MapLibre doesn't expand `{s}`)
-        assert "a.basemaps.cartocdn.com" in html and "d.basemaps.cartocdn.com" in html
+        assert "cartocdn" not in html, "no keyed basemap may come back"
+        assert "tile.openstreetmap.org" in html
+        # darkened in the renderer rather than by fetching a dark tileset
+        assert "raster-brightness-max" in html and "raster-saturation" in html
+
+    def test_no_basemap_option_uses_a_keyed_host(self, tmp_path):
+        for basemap in ("dark", "light", "osm", "none"):
+            assert "cartocdn" not in self._render(tmp_path, basemap=basemap), basemap
 
     def test_routes_drawn_under_dots_with_casing(self, tmp_path):
         html = self._render(tmp_path)

@@ -654,23 +654,37 @@ def _default_palette(i: int) -> str:
 # Basemap backdrops. Each entry → (theme, JS source fragment, JS layer fragment).
 # `theme` drives foreground contrast (label/stroke/casing colours) so dots and
 # routes read on whichever backdrop is chosen. "none" emits no tile source, just
-# a flat dark background, so the map works offline. CARTO tiles round-robin over
-# a,b,c,d subdomains — MapLibre GL does NOT expand a Leaflet-style `{s}`, so the
-# subdomains are listed explicitly in the tiles array.
-def _carto_tiles(style: str) -> str:
-    urls = ",".join(
-        f"'https://{s}.basemaps.cartocdn.com/{style}/{{z}}/{{x}}/{{y}}.png'"
-        for s in "abcd"
-    )
-    return f"bg:{{type:'raster',tiles:[{urls}],tileSize:256,attribution:'© OpenStreetMap © CARTO'}}"
-
+# a flat dark background, so the map works offline.
+#
+# ⚠️ "dark" and "light" used CARTO (basemaps.cartocdn.com). CARTO began
+# ENFORCING API keys in late August 2026 and now WATERMARKS unauthenticated
+# tiles "API KEY REQUIRED" — every map drawn with those two options carries it.
+# The published gallery was migrated off CARTO on 2026-09-04; this renderer was
+# not, and kept producing watermarked maps until 2026-09-24.
+#
+# They are keyless OpenStreetMap raster now, darkened/desaturated with
+# MapLibre's own raster paint properties rather than by fetching a differently
+# styled tileset. That keeps the geographic context a flat background loses,
+# needs no key, and cannot be revoked.
+#
+# ⚠️ Do NOT "fix" this with Esri's keyless dark basemap: it serves {z}/{y}/{x}
+# while these templates are {z}/{x}/{y}, BOTH return HTTP 200, and the result is
+# a silently scrambled map. And a CARTO key only postpones the problem — they
+# are retiring raster basemaps outright.
+_OSM_RASTER = (
+    "bg:{type:'raster',"
+    "tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],"
+    "tileSize:256,attribution:'© OpenStreetMap'}"
+)
 
 _BASEMAPS = {
-    "dark": ("dark", _carto_tiles("dark_nolabels"), "{id:'bg',type:'raster',source:'bg'}"),
-    "light": ("light", _carto_tiles("light_nolabels"), "{id:'bg',type:'raster',source:'bg'}"),
-    "osm": ("light",
-            "bg:{type:'raster',tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],tileSize:256,attribution:'© OpenStreetMap'}",
-            "{id:'bg',type:'raster',source:'bg'}"),
+    "dark": ("dark", _OSM_RASTER,
+             "{id:'bg',type:'raster',source:'bg',paint:{'raster-brightness-max':0.45,"
+             "'raster-saturation':-0.85,'raster-contrast':0.15}}"),
+    "light": ("light", _OSM_RASTER,
+              "{id:'bg',type:'raster',source:'bg',paint:{'raster-saturation':-0.55,"
+              "'raster-brightness-min':0.1}}"),
+    "osm": ("light", _OSM_RASTER, "{id:'bg',type:'raster',source:'bg'}"),
     "none": ("dark", "", "{id:'bg',type:'background',paint:{'background-color':'#0a0a0c'}}"),
 }
 
