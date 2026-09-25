@@ -4,6 +4,7 @@ Generates interactive HTML maps using Folium (Leaflet.js) with OpenStreetMap til
 or static PNG images using contextily + matplotlib.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -687,6 +688,21 @@ _BASEMAPS = {
     "osm": ("light", _OSM_RASTER, "{id:'bg',type:'raster',source:'bg'}"),
     "none": ("dark", "", "{id:'bg',type:'background',paint:{'background-color':'#0a0a0c'}}"),
 }
+
+
+def basemap_fingerprint() -> str:
+    """Short hash of the basemap DEFINITIONS.
+
+    ⚠️ Belongs in the render cache key. `basemap="dark"` names an option, not
+    its content: when CARTO started watermarking and "dark" was repointed at
+    keyless OSM raster, every cached map stayed on the old tiles because the
+    PARAMETER had not changed. Measured 2026-09-24 — a re-render returned the
+    watermarked page from cache. A key that cannot see a definition change
+    cannot tell a stale map from a current one.
+    """
+    return hashlib.sha256(
+        json.dumps(_BASEMAPS, sort_keys=True, default=str).encode()
+    ).hexdigest()[:12]
 
 
 def render_tiled_map(

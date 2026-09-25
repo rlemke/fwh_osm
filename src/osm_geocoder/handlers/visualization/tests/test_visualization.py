@@ -472,3 +472,29 @@ class TestRenderTiledMap:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestBasemapFingerprint:
+    """`basemap="dark"` names an option, not its content.
+
+    When CARTO began watermarking and "dark" was repointed at keyless OSM
+    raster, every cached map stayed on the old tiles because the PARAMETER had
+    not changed — a re-render returned the watermarked page from cache
+    (measured 2026-09-24). The render cache must key on what the option points
+    at, not only on its name.
+    """
+
+    def test_fingerprint_is_stable(self):
+        from osm_geocoder.handlers.visualization.map_renderer import basemap_fingerprint
+        assert basemap_fingerprint() == basemap_fingerprint()
+
+    def test_repointing_a_basemap_changes_the_fingerprint(self, monkeypatch):
+        from osm_geocoder.handlers.visualization import map_renderer as mr
+        before = mr.basemap_fingerprint()
+        monkeypatch.setitem(mr._BASEMAPS, "dark", ("dark", "bg:{type:'raster'}", "{id:'bg'}"))
+        assert mr.basemap_fingerprint() != before
+
+    def test_the_render_handler_includes_it_in_its_cache_key(self):
+        from pathlib import Path
+        src = (Path(__file__).resolve().parents[1] / "visualization_handlers.py").read_text()
+        assert '"basemap_def": basemap_fingerprint()' in src

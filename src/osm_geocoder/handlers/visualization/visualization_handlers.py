@@ -13,6 +13,7 @@ from .map_renderer import (
     HAS_STATIC,
     LayerStyle,
     MapResult,
+    basemap_fingerprint,
     preview_map,
     render_layers,
     render_map,
@@ -270,6 +271,8 @@ def _make_render_tiled_map_handler(facet_name: str):
             "layer_names": layer_names, "colors": colors, "title": title,
             "center_lon": center_lon, "center_lat": center_lat, "zoom": zoom,
             "basemap": basemap,
+            # What "dark" POINTS AT, not just its name — see basemap_fingerprint.
+            "basemap_def": basemap_fingerprint(),
         }
         hit = cached_result(qualified, cache, cache_params, step_log)
         if hit is not None:
