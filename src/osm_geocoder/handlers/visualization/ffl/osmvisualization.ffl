@@ -44,13 +44,18 @@ namespace osm.viz {
         to it) that MUST be served over HTTP — `file://` is not reliable for the
         Range fetches PMTiles relies on. `layer_names` are the per-PMTiles inner
         layer names (the `-l` value used in BuildVectorTiles); defaults to the
-        file stems. `basemap` selects the backdrop — "dark" (default, CARTO
-        dark no-labels: bright bands/routes pop hardest), "light" (CARTO Positron
-        no-labels), "osm" (full-colour OpenStreetMap raster), or "none" (flat dark
-        background, no tiles). */
+        file stems. `basemap` selects the backdrop — "dark" (default: OpenStreetMap
+        raster, darkened and desaturated in the client so bright bands/routes pop
+        hardest), "light" (the same raster, lightly washed), "osm" (full-colour
+        OpenStreetMap raster), or "none" (flat dark background, no tiles). All are
+        KEYLESS: CARTO began requiring an API key in Aug 2026 and watermarked
+        every map that used it. `fit_to_data` (default true) frames the first
+        archive's own bounds on load, so a per-region centre table is not needed
+        and cannot be silently wrong; `center_lon`/`center_lat`/`zoom` remain the
+        initial view and the fallback when the tiles carry no bounds. */
     event facet RenderTiledMap(tiles: [String], layer_names: [String], colors: [String],
         title: String = "Tiled map", center_lon: Double = 0.0, center_lat: Double = 20.0, zoom: Double = 2.0,
-        basemap: String = "dark") => (result: MapResult) with Effect(kind = "io") with Cost(tier = "cheap")
+        basemap: String = "dark", fit_to_data: Boolean = true) => (result: MapResult) with Effect(kind = "io") with Cost(tier = "cheap")
 
     /** Renders a map with custom layer styling. */
     event facet RenderStyledMap(geojson_path: String, style: LayerStyle,

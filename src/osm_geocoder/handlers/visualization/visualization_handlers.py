@@ -14,6 +14,7 @@ from .map_renderer import (
     LayerStyle,
     MapResult,
     basemap_fingerprint,
+    page_fingerprint,
     preview_map,
     render_layers,
     render_map,
@@ -257,6 +258,8 @@ def _make_render_tiled_map_handler(facet_name: str):
         center_lat = float(payload.get("center_lat", 20.0) or 20.0)
         zoom = float(payload.get("zoom", 2.0) or 2.0)
         basemap = payload.get("basemap") or "dark"
+        fit_to_data = payload.get("fit_to_data")
+        fit_to_data = True if fit_to_data is None else bool(fit_to_data)
         step_log = payload.get("_step_log")
 
         if isinstance(tiles, str):
@@ -271,8 +274,12 @@ def _make_render_tiled_map_handler(facet_name: str):
             "layer_names": layer_names, "colors": colors, "title": title,
             "center_lon": center_lon, "center_lat": center_lat, "zoom": zoom,
             "basemap": basemap,
+            "fit_to_data": fit_to_data,
             # What "dark" POINTS AT, not just its name — see basemap_fingerprint.
             "basemap_def": basemap_fingerprint(),
+            # And what the PAGE ITSELF is. Same trap one level up: a template
+            # change with identical params served the old HTML from cache.
+            "page_def": page_fingerprint(),
         }
         hit = cached_result(qualified, cache, cache_params, step_log)
         if hit is not None:
@@ -291,7 +298,7 @@ def _make_render_tiled_map_handler(facet_name: str):
                 layer_names=layer_names if layer_names else None,
                 colors=colors if colors else None,
                 title=title, center_lon=center_lon, center_lat=center_lat, zoom=zoom,
-                basemap=basemap,
+                basemap=basemap, fit_to_data=fit_to_data,
             )
             rv = {"result": _result_to_dict(result)}
             save_result_meta(qualified, cache, cache_params, rv)

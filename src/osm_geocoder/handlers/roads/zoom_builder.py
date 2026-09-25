@@ -37,6 +37,7 @@ from .zoom_sbs import (
     SegmentIndex,
     build_anchors,
     normalize_sbs,
+    probe_router,
     route_and_accumulate,
     sample_od_pairs,
     save_anchors,
@@ -175,6 +176,19 @@ def build_zoom_layers(
     sbs_by_zoom: dict[int, dict[int, float]] = {}
     segment_index = SegmentIndex(road_graph)
     total_route_count = 0
+
+    # Prove the router serves THIS region before spending hours on it. A server
+    # holding another state rejects every pair as out of bounds and _route_pair
+    # swallows that like any other miss, so the alternative is a run that
+    # completes with zero betweenness and reports success.
+    if HAS_REQUESTS and graph_dir:
+        if heartbeat is not None:
+            heartbeat("step 3: probing the routing server")
+        probe_router(
+            road_graph.node_coords,
+            sample_od_pairs(anchors_by_zoom[2], 2, road_graph),
+            profile,
+        )
 
     for z in range(2, 7):  # z2..z6 (z7 reuses z6)
         log.info("  SBS for zoom %d", z)

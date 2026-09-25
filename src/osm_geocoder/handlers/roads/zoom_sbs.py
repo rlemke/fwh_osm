@@ -22,6 +22,14 @@ try:
 except ImportError:
     HAS_REQUESTS = False
 
+try:
+    from facetwork.runtime.errors import PermanentError
+except ImportError:  # keep the handler importable outside a runtime checkout
+
+    class PermanentError(RuntimeError):  # type: ignore[no-redef]
+        pass
+
+
 from ..shared._output import ensure_dir, open_output, read_storage_json
 from .zoom_graph import RoadGraph, _haversine_m
 
@@ -460,6 +468,73 @@ def route_batch_parallel(
     return results
 
 
+def probe_router(
+    node_coords: dict[int, tuple[float, float]],
+    pairs: list[tuple[int, int]],
+    profile: str,
+    attempts: int = 8,
+) -> None:
+    """Refuse to start the SBS loop unless the router can serve THIS region.
+
+    graphhopper-web serves exactly ONE region: ``_route_pair`` sends only
+    lon/lat + profile, so a server holding another region answers **HTTP 400
+    "Point 0 is out of bounds"** for every pair. That path returns ``None``
+    like any other miss, so the whole loop completes, betweenness is empty, and
+    the step reports success — measured 2026-09-22 on Washington with no server
+    at all ("0 / 114163 pairs succeeded") and again 2026-09-24 against the
+    Washington server with Oregon and Idaho coordinates. A hollow map is worse
+    than a failed run, because nothing downstream can tell.
+
+    So probe a few real pairs first and raise with the server's OWN message.
+    ``PermanentError``: a graph that does not cover these coordinates will not
+    start covering them on retry.
+    """
+    if not HAS_REQUESTS:
+        raise PermanentError(
+            "low-zoom routing needs the `requests` package; this runner has none, "
+            "so every route would silently return no path"
+        )
+    if not pairs:
+        return
+
+    last: str = "no pair had usable coordinates"
+    for from_node, to_node in pairs[:attempts]:
+        a = node_coords.get(from_node)
+        b = node_coords.get(to_node)
+        if not a or not b:
+            continue
+        try:
+            resp = requests.get(
+                f"{GRAPHHOPPER_API_URL}/route",
+                params={
+                    "point": [f"{a[1]},{a[0]}", f"{b[1]},{b[0]}"],
+                    "profile": profile,
+                    "type": "json",
+                    "points_encoded": "false",
+                },
+                timeout=30,
+            )
+        except Exception as e:  # unreachable server, DNS, timeout
+            last = f"{type(e).__name__}: {e}"
+            continue
+        if resp.status_code == 200 and (resp.json().get("paths") or []):
+            log.info(
+                "Router probe OK: %s serves profile %r for this region",
+                GRAPHHOPPER_API_URL, profile,
+            )
+            return
+        last = f"HTTP {resp.status_code}: {resp.text[:300]}"
+
+    raise PermanentError(
+        f"the routing server at {GRAPHHOPPER_API_URL} cannot route this region "
+        f"(profile {profile!r}); last response -> {last}. "
+        "graphhopper-web serves ONE region+profile, so a server holding a different "
+        "state rejects every pair as out of bounds and the run would produce a map "
+        "with no betweenness at all. Point the graphhopper role at this region "
+        "(`fw fleet set --graphhopper-region <region>`) and wait for it to be healthy."
+    )
+
+
 def route_and_accumulate(
     pairs: list[tuple[int, int]],
     node_coords: dict[int, tuple[float, float]],
@@ -531,6 +606,16 @@ def route_and_accumulate(
 
     log.info("Completed routing: %d / %d pairs succeeded", routed, total)
     log.info("Accumulated votes on %d edges from %d routes", len(bc), routed)
+    # The probe proves the server CAN route this region; this catches it stopping
+    # mid-loop (restarted, OOM-killed, repointed at another state by a concurrent
+    # `fleet set`). Zero votes is not a sparse result, it is no result, and every
+    # downstream score would be uniformly 0 while the step reported success.
+    if total and routed * 20 < total:
+        raise PermanentError(
+            f"routing collapsed: only {routed:,} of {total:,} sampled pairs returned a "
+            f"path against {GRAPHHOPPER_API_URL}. Betweenness computed from this would "
+            "be meaningless, so the run stops here rather than publishing a hollow map."
+        )
     if heartbeat is not None:
         heartbeat(f"routed {routed:,}/{total:,} pairs")
     return dict(bc), routed

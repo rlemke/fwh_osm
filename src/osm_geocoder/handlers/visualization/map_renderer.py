@@ -625,6 +625,11 @@ const map=new maplibregl.Map({
   center:[__CENTER_LON__,__CENTER_LAT__], zoom:__ZOOM__
 });
 map.on('error',e=>showErr('map error: '+(e.error&&e.error.message||JSON.stringify(e))));
+// Fit the view to the DATA, not to a centre someone typed in. Every PMTiles
+// archive carries its own bounds in its header, so the page can frame Delaware
+// and Alaska correctly with no per-region table to get wrong. Falls back to the
+// supplied centre/zoom when the header has no usable bounds.
+__FIT__
 map.addControl(new maplibregl.NavigationControl());
 map.addControl(new maplibregl.ScaleControl());
 // "About this data" popup: shown on load, reopened via the ℹ️ button, dismissed
@@ -705,6 +710,17 @@ def basemap_fingerprint() -> str:
     ).hexdigest()[:12]
 
 
+def page_fingerprint() -> str:
+    """Short hash of the tiled-viewer PAGE TEMPLATE.
+
+    The sibling of ``basemap_fingerprint``, and the same trap one level up: the
+    render cache keys on the facet's parameters, so a change to the HTML/JS
+    itself — a fixed overlay, a new fit-to-bounds block — is invisible to it and
+    every re-render serves the old page. Measured 2026-09-24 twice in one day.
+    """
+    return hashlib.sha256(_TILED_HTML_TEMPLATE.encode()).hexdigest()[:12]
+
+
 def render_tiled_map(
     tile_paths: list[str | Path],
     layer_names: list[str] | None = None,
@@ -715,6 +731,7 @@ def render_tiled_map(
     center_lat: float = 20.0,
     zoom: float = 2.0,
     basemap: str = "dark",
+    fit_to_data: bool = True,
     about: str = "",
 ) -> MapResult:
     """Render a MapLibre + PMTiles viewer page for a set of vector-tile layers.
@@ -741,7 +758,9 @@ def render_tiled_map(
             file stem is used as a fallback.
         colors: per-layer color; defaults to a small palette.
         title: page title.
-        center_lon, center_lat, zoom: initial view.
+        center_lon, center_lat, zoom: initial view, used when the tiles carry
+            no bounds or ``fit_to_data`` is off.
+        fit_to_data: frame the first archive's own bounds on load (default).
         basemap: backdrop — ``"dark"`` (default), ``"light"``, ``"osm"`` or
             ``"none"``. A muted/dark backdrop keeps the thematic dots and routes
             legible; the full-colour ``"osm"`` raster competes with them.
@@ -804,6 +823,24 @@ def render_tiled_map(
     pre_register = "\n".join(
         f"protocol.add(new pmtiles.PMTiles(here + '{s['file']}'));" for s in sources
     )
+    # Reading the header is async and may fail (a pre-3.x archive, a truncated
+    # upload), so the supplied centre/zoom stays as the initial view and the fit
+    # only ever narrows it. Silent either way: a failed fit is a cosmetic miss,
+    # not a reason to blank the page.
+    if fit_to_data and sources:
+        first = sources[0]["file"]
+        fit_js = (
+            "(function(){try{new pmtiles.PMTiles(here + '%s').getHeader().then(function(h){"
+            "if(!h)return;"
+            "var w=h.minLon,so=h.minLat,e=h.maxLon,n=h.maxLat;"
+            "if([w,so,e,n].some(function(v){return typeof v!=='number'||!isFinite(v);}))return;"
+            "if(e-w<=0||n-so<=0)return;"
+            "map.fitBounds([[w,so],[e,n]],{padding:28,duration:0});"
+            "}).catch(function(){});}catch(err){}})();" % first
+        )
+    else:
+        fit_js = ""
+
 
     # Foreground contrast adapts to the backdrop so dots/routes/labels read on
     # either dark or light. Dot strokes, line casings and label haloes flip; the
@@ -874,6 +911,7 @@ def render_tiled_map(
             .replace("__TITLE__", title)
             .replace("__ABOUT__", about_html)
             .replace("__PRE_REGISTER__", pre_register)
+            .replace("__FIT__", fit_js)
             .replace("__BG_SOURCE__", bg_source)
             .replace("__BG_LAYER__", bg_layer)
             .replace("__LEGEND__", legend)

@@ -437,6 +437,40 @@ class TestRenderTiledMap:
         for basemap in ("dark", "light", "osm", "none"):
             assert "cartocdn" not in self._render(tmp_path, basemap=basemap), basemap
 
+    def test_fits_the_datas_own_bounds_by_default(self, tmp_path):
+        """A per-region centre table is the thing this replaces.
+
+        Every PMTiles archive carries its bounds in its header, so the page can
+        frame Delaware and Alaska correctly with nothing to type in. The
+        alternative — 45 hardcoded state centroids — is wrong silently.
+        """
+        html = self._render(tmp_path)
+        assert "fitBounds" in html
+        assert "getHeader()" in html
+
+    def test_fit_can_be_turned_off(self, tmp_path):
+        from osm_geocoder.handlers.visualization.map_renderer import render_tiled_map
+
+        t = tmp_path / "a.pmtiles"
+        t.write_bytes(b"x")
+        out = tmp_path / "nofit"
+        render_tiled_map([t], layer_names=["a"], output_path=out, fit_to_data=False)
+        html = (out / "index.html").read_text()
+        assert "fitBounds" not in html
+        assert "__FIT__" not in html, "the placeholder must always be substituted"
+
+    def test_page_fingerprint_tracks_the_template(self):
+        """The render cache keys on parameters, so a template change is invisible
+        to it — measured twice on 2026-09-24, where a re-render served the old
+        page. The fingerprint is what makes an edit here invalidate it."""
+        import hashlib
+
+        from osm_geocoder.handlers.visualization import map_renderer as mr
+
+        assert mr.page_fingerprint() == hashlib.sha256(
+            mr._TILED_HTML_TEMPLATE.encode()
+        ).hexdigest()[:12]
+
     def test_routes_drawn_under_dots_with_casing(self, tmp_path):
         html = self._render(tmp_path)
         import re
