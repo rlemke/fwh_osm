@@ -184,11 +184,17 @@ def build_zoom_layers(
     if HAS_REQUESTS and graph_dir:
         if heartbeat is not None:
             heartbeat("step 3: probing the routing server")
-        probe_router(
-            road_graph.node_coords,
-            sample_od_pairs(anchors_by_zoom[2], 2, road_graph),
-            profile,
-        )
+        # Take the sample from the first zoom that HAS one. Zoom 2 wants anchors
+        # over 500k population at least 300 km apart, which Delaware, DC and
+        # Rhode Island legitimately cannot supply — probing only z2 would skip
+        # the check on exactly the small states, silently.
+        probe_pairs: list = []
+        for pz in range(2, 7):
+            probe_pairs = sample_od_pairs(anchors_by_zoom[pz], pz, road_graph)
+            if probe_pairs:
+                log.info("Probing the router with zoom-%d pairs", pz)
+                break
+        probe_router(road_graph.node_coords, probe_pairs, profile)
 
     for z in range(2, 7):  # z2..z6 (z7 reuses z6)
         log.info("  SBS for zoom %d", z)
