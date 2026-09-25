@@ -20,6 +20,11 @@ COORDS = {1: (-122.68, 45.52), 2: (-123.09, 44.05)}
 PAIRS = [(1, 2)]
 
 
+OOB = "Point 0 is out of bounds: 45.5152,-122.6784, the bounds are: -148.6745"
+NO_ROUTE = ('{"message":"Connection between locations not found","hints":'
+            '[{"details":"com.graphhopper.util.exceptions.ConnectionNotFoundException"}]}')
+
+
 class _Resp:
     def __init__(self, status, payload=None, text=""):
         self.status_code = status
@@ -38,17 +43,36 @@ def _server(resp):
 
 
 class TestProbeRouter:
-    def test_out_of_bounds_raises_with_the_servers_own_message(self, monkeypatch):
+    def test_out_of_bounds_raises(self, monkeypatch):
         """The measured failure: Oregon coordinates against the Washington graph."""
-        body = "Point 0 is out of bounds: 45.5152,-122.6784, the bounds are: -148.6745"
         monkeypatch.setattr(zoom_sbs, "HAS_REQUESTS", True)
-        monkeypatch.setattr(zoom_sbs.requests, "get", _server(_Resp(400, text=body)))
+        monkeypatch.setattr(zoom_sbs.requests, "get", _server(_Resp(400, text=OOB)))
 
         with pytest.raises(PermanentError) as e:
             probe_router(COORDS, PAIRS, "car")
-        # The server's own words, so the operator sees WHY, not just "probe failed".
-        assert "out of bounds" in str(e.value)
-        assert "graphhopper-web serves ONE region" in str(e.value)
+        assert "oob=" in str(e.value), "the outcome tally names what actually happened"
+        assert "out of bounds" in str(e.value), "and the server's own words say why"
+        assert "serves ONE region" in str(e.value)
+
+    def test_a_pair_with_no_route_PASSES(self, monkeypatch):
+        """⚠️ The Hawaii false positive, 2026-09-25.
+
+        Zoom 2 samples pairs at least 300 km apart, which for Hawaii is
+        inter-island, and no car route exists between islands. GraphHopper answers
+        400 for that exactly as it does for a wrong region — but to report
+        ConnectionNotFound it had to snap BOTH points into the loaded graph, so it
+        is positive proof the right region is served. Conflating the two failed a
+        state whose data was fine.
+        """
+        monkeypatch.setattr(zoom_sbs, "HAS_REQUESTS", True)
+        monkeypatch.setattr(zoom_sbs.requests, "get", _server(_Resp(400, text=NO_ROUTE)))
+        probe_router(COORDS, PAIRS, "car")  # must not raise
+
+    def test_200_with_no_paths_also_passes(self, monkeypatch):
+        """Same reasoning: the server answered about this graph."""
+        monkeypatch.setattr(zoom_sbs, "HAS_REQUESTS", True)
+        monkeypatch.setattr(zoom_sbs.requests, "get", _server(_Resp(200, {"paths": []})))
+        probe_router(COORDS, PAIRS, "car")
 
     def test_unreachable_server_raises(self, monkeypatch):
         monkeypatch.setattr(zoom_sbs, "HAS_REQUESTS", True)
@@ -57,8 +81,12 @@ class TestProbeRouter:
             raise OSError("Connection refused")
 
         monkeypatch.setattr(zoom_sbs.requests, "get", _boom)
-        with pytest.raises(PermanentError, match="Connection refused"):
+        with pytest.raises(PermanentError) as e:
             probe_router(COORDS, PAIRS, "car")
+        # The tally says WHAT, the server's own words say WHY: "Connection refused"
+        # and "timeout" call for different actions.
+        assert "transport=" in str(e.value)
+        assert "Connection refused" in str(e.value)
 
     def test_missing_requests_raises_rather_than_routing_nothing(self, monkeypatch):
         monkeypatch.setattr(zoom_sbs, "HAS_REQUESTS", False)
@@ -85,26 +113,48 @@ class _NullIndex:
         return set()
 
 
-class TestCollapseFloor:
-    def test_every_route_failing_raises(self, monkeypatch):
-        """The probe can pass and the server still die mid-loop."""
+class TestServerFaultFloor:
+    """The probe proves the server CAN serve the region, not that it kept doing so."""
+
+    def _run(self, monkeypatch, response):
         monkeypatch.setattr(zoom_sbs, "HAS_REQUESTS", True)
-        monkeypatch.setattr(zoom_sbs, "_route_pair", lambda *a, **k: None)
-        with pytest.raises(PermanentError, match="routing collapsed"):
+        monkeypatch.setattr(zoom_sbs.requests, "get", _server(response))
+        return route_and_accumulate(
+            [(1, 2)] * 100, COORDS, "/graph", "car", _NullIndex(), max_concurrent=2
+        )
+
+    def test_the_server_going_out_of_bounds_mid_run_raises(self, monkeypatch):
+        with pytest.raises(PermanentError, match="stopped serving this region"):
+            self._run(monkeypatch, _Resp(400, text=OOB))
+
+    def test_a_dead_server_mid_run_raises(self, monkeypatch):
+        monkeypatch.setattr(zoom_sbs, "HAS_REQUESTS", True)
+
+        def _boom(url, params=None, timeout=None):
+            raise OSError("Connection refused")
+
+        monkeypatch.setattr(zoom_sbs.requests, "get", _boom)
+        with pytest.raises(PermanentError, match="stopped serving this region"):
             route_and_accumulate(
                 [(1, 2)] * 100, COORDS, "/graph", "car", _NullIndex(), max_concurrent=2
             )
 
+    def test_every_pair_unroutable_is_NOT_a_failure(self, monkeypatch):
+        """Hawaii: an archipelago's long pairs are genuinely unroutable by car."""
+        votes, routed = self._run(monkeypatch, _Resp(400, text=NO_ROUTE))
+        assert routed == 0
+        assert votes == {}
+
     def test_a_sparse_but_real_result_is_kept(self, monkeypatch):
-        """Some pairs legitimately have no path; that is data, not a failure."""
         monkeypatch.setattr(zoom_sbs, "HAS_REQUESTS", True)
         calls = {"n": 0}
+        ok = _Resp(200, {"paths": [{"points": {"coordinates": [[-122.68, 45.52]]}}]})
 
-        def _sometimes(*a, **k):
+        def _sometimes(url, params=None, timeout=None):
             calls["n"] += 1
-            return [[-122.68, 45.52]] if calls["n"] % 2 else None
+            return ok if calls["n"] % 2 else _Resp(400, text=NO_ROUTE)
 
-        monkeypatch.setattr(zoom_sbs, "_route_pair", _sometimes)
+        monkeypatch.setattr(zoom_sbs.requests, "get", _sometimes)
         _votes, routed = route_and_accumulate(
             [(1, 2)] * 100, COORDS, "/graph", "car", _NullIndex(), max_concurrent=2
         )

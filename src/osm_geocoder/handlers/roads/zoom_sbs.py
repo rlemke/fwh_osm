@@ -319,14 +319,50 @@ def sample_od_pairs(
     return valid_pairs
 
 
+# How a routing attempt ended. The distinction is load-bearing: two of these mean
+# the SERVER is wrong and the run must stop, and one means the DATA has no route
+# and the run must continue.
+#   ok         a path came back
+#   no_path    GraphHopper resolved BOTH points into this graph and found no route
+#              between them. Measured 2026-09-25 on Hawaii: zoom 2 samples pairs at
+#              least 300 km apart, which is inter-island, and no car route exists.
+#              This is an answer about the data, and it PROVES the right region is
+#              loaded, because an unloaded point could not have been snapped.
+#   oob        "Point N is out of bounds" — the graph does not cover these
+#              coordinates, i.e. the server holds another region.
+#   transport  the server did not answer at all (down, restarting, unreachable).
+#   other      any other non-200.
+ROUTE_OK = "ok"
+ROUTE_NO_PATH = "no_path"
+ROUTE_OOB = "oob"
+ROUTE_TRANSPORT = "transport"
+ROUTE_OTHER = "other"
+# Reasons that indict the SERVER rather than the pair.
+ROUTE_SERVER_FAULTS = frozenset({ROUTE_OOB, ROUTE_TRANSPORT, ROUTE_OTHER})
+
+
+def _classify(status: int, body: str) -> str:
+    if "out of bounds" in body or "cannot find point" in body.lower():
+        return ROUTE_OOB
+    if "ConnectionNotFound" in body or "Connection between locations not found" in body:
+        return ROUTE_NO_PATH
+    return ROUTE_OTHER
+
+
 def _route_pair(
     from_node: int,
     to_node: int,
     node_coords: dict[int, tuple[float, float]],
     graph_dir: str,
     profile: str,
+    tally: dict[str, int] | None = None,
+    detail: list[str] | None = None,
 ) -> list[list[float]] | None:
-    """Query GraphHopper HTTP API for fastest route between two nodes."""
+    """Query GraphHopper HTTP API for fastest route between two nodes.
+
+    ``tally`` counts outcomes by the reasons above, so a caller can tell a region
+    the server cannot serve from pairs the map genuinely cannot connect.
+    """
     if not HAS_REQUESTS:
         return None
 
@@ -353,9 +389,26 @@ def _route_pair(
             data = resp.json()
             paths = data.get("paths", [])
             if paths:
+                if tally is not None:
+                    tally[ROUTE_OK] = tally.get(ROUTE_OK, 0) + 1
                 points = paths[0].get("points", {})
                 return points.get("coordinates", [])
+            if tally is not None:
+                tally[ROUTE_NO_PATH] = tally.get(ROUTE_NO_PATH, 0) + 1
+            return None
+        reason = _classify(resp.status_code, resp.text)
+        if tally is not None:
+            tally[reason] = tally.get(reason, 0) + 1
+        if detail is not None and reason in ROUTE_SERVER_FAULTS:
+            detail.append(f"HTTP {resp.status_code}: {resp.text[:200]}")
+        if reason is ROUTE_OTHER or reason == ROUTE_OTHER:
+            log.debug("Route %d→%d HTTP %s: %s", from_node, to_node,
+                      resp.status_code, resp.text[:200])
     except Exception as e:
+        if tally is not None:
+            tally[ROUTE_TRANSPORT] = tally.get(ROUTE_TRANSPORT, 0) + 1
+        if detail is not None:
+            detail.append(f"{type(e).__name__}: {e}")
         log.debug("Route failed %d→%d: %s", from_node, to_node, e)
 
     return None
@@ -485,7 +538,14 @@ def probe_router(
     Washington server with Oregon and Idaho coordinates. A hollow map is worse
     than a failed run, because nothing downstream can tell.
 
-    So probe a few real pairs first and raise with the server's OWN message.
+    ⚠️ **A pair with no route is not a wrong region.** GraphHopper answers HTTP
+    400 for both, and the first version of this probe conflated them: Hawaii
+    failed on 2026-09-25 because zoom 2 samples pairs at least 300 km apart,
+    which is inter-island, and no car route exists between islands. But
+    ``ConnectionNotFound`` is positive evidence — to report it the server had to
+    snap BOTH points into the loaded graph — so it PASSES the probe. Only
+    out-of-bounds, a dead server, or an unrecognised response indict the server.
+
     ``PermanentError``: a graph that does not cover these coordinates will not
     start covering them on retry.
     """
@@ -497,40 +557,37 @@ def probe_router(
     if not pairs:
         return
 
-    last: str = "no pair had usable coordinates"
+    tally: dict[str, int] = {}
+    detail: list[str] = []
+    probed = 0
     for from_node, to_node in pairs[:attempts]:
-        a = node_coords.get(from_node)
-        b = node_coords.get(to_node)
-        if not a or not b:
+        if from_node not in node_coords or to_node not in node_coords:
             continue
-        try:
-            resp = requests.get(
-                f"{GRAPHHOPPER_API_URL}/route",
-                params={
-                    "point": [f"{a[1]},{a[0]}", f"{b[1]},{b[0]}"],
-                    "profile": profile,
-                    "type": "json",
-                    "points_encoded": "false",
-                },
-                timeout=30,
-            )
-        except Exception as e:  # unreachable server, DNS, timeout
-            last = f"{type(e).__name__}: {e}"
-            continue
-        if resp.status_code == 200 and (resp.json().get("paths") or []):
+        probed += 1
+        _route_pair(from_node, to_node, node_coords, graph_dir="", profile=profile,
+                    tally=tally, detail=detail)
+        if tally.get(ROUTE_OK) or tally.get(ROUTE_NO_PATH):
             log.info(
-                "Router probe OK: %s serves profile %r for this region",
+                "Router probe OK: %s serves this region for profile %r (%d routed, "
+                "%d with no path)",
                 GRAPHHOPPER_API_URL, profile,
+                tally.get(ROUTE_OK, 0), tally.get(ROUTE_NO_PATH, 0),
             )
             return
-        last = f"HTTP {resp.status_code}: {resp.text[:300]}"
 
+    if not probed:
+        return  # nothing had usable coordinates; nothing to prove
+
+    faults = ", ".join(f"{k}={v}" for k, v in sorted(tally.items()))
     raise PermanentError(
-        f"the routing server at {GRAPHHOPPER_API_URL} cannot route this region "
-        f"(profile {profile!r}); last response -> {last}. "
-        "graphhopper-web serves ONE region+profile, so a server holding a different "
-        "state rejects every pair as out of bounds and the run would produce a map "
-        "with no betweenness at all. Point the graphhopper role at this region "
+        f"the routing server at {GRAPHHOPPER_API_URL} cannot serve this region "
+        f"(profile {profile!r}): {probed} probe pairs, outcomes {faults or 'none'}; "
+        f"last response -> {detail[-1] if detail else 'nothing'}. "
+        "Every one was refused for a reason that indicts the SERVER, not the pair "
+        "(out of bounds, unreachable, or an unrecognised response) — graphhopper-web "
+        "serves ONE region+profile, so a server holding a different state rejects "
+        "every pair and the run would produce a map with no betweenness at all. "
+        "Point the graphhopper role at this region "
         "(`fw fleet set --graphhopper-region <region>`) and wait for it to be healthy."
     )
 
@@ -563,6 +620,7 @@ def route_and_accumulate(
     if not HAS_REQUESTS:
         log.warning("requests not available, skipping routing")
         return dict(bc), 0
+    tally: dict[str, int] = {}
 
     total = len(pairs)
     routed = 0
@@ -593,7 +651,7 @@ def route_and_accumulate(
         it = iter(pairs)
         try:
             for a, b in it:
-                pending.add(pool.submit(_route_pair, a, b, node_coords, graph_dir, profile))
+                pending.add(pool.submit(_route_pair, a, b, node_coords, graph_dir, profile, tally))
                 if len(pending) >= submit_window:
                     finished = next(as_completed(pending))
                     pending.discard(finished)
@@ -610,11 +668,22 @@ def route_and_accumulate(
     # mid-loop (restarted, OOM-killed, repointed at another state by a concurrent
     # `fleet set`). Zero votes is not a sparse result, it is no result, and every
     # downstream score would be uniformly 0 while the step reported success.
-    if total and routed * 20 < total:
+    faults = sum(tally.get(r, 0) for r in ROUTE_SERVER_FAULTS)
+    answered = sum(tally.values())
+    if answered:
+        log.info("Routing outcomes: %s", ", ".join(f"{k}={v}" for k, v in sorted(tally.items())))
+    # Judge the SERVER, not the map. A pair with no route is data — Hawaii's
+    # inter-island zoom-2 sample is almost entirely unroutable by car, and a
+    # blanket "under 5% returned a path" floor failed that state on 2026-09-25.
+    # Out-of-bounds and transport failures are the ones that mean this run cannot
+    # produce betweenness, and a repointed or dead server drives them to ~100%.
+    if answered and faults * 5 > answered:
         raise PermanentError(
-            f"routing collapsed: only {routed:,} of {total:,} sampled pairs returned a "
-            f"path against {GRAPHHOPPER_API_URL}. Betweenness computed from this would "
-            "be meaningless, so the run stops here rather than publishing a hollow map."
+            f"the routing server at {GRAPHHOPPER_API_URL} stopped serving this region "
+            f"mid-run: {faults:,} of {answered:,} requests failed in a way that indicts "
+            f"the server ({', '.join(f'{k}={v}' for k, v in sorted(tally.items()))}). "
+            "Betweenness computed from this would be meaningless, so the run stops "
+            "here rather than publishing a hollow map."
         )
     if heartbeat is not None:
         heartbeat(f"routed {routed:,}/{total:,} pairs")
