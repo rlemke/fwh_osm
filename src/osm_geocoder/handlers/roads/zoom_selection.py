@@ -46,6 +46,51 @@ W_SPECIAL: dict[int, float] = {
 # region — and that single statewide budget (260 km at z4, against 91,899 km of
 # road) is what actually limited selection. The adaptive per-cell budget of
 # spec 6 had never run at all.
+# Minimum length (km) a DISCONNECTED piece of the selection must reach to be kept.
+#
+# ⚠️ Selection is PER EDGE and checks no connectivity. The greedy pass adds any
+# edge that fits its cell budget, and the sparse-region floor pads an under-filled
+# rural cell with "the highest-scoring unselected edges in this cell" one at a
+# time — neither asks whether the edge touches anything already selected. Backbone
+# repair enforces connectivity only between sampled ANCHORS, so it never reaches
+# these. The result is orphan stubs, and they are not rare: measured 2026-09-25 on
+# the published layers,
+#
+#   iowa     z7  48,482 edges -> 727 components; 671 under 2 km (92% of components)
+#   nebraska z7  46,511 edges -> 1,012 components; 941 under 2 km (93%)
+#
+# — one giant network plus ~700-1,000 fragments, most of them ONE OR TWO edges.
+# Only 2-3% of edges, but they dominate the eye in empty farmland because the real
+# network is elsewhere.
+#
+# ⚠️ They are NOT disconnected in OSM. At z7 the class floor is `unclassified` and
+# the roads joining these farm stubs to the network are `residential`/`service`,
+# below the floor — the connector is real but invisible at this zoom. So this is
+# cartographic generalisation, not data repair: at this scale an isolated two-block
+# fragment carries no information, and dropping it is the standard treatment.
+# ⚠️ CALIBRATED BY SWEEP, not chosen. The first cut scaled the threshold like the
+# other ladders (50 km at z2 down to 2 km at z7) and was badly wrong in the middle:
+# it removed 29% of z4's selected LENGTH on Iowa and 22% of z5's on Nebraska. At the
+# low zooms the selection is a deliberately sparse SAMPLE, so it fragments by design
+# and component length stops being a proxy for "orphan" — pruning there deletes the
+# content, not the noise.
+#
+# Measured trade-off (% of selected length removed, iowa / nebraska):
+#
+#        0.5 km      1.0 km      2.0 km      5.0 km
+#   z4   0.51/0.60   1.59/1.50   4.84/5.08  14.57/11.54
+#   z5   0.32/0.42   0.72/0.93   2.15/3.47   8.12/14.21
+#   z6   0.16/0.28   0.36/0.62   0.67/1.14   1.64/2.56
+#   z7   0.07/0.13   0.14/0.28   0.22/0.52   0.34/0.83
+#
+# So the ladder RISES with zoom, which is right for the reason it looks backwards:
+# the denser the tier, the smaller a share an orphan of a given length is, and the
+# safer it is to drop. These values hold collateral under ~1% of length everywhere
+# while still catching the reported stubs, which are well under 2 km.
+MIN_COMPONENT_KM: dict[int, float] = {
+    2: 0.5, 3: 0.5, 4: 0.5, 5: 1.0, 6: 1.5, 7: 2.5,
+}
+
 BASE_KM: dict[int, float] = {
     2: 1.0,
     3: 1.5,
@@ -422,16 +467,117 @@ def select_edges(
                                 if cell_used_km[cell] >= min_km:
                                     break
 
+        # Generalisation: drop the orphans the three passes above create.
+        selected, pruned_n, pruned_km = prune_fragments(
+            graph, selected, z, protected=backbone_added
+        )
+
         selected_by_zoom[z] = selected
         log.info(
-            "Zoom %d: selected %d edges (%.0f km)",
+            "Zoom %d: selected %d edges (%.0f km); pruned %d orphan edges (%.0f km, "
+            "components under %.0f km)",
             z,
             len(selected),
             sum(graph.edge_by_id[e].length_m / 1000 for e in selected if e in graph.edge_by_id),
+            pruned_n,
+            pruned_km,
+            MIN_COMPONENT_KM.get(z, 0.0),
         )
 
     return selected_by_zoom
 
+
+
+
+def prune_fragments(
+    graph: RoadGraph,
+    selected: set[int],
+    zoom: int,
+    protected: set[int] | None = None,
+) -> tuple[set[int], int, float]:
+    """Drop short pieces of the selection that connect to nothing.
+
+    Returns ``(kept, dropped_edge_count, dropped_km)``.
+
+    Two rules decide a component's fate, and the second is what keeps this from
+    deleting real places:
+
+    1. **Long enough is kept.** ``MIN_COMPONENT_KM[zoom]`` is the bar.
+    2. **Complete is kept, however short.** A component none of whose nodes touch
+       an unselected edge is not a fragment we created — it is a road network that
+       is genuinely isolated in the data, an island's roads being the obvious case.
+       Only components we CUT (some node continues into an edge we did not select)
+       are eligible to be pruned.
+
+    ``protected`` edges (backbone repair's output) are never dropped, and neither
+    is any component containing one.
+    """
+    protected = protected or set()
+    min_km = MIN_COMPONENT_KM.get(zoom)
+    if not min_km or not selected:
+        return set(selected), 0, 0.0
+
+    # Components over the SELECTED subgraph, by node adjacency.
+    comp_of: dict[int, int] = {}
+    components: list[list[int]] = []
+    sub_adj: dict[int, list[int]] = defaultdict(list)
+    for eid in selected:
+        edge = graph.edge_by_id.get(eid)
+        if not edge:
+            continue
+        sub_adj[edge.from_node].append(eid)
+        sub_adj[edge.to_node].append(eid)
+
+    for start in sub_adj:
+        if start in comp_of:
+            continue
+        cid = len(components)
+        members: list[int] = []
+        stack = [start]
+        comp_of[start] = cid
+        while stack:
+            node = stack.pop()
+            members.append(node)
+            for eid in sub_adj.get(node, ()):
+                edge = graph.edge_by_id.get(eid)
+                if not edge:
+                    continue
+                other = edge.to_node if edge.from_node == node else edge.from_node
+                if other not in comp_of:
+                    comp_of[other] = cid
+                    stack.append(other)
+        components.append(members)
+
+    comp_edges: dict[int, set[int]] = defaultdict(set)
+    comp_km: dict[int, float] = defaultdict(float)
+    for eid in selected:
+        edge = graph.edge_by_id.get(eid)
+        if not edge:
+            continue
+        cid = comp_of.get(edge.from_node)
+        if cid is None:
+            continue
+        comp_edges[cid].add(eid)
+        comp_km[cid] += edge.length_m / 1000.0
+
+    kept = set(selected)
+    dropped = 0
+    dropped_km = 0.0
+    for cid, edges in comp_edges.items():
+        if comp_km[cid] >= min_km or edges & protected:
+            continue
+        # Rule 2: did we cut this, or is it isolated in the data?
+        cut = any(
+            any(e not in selected for e in graph.adj.get(node, ()))
+            for node in components[cid]
+        )
+        if not cut:
+            continue
+        kept -= edges
+        dropped += len(edges)
+        dropped_km += comp_km[cid]
+
+    return kept, dropped, dropped_km
 
 def _backbone_repair(
     graph: RoadGraph,

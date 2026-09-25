@@ -81,6 +81,7 @@ def recipe_fingerprint() -> str:
     )
     from .zoom_selection import (
         BASE_KM,
+        MIN_COMPONENT_KM,
         MIN_FC_BY_ZOOM,
         MIN_KM,
         SKELETON_FCS,
@@ -94,6 +95,7 @@ def recipe_fingerprint() -> str:
             "skeleton": sorted(SKELETON_FCS),
             "w_sb": W_SB, "w_fc": W_FC,
             "base_km": BASE_KM, "min_km": MIN_KM,
+            "min_component_km": MIN_COMPONENT_KM,
             "anchor_pop": ANCHOR_POP_THRESHOLDS, "anchor_targets": ANCHOR_TARGETS,
             "k_pairs": DEFAULT_K_PAIRS, "min_pair_km": MIN_PAIR_DISTANCE_KM,
             "bypass": [BYPASS_TIME_RATIO, BYPASS_CORE_FRACTION_MAX, BYPASS_FC_ADVANTAGE],
