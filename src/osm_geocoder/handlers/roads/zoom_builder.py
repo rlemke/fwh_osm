@@ -47,6 +47,7 @@ from .zoom_selection import (
     build_cell_budgets,
     compute_scores,
     enforce_monotonic_reveal,
+    prune_assignments,
     select_edges,
 )
 
@@ -96,6 +97,11 @@ def recipe_fingerprint() -> str:
             "w_sb": W_SB, "w_fc": W_FC,
             "base_km": BASE_KM, "min_km": MIN_KM,
             "min_component_km": MIN_COMPONENT_KM,
+            # ⚠️ Behaviour, not a constant: the prune moved from per-zoom
+            # pre-union to one monotonic post-union pass. The fingerprint hashes
+            # CONSTANTS, so a code-only change is invisible to it and every cached
+            # layer would come back with the old behaviour.
+            "prune_stage": "post-union-monotonic",
             "anchor_pop": ANCHOR_POP_THRESHOLDS, "anchor_targets": ANCHOR_TARGETS,
             "k_pairs": DEFAULT_K_PAIRS, "min_pair_km": MIN_PAIR_DISTANCE_KM,
             "bypass": [BYPASS_TIME_RATIO, BYPASS_CORE_FRACTION_MAX, BYPASS_FC_ADVANTAGE],
@@ -282,6 +288,15 @@ def build_zoom_layers(
     if heartbeat is not None:
         heartbeat("step 8")
     assignments = enforce_monotonic_reveal(selected_by_zoom)
+
+    # 8b. Generalisation: drop the orphan fragments per-edge selection leaves.
+    # AFTER the union, because the union is what the map shows, and applied as one
+    # set across every zoom, because the bar rises with zoom and pruning the layers
+    # independently would make a road vanish as you zoom IN.
+    assignments, pruned_n, pruned_km = prune_assignments(
+        road_graph, assignments, backbone_by_zoom
+    )
+    log.info("Step 8b: pruned %d orphan edges (%.0f km) from every zoom", pruned_n, pruned_km)
 
     # 9. Export
     log.info("Step 9: Exporting results")

@@ -111,3 +111,64 @@ class TestPruneFragments:
         g = _graph(_edge(1, 10, 11, 0.1), _edge(9, 11, 12, 0.1))
         kept, dropped, _ = prune_fragments(g, {1}, 99)
         assert kept == {1} and dropped == 0
+
+
+class TestPruneAssignments:
+    """⚠️ The regression this class exists for.
+
+    Pruning each zoom's own selection BEFORE the monotonic union cannot see what
+    the union puts on the map: a component clearing z6's 1.5 km bar is carried into
+    z7 and never re-tested against z7's 2.5 km bar (69 such edges survived on
+    natively-built Washington). But pruning the unioned layers INDEPENDENTLY breaks
+    monotonic reveal, because the bar rises with zoom — measured on the backfilled
+    layers, Maryland lost 112 edges between z6 and z7 and Arizona 87. A road that
+    vanishes as you zoom IN is worse than the stub it replaced.
+    """
+
+    def _fixture(self):
+        # A long spine, plus a 2.0 km orphan: over z5's 1.0 km bar, under z7's 2.5.
+        g = _graph(
+            _edge(1, 10, 11, 40.0),
+            _edge(2, 11, 12, 40.0),
+            _edge(3, 50, 51, 2.0),   # the orphan
+            _edge(9, 51, 12, 0.2),   # its unselected connector
+        )
+        # Already monotonic: each zoom a superset of the one below.
+        assignments = {
+            5: {1, 3},
+            6: {1, 2, 3},
+            7: {1, 2, 3},
+        }
+        return g, assignments
+
+    def test_a_zoom_specific_drop_is_applied_to_every_zoom(self):
+        g, assignments = self._fixture()
+        pruned, n, km = zs.prune_assignments(g, assignments)
+        assert n == 1 and km == pytest.approx(2.0)
+        for z, kept in pruned.items():
+            assert 3 not in kept, f"the orphan survived at z{z}"
+
+    def test_monotonic_reveal_survives_the_prune(self):
+        """Nothing may disappear as you zoom in."""
+        g, assignments = self._fixture()
+        pruned, _, _ = zs.prune_assignments(g, assignments)
+        for z in sorted(pruned)[:-1]:
+            assert pruned[z] <= pruned[z + 1], f"z{z} is not a subset of z{z + 1}"
+
+    def test_the_real_network_is_untouched(self):
+        g, assignments = self._fixture()
+        pruned, _, _ = zs.prune_assignments(g, assignments)
+        assert pruned[7] == {1, 2}
+        assert pruned[5] == {1}
+
+    def test_nothing_to_do_is_a_clean_no_op(self):
+        g = _graph(_edge(1, 10, 11, 40.0), _edge(2, 11, 12, 40.0))
+        pruned, n, km = zs.prune_assignments(g, {7: {1, 2}})
+        assert (n, km) == (0, 0.0)
+        assert pruned == {7: {1, 2}}
+
+    def test_backbone_edges_are_protected_per_zoom(self):
+        g, assignments = self._fixture()
+        pruned, n, _ = zs.prune_assignments(g, assignments, backbone_by_zoom={7: {3}})
+        assert n == 0
+        assert all(3 in kept for kept in pruned.values())

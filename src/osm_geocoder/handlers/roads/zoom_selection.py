@@ -437,8 +437,6 @@ def select_edges(
         # Backbone connectivity repair (spec §8.2)
         backbone_added = _backbone_repair(graph, selected, anchors, edge_cells, fc_floor)
         selected |= backbone_added
-        if backbone_out is not None:
-            backbone_out[z] = set(backbone_added)
 
         # Sparse region floor (spec §8.3)
         min_km = MIN_KM.get(z, 10.0)
@@ -467,21 +465,14 @@ def select_edges(
                                 if cell_used_km[cell] >= min_km:
                                     break
 
-        # Generalisation: drop the orphans the three passes above create.
-        selected, pruned_n, pruned_km = prune_fragments(
-            graph, selected, z, protected=backbone_added
-        )
-
         selected_by_zoom[z] = selected
+        if backbone_out is not None:
+            backbone_out[z] = set(backbone_added)
         log.info(
-            "Zoom %d: selected %d edges (%.0f km); pruned %d orphan edges (%.0f km, "
-            "components under %.0f km)",
+            "Zoom %d: selected %d edges (%.0f km)",
             z,
             len(selected),
             sum(graph.edge_by_id[e].length_m / 1000 for e in selected if e in graph.edge_by_id),
-            pruned_n,
-            pruned_km,
-            MIN_COMPONENT_KM.get(z, 0.0),
         )
 
     return selected_by_zoom
@@ -578,6 +569,49 @@ def prune_fragments(
         dropped_km += comp_km[cid]
 
     return kept, dropped, dropped_km
+
+def prune_assignments(
+    graph: RoadGraph,
+    assignments: dict[int, set[int]],
+    backbone_by_zoom: dict[int, set[int]] | None = None,
+) -> tuple[dict[int, set[int]], int, float]:
+    """Prune orphans from the layers as they will be DISPLAYED, monotonically.
+
+    ⚠️ Must run AFTER ``enforce_monotonic_reveal``, and the two rules below are
+    what make that safe.
+
+    Pruning each zoom's own selection BEFORE the union cannot see what the union
+    puts on the map: a component that clears z6's 1.5 km bar is carried into z7 by
+    ``S'_z = S_z ∪ S'_{z-1}`` and never re-tested against z7's 2.5 km bar. Measured
+    2026-09-25 on natively-built Washington — 69 such edges survived.
+
+    But pruning the unioned layers INDEPENDENTLY breaks monotonic reveal, because
+    the bar RISES with zoom: a 2 km component kept at z5 is dropped at z7, so a
+    road VANISHES as you zoom in. Measured on the backfilled layers — Maryland lost
+    112 edges from z6 to z7, Arizona 87, and a road disappearing when you zoom in
+    is worse than the stub it replaced.
+
+    So: decide per zoom, then apply the UNION of every zoom's decision to every
+    zoom. The layers were nested before, they lose the same set, so they stay
+    nested — and nothing a higher zoom judged an orphan survives lower down, where
+    it is a subset of the very component that was rejected.
+    """
+    backbone_by_zoom = backbone_by_zoom or {}
+    doomed: set[int] = set()
+    for z, selected in assignments.items():
+        _kept, _n, _km = prune_fragments(
+            graph, selected, z, protected=backbone_by_zoom.get(z, set())
+        )
+        doomed |= selected - _kept
+
+    if not doomed:
+        return {z: set(v) for z, v in assignments.items()}, 0, 0.0
+
+    dropped_km = sum(
+        graph.edge_by_id[e].length_m / 1000.0 for e in doomed if e in graph.edge_by_id
+    )
+    pruned = {z: set(v) - doomed for z, v in assignments.items()}
+    return pruned, len(doomed), dropped_km
 
 def _backbone_repair(
     graph: RoadGraph,
