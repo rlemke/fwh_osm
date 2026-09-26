@@ -141,12 +141,33 @@ class TestPruneAssignments:
         }
         return g, assignments
 
-    def test_a_zoom_specific_drop_is_applied_to_every_zoom(self):
+    def test_a_drop_at_the_top_propagates_DOWN(self):
         g, assignments = self._fixture()
         pruned, n, km = zs.prune_assignments(g, assignments)
         assert n == 1 and km == pytest.approx(2.0)
         for z, kept in pruned.items():
             assert 3 not in kept, f"the orphan survived at z{z}"
+
+    def test_a_drop_at_a_LOW_zoom_does_not_reach_up(self):
+        """⚠️ The over-correction this replaced.
+
+        A component that is an orphan at z5 is often well connected at z7 — z7
+        holds the very edges that join it up. Unioning every zoom's verdict and
+        applying it everywhere deletes connected road from the most detailed
+        layer: measured on alabama, 3,515 edges removed from z7 against the 987
+        that are actually orphans there. Monotonicity does not require it either:
+        dropping low while keeping high preserves kept_z subset-of kept_z+1.
+        """
+        g = _graph(
+            _edge(1, 10, 11, 40.0),
+            _edge(3, 50, 51, 0.8),    # alone at z5, joined to the spine at z7
+            _edge(4, 51, 11, 0.9),    # the joining edge, selected only at z7
+        )
+        assignments = {5: {1, 3}, 7: {1, 3, 4}}
+        pruned, _n, _km = zs.prune_assignments(g, assignments)
+        assert 3 not in pruned[5], "orphan at z5 must go at z5"
+        assert pruned[7] == {1, 3, 4}, "but z7 connects it, so z7 keeps it"
+        assert pruned[5] <= pruned[7]
 
     def test_monotonic_reveal_survives_the_prune(self):
         """Nothing may disappear as you zoom in."""

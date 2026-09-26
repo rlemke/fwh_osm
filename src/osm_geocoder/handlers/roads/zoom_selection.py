@@ -575,43 +575,51 @@ def prune_assignments(
     assignments: dict[int, set[int]],
     backbone_by_zoom: dict[int, set[int]] | None = None,
 ) -> tuple[dict[int, set[int]], int, float]:
-    """Prune orphans from the layers as they will be DISPLAYED, monotonically.
+    """Prune orphans from the layers as DISPLAYED, without breaking the reveal.
 
-    ⚠️ Must run AFTER ``enforce_monotonic_reveal``, and the two rules below are
-    what make that safe.
+    ⚠️ Must run AFTER ``enforce_monotonic_reveal``. Three rules, each pinned by a
+    measurement, because the two obvious implementations are both wrong.
 
-    Pruning each zoom's own selection BEFORE the union cannot see what the union
-    puts on the map: a component that clears z6's 1.5 km bar is carried into z7 by
-    ``S'_z = S_z ∪ S'_{z-1}`` and never re-tested against z7's 2.5 km bar. Measured
-    2026-09-25 on natively-built Washington — 69 such edges survived.
+    **Why after the union.** Pruning each zoom's own selection first cannot see
+    what the union puts on the map: a component clearing z6's 1.5 km bar rides
+    ``S'_z = S_z ∪ S'_{z-1}`` into z7 and is never re-tested against z7's 2.5 km
+    bar. 69 such edges survived on natively-built Washington.
 
-    But pruning the unioned layers INDEPENDENTLY breaks monotonic reveal, because
-    the bar RISES with zoom: a 2 km component kept at z5 is dropped at z7, so a
-    road VANISHES as you zoom in. Measured on the backfilled layers — Maryland lost
-    112 edges from z6 to z7, Arizona 87, and a road disappearing when you zoom in
-    is worse than the stub it replaced.
+    **Why not independently per layer.** The bar RISES with zoom, so a 2 km
+    component kept at z5 would be dropped at z7 and the road VANISHES as you zoom
+    in — maryland lost 112 edges z6→z7, arizona 87. Monotonic reveal exists to
+    forbid that.
 
-    So: decide per zoom, then apply the UNION of every zoom's decision to every
-    zoom. The layers were nested before, they lose the same set, so they stay
-    nested — and nothing a higher zoom judged an orphan survives lower down, where
-    it is a subset of the very component that was rejected.
+    **Why drops propagate DOWNWARD and not as one global union.** The constraint is
+    asymmetric: ``kept_z ⊆ kept_{z+1}`` is broken only by dropping at a HIGHER zoom
+    what a lower zoom keeps. Dropping at a lower zoom something a higher zoom keeps
+    is perfectly monotonic. And the difference matters, because **a component that
+    is an orphan at z5 is often well connected at z7** — z7 holds the very edges
+    that join it up. Unioning every zoom's verdict and applying it everywhere
+    therefore deletes connected road from the most detailed layer: measured on
+    alabama, 3,515 edges removed from z7 against the 987 that are actually orphans
+    there.
+
+    So walk the zooms from the top down, accumulating: an edge is kept at zoom z
+    unless z, or any zoom above it, judged it an orphan.
     """
     backbone_by_zoom = backbone_by_zoom or {}
     doomed: set[int] = set()
-    for z, selected in assignments.items():
-        _kept, _n, _km = prune_fragments(
+    pruned: dict[int, set[int]] = {}
+    for z in sorted(assignments, reverse=True):
+        selected = assignments[z]
+        kept, _n, _km = prune_fragments(
             graph, selected, z, protected=backbone_by_zoom.get(z, set())
         )
-        doomed |= selected - _kept
+        doomed |= selected - kept
+        pruned[z] = selected - doomed
 
-    if not doomed:
-        return {z: set(v) for z, v in assignments.items()}, 0, 0.0
-
+    removed = set().union(*(assignments[z] - pruned[z] for z in assignments)) if assignments else set()
     dropped_km = sum(
-        graph.edge_by_id[e].length_m / 1000.0 for e in doomed if e in graph.edge_by_id
+        graph.edge_by_id[e].length_m / 1000.0 for e in removed if e in graph.edge_by_id
     )
-    pruned = {z: set(v) - doomed for z, v in assignments.items()}
-    return pruned, len(doomed), dropped_km
+    return pruned, len(removed), dropped_km
+
 
 def _backbone_repair(
     graph: RoadGraph,
