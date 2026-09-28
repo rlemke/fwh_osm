@@ -113,7 +113,7 @@ class TestPruneFragments:
         assert kept == {1} and dropped == 0
 
 
-class TestPruneAssignments:
+class TestPruneLayers:
     """⚠️ The regression this class exists for.
 
     Pruning each zoom's own selection BEFORE the monotonic union cannot see what
@@ -143,7 +143,7 @@ class TestPruneAssignments:
 
     def test_a_drop_at_the_top_propagates_DOWN(self):
         g, assignments = self._fixture()
-        pruned, n, km = zs.prune_assignments(g, assignments)
+        pruned, n, km = zs.prune_layers(g, assignments)
         assert n == 1 and km == pytest.approx(2.0)
         for z, kept in pruned.items():
             assert 3 not in kept, f"the orphan survived at z{z}"
@@ -164,7 +164,7 @@ class TestPruneAssignments:
             _edge(4, 51, 11, 0.9),    # the joining edge, selected only at z7
         )
         assignments = {5: {1, 3}, 7: {1, 3, 4}}
-        pruned, _n, _km = zs.prune_assignments(g, assignments)
+        pruned, _n, _km = zs.prune_layers(g, assignments)
         assert 3 not in pruned[5], "orphan at z5 must go at z5"
         assert pruned[7] == {1, 3, 4}, "but z7 connects it, so z7 keeps it"
         assert pruned[5] <= pruned[7]
@@ -172,24 +172,80 @@ class TestPruneAssignments:
     def test_monotonic_reveal_survives_the_prune(self):
         """Nothing may disappear as you zoom in."""
         g, assignments = self._fixture()
-        pruned, _, _ = zs.prune_assignments(g, assignments)
+        pruned, _, _ = zs.prune_layers(g, assignments)
         for z in sorted(pruned)[:-1]:
             assert pruned[z] <= pruned[z + 1], f"z{z} is not a subset of z{z + 1}"
 
     def test_the_real_network_is_untouched(self):
         g, assignments = self._fixture()
-        pruned, _, _ = zs.prune_assignments(g, assignments)
+        pruned, _, _ = zs.prune_layers(g, assignments)
         assert pruned[7] == {1, 2}
         assert pruned[5] == {1}
 
     def test_nothing_to_do_is_a_clean_no_op(self):
         g = _graph(_edge(1, 10, 11, 40.0), _edge(2, 11, 12, 40.0))
-        pruned, n, km = zs.prune_assignments(g, {7: {1, 2}})
+        pruned, n, km = zs.prune_layers(g, {7: {1, 2}})
         assert (n, km) == (0, 0.0)
         assert pruned == {7: {1, 2}}
 
     def test_backbone_edges_are_protected_per_zoom(self):
         g, assignments = self._fixture()
-        pruned, n, _ = zs.prune_assignments(g, assignments, backbone_by_zoom={7: {3}})
+        pruned, n, _ = zs.prune_layers(g, assignments, backbone_by_zoom={7: {3}})
         assert n == 0
         assert all(3 in kept for kept in pruned.values())
+
+
+class TestPruneAssignmentsIsTheShapeThePipelineUses:
+    """⚠️ The coverage gap that let a crash reach the main path.
+
+    Every test above exercises the LAYER-shaped function, because that is the
+    shape the backfill script passes. The pipeline passes the other shape —
+    `{edge_id: min_zoom}`, straight out of `enforce_monotonic_reveal` — and
+    nothing called the two in sequence, so when step 8b was added in `bab0515`
+    it went in with the wrong argument and every test stayed green. Both dicts
+    are `dict[int, ...]`; the mismatch only surfaces when a value is used.
+
+    It survived the entire 49-state batch because those states were built by the
+    deployed image, which still had the earlier per-zoom prune, and the
+    corrected logic reached the published maps through the backfill — the one
+    caller that passes layers. A re-bake would have shipped a crash.
+    """
+
+    def _net(self):
+        # a real network plus a short cut-off stub
+        g = _graph(
+            _edge(1, 10, 11, 20.0),
+            _edge(2, 11, 12, 20.0),
+            _edge(3, 90, 91, 0.3),   # stub, cut from node 91
+            _edge(4, 91, 92, 20.0),  # its unselected connector
+        )
+        return g
+
+    def test_the_two_functions_compose_in_pipeline_order(self):
+        """enforce_monotonic_reveal -> prune_assignments, as zoom_builder calls it."""
+        g = self._net()
+        assignments = zs.enforce_monotonic_reveal({7: {1, 2, 3}})
+        pruned, dropped, _km = zs.prune_assignments(g, assignments)
+        assert isinstance(pruned, dict)
+        assert all(isinstance(v, int) for v in pruned.values()), "must stay {edge: min_zoom}"
+        assert dropped == 1 and 3 not in pruned
+        assert pruned[1] == 7 and pruned[2] == 7
+
+    def test_min_zoom_is_preserved_for_what_survives(self):
+        g = self._net()
+        assignments = zs.enforce_monotonic_reveal({4: {1}, 7: {2}})
+        pruned, _n, _km = zs.prune_assignments(g, assignments)
+        assert pruned == {1: 4, 2: 7}
+
+    def test_handing_it_layers_is_refused_LOUDLY(self):
+        """The failure mode was a TypeError deep inside prune_fragments.
+
+        Both shapes are dict[int, ...], so the only protection is to say so at
+        the boundary — a wrong call must name what it got, not surface as
+        "'int' object is not iterable" three frames down.
+        """
+        g = self._net()
+        with pytest.raises(TypeError, match="prune_layers"):
+            zs.prune_assignments(g, {7: {1, 2}})
+        with pytest.raises(TypeError, match="prune_assignments"):
+            zs.prune_layers(g, {1: 7, 2: 7})

@@ -570,9 +570,9 @@ def prune_fragments(
 
     return kept, dropped, dropped_km
 
-def prune_assignments(
+def prune_layers(
     graph: RoadGraph,
-    assignments: dict[int, set[int]],
+    layers: dict[int, set[int]],
     backbone_by_zoom: dict[int, set[int]] | None = None,
 ) -> tuple[dict[int, set[int]], int, float]:
     """Prune orphans from the layers as DISPLAYED, without breaking the reveal.
@@ -604,21 +604,74 @@ def prune_assignments(
     unless z, or any zoom above it, judged it an orphan.
     """
     backbone_by_zoom = backbone_by_zoom or {}
+    for z, edges in layers.items():
+        if not isinstance(edges, (set, frozenset)):
+            raise TypeError(
+                "prune_layers takes {zoom: set_of_edge_ids} — the CUMULATIVE layers. "
+                f"Got {type(edges).__name__} for key {z}. For the {{edge_id: min_zoom}} "
+                "map that enforce_monotonic_reveal returns, call prune_assignments."
+            )
     doomed: set[int] = set()
     pruned: dict[int, set[int]] = {}
-    for z in sorted(assignments, reverse=True):
-        selected = assignments[z]
+    for z in sorted(layers, reverse=True):
+        selected = layers[z]
         kept, _n, _km = prune_fragments(
             graph, selected, z, protected=backbone_by_zoom.get(z, set())
         )
         doomed |= selected - kept
         pruned[z] = selected - doomed
 
-    removed = set().union(*(assignments[z] - pruned[z] for z in assignments)) if assignments else set()
+    removed = set().union(*(layers[z] - pruned[z] for z in layers)) if layers else set()
     dropped_km = sum(
         graph.edge_by_id[e].length_m / 1000.0 for e in removed if e in graph.edge_by_id
     )
     return pruned, len(removed), dropped_km
+
+
+def prune_assignments(
+    graph: RoadGraph,
+    assignments: dict[int, int],
+    backbone_by_zoom: dict[int, set[int]] | None = None,
+) -> tuple[dict[int, int], int, float]:
+    """``prune_layers`` in the pipeline's own currency: ``{edge_id: min_zoom}``.
+
+    ⚠️ This wrapper exists because its absence was a crash on the main path.
+    ``bab0515`` added the step 8b call in ``zoom_builder`` passing the
+    ``{edge_id: min_zoom}`` map straight into the layer-shaped function. The two
+    dicts are both ``dict[int, ...]``, so nothing objected until the values were
+    used: ``prune_fragments`` was handed an *int* as its edge set and the run
+    died with ``TypeError: 'int' object is not iterable``.
+
+    It went unnoticed for the entire 49-state batch because those states were
+    built by the DEPLOYED image, which still carried the earlier per-zoom prune;
+    the corrected logic reached the published maps through a separate backfill
+    script that assembled the layers itself and therefore passed the right
+    shape. So the only path that exercised the new code was the one that did not
+    use this call site — and a re-bake, which the batch notes already asked for,
+    would have shipped an image that crashed at step 8b on the first state.
+
+    Converting here rather than at the call site keeps the two shapes named:
+    layers in, layers out for the backfill; min_zoom in, min_zoom out for the
+    pipeline, which is what ``_export_results`` reads.
+    """
+    if any(isinstance(v, (set, frozenset)) for v in assignments.values()):
+        raise TypeError(
+            "prune_assignments takes {edge_id: min_zoom}. Got sets as values — "
+            "those are cumulative layers; call prune_layers instead."
+        )
+    zooms = sorted(set(assignments.values())) or [2]
+    lo, hi = min(min(zooms), 2), max(max(zooms), 7)
+    layers = {
+        z: {e for e, mz in assignments.items() if mz <= z} for z in range(lo, hi + 1)
+    }
+    kept_layers, dropped, dropped_km = prune_layers(graph, layers, backbone_by_zoom)
+
+    out: dict[int, int] = {}
+    for z in sorted(kept_layers):
+        for eid in kept_layers[z]:
+            if eid not in out:
+                out[eid] = z
+    return out, dropped, dropped_km
 
 
 def _backbone_repair(
