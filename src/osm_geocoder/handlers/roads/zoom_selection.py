@@ -6,6 +6,7 @@ and enforces monotonic zoom reveal.
 """
 
 import logging
+import os
 from collections import defaultdict
 
 log = logging.getLogger(__name__)
@@ -338,6 +339,160 @@ def _edge_to_cells(edge) -> set[str]:
     return cells if cells else {"flat"}
 
 
+# Select whole ROADS rather than individual edges.
+#
+# ⚠️ The defect this exists to fix. Selection was per edge under a per-cell
+# budget, and nothing tied an edge to the road it belongs to, so an interior
+# segment that lost its cell's budget left a HOLE while its neighbours stayed.
+# The route then appears in pieces at that zoom — and because the layers are
+# cumulative, that is exactly what the map draws at that map zoom.
+#
+# Measured on the published New York run: of 947 named routes with >=5 selected
+# edges, 338 are more broken at z5 than they are complete (45%), 318 at z6, 202
+# at z4. NY 34B is 2 pieces whole and EIGHT at z5 — all 34 of its edges are
+# `secondary`, so every one was class-eligible at z5; 12 simply lost the budget.
+#
+# The other repair (close the gaps afterwards) treats the symptom. This changes
+# what the unit of selection IS: a corridor is admitted whole or not at all, so
+# a road cannot be half-drawn. A corridor that does not fit at z5 appears at z6,
+# which is the behaviour the graded reveal is supposed to have.
+CORRIDOR_SELECTION: bool = os.environ.get("FW_LZ_CORRIDOR_SELECT", "1") != "0"
+
+# How much of a corridor may lie in cells that cannot afford it and still be
+# admitted whole (the over-budget cells are charged anyway, so the overdraft is
+# visible to everything selected after it).
+#
+# ⚠️ CALIBRATED BY SWEEP, not chosen — and 0.0, the obvious rule, is wrong.
+# Strict all-or-nothing refuses a 200 km arterial because ONE downtown cell it
+# clips is full, so the whole road drops a zoom. That hurts most in the SPARSE
+# states, where the few long routes are the map.
+#
+# Replayed on three finished runs (the selection stage is deterministic and
+# cheap; only routing is expensive). z5 cumulative km / named routes present /
+# % of those routes more broken at z5 than they are complete:
+#
+#                per-edge        0.00          0.25          0.50
+#   new-york   28,588 752 45%  22,644 550 1%  25,606 598 1%  32,974 672 1%
+#   new-jersey 12,314 495 27%  11,430 445 3%  12,019 455 2%  13,356 461 3%
+#   wyoming    10,308 188 51%   6,984 104 7%  10,425 145 6%  12,195 171 4%
+#
+# 0.00 costs Wyoming a THIRD of its z5 length and 45% of its routes. 0.50 stops
+# the budget binding at all — every state gains length over the per-edge run
+# (+15% z5 on New York, +22% z6). 0.25 holds z5 length at roughly the per-edge
+# figure in all three while taking fragmentation from 27-51% down to 1-6%,
+# which is the trade this change exists to make.
+CORRIDOR_OVERDRAFT: float = float(os.environ.get("FW_LZ_CORRIDOR_OVERDRAFT", "0.25"))
+
+
+def corridor_key(edge) -> str | None:
+    """The road identity two edges must share to belong to one corridor.
+
+    `ref` first (`NY 34B`), else `name`. An edge with neither is its own
+    corridor — which keeps per-edge behaviour for the unnamed local roads that
+    make up most of the z7 tier, where there is no route to keep continuous.
+    """
+    ref = (getattr(edge, "ref", "") or "").strip()
+    if ref:
+        return f"ref:{ref}"
+    name = (getattr(edge, "name", "") or "").strip()
+    if name:
+        return f"name:{name}"
+    return None
+
+
+def build_corridors(graph: RoadGraph, eligible: set[int]) -> list[list[int]]:
+    """Partition `eligible` into corridors: connected runs of one road identity.
+
+    ⚠️ Connectivity is part of the identity, not just the name. `NY 34B` can
+    appear in two unconnected places, and `name:Main Street` in hundreds — one
+    corridor per town, which is right. Joining them would make a single budget
+    decision for edges 300 km apart.
+
+    ⚠️ Built over the ELIGIBLE set, i.e. after the zoom's class floor. A route
+    that runs primary then drops to tertiary is two different corridors at z5
+    (only the primary part is eligible) and one at z6. That is deliberate: the
+    floor decides what may be drawn at a zoom, and this decides that whatever
+    may be drawn is drawn whole.
+    """
+    by_key: dict[str, list[int]] = defaultdict(list)
+    singles: list[list[int]] = []
+    for eid in eligible:
+        edge = graph.edge_by_id.get(eid)
+        if edge is None:
+            continue
+        key = corridor_key(edge)
+        if key is None:
+            singles.append([eid])
+        else:
+            by_key[key].append(eid)
+
+    corridors: list[list[int]] = list(singles)
+    for _key, eids in by_key.items():
+        parent: dict[int, int] = {}
+
+        def find(a: int) -> int:
+            while parent[a] != a:
+                parent[a] = parent[parent[a]]
+                a = parent[a]
+            return a
+
+        for eid in eids:
+            e = graph.edge_by_id[eid]
+            for node in (e.from_node, e.to_node):
+                parent.setdefault(node, node)
+            ra, rb = find(e.from_node), find(e.to_node)
+            if ra != rb:
+                parent[ra] = rb
+
+        groups: dict[int, list[int]] = defaultdict(list)
+        for eid in eids:
+            groups[find(graph.edge_by_id[eid].from_node)].append(eid)
+        corridors.extend(groups.values())
+
+    return corridors
+
+
+def corridor_score(corridor: list[int], z_scores: dict[int, float], graph: RoadGraph) -> float:
+    """Length-weighted mean of the member edges' scores.
+
+    The mean, not the sum or the max. The budget is charged in KILOMETRES, so
+    ranking by score-per-km is the knapsack ratio — a sum would rank a long
+    mediocre road above a short vital one purely for being long, and a max
+    would let one good segment carry an entire route into a continental zoom.
+    """
+    total_km = 0.0
+    weighted = 0.0
+    for eid in corridor:
+        edge = graph.edge_by_id.get(eid)
+        if edge is None:
+            continue
+        km = edge.length_m / 1000.0
+        total_km += km
+        weighted += z_scores.get(eid, 0.0) * km
+    return weighted / total_km if total_km > 0 else 0.0
+
+
+def _corridor_cell_cost(
+    corridor: list[int], graph: RoadGraph, edge_cells: dict[int, set[str]]
+) -> dict[str, float]:
+    """Kilometres this corridor would charge to each cell it passes through.
+
+    Same accounting as the per-edge pass — an edge's length split evenly over
+    the cells it touches — just summed over the corridor before any of it is
+    committed, because the decision is now all-or-nothing.
+    """
+    cost: dict[str, float] = defaultdict(float)
+    for eid in corridor:
+        edge = graph.edge_by_id.get(eid)
+        if edge is None:
+            continue
+        cells = edge_cells.get(eid) or {"flat"}
+        per_cell = (edge.length_m / 1000.0) / max(1, len(cells))
+        for cell in cells:
+            cost[cell] += per_cell
+    return dict(cost)
+
+
 def select_edges(
     graph: RoadGraph,
     scores: dict[int, dict[int, float]],
@@ -407,32 +562,78 @@ def select_edges(
             if edge.fc in SKELETON_FCS and edge.fc_score >= fc_floor:
                 selected.add(edge.edge_id)
 
-        # Greedy selection (spec §8.1)
-        for eid, _score in candidates:
-            edge = graph.edge_by_id.get(eid)
-            if not edge:
-                continue
-            if edge.fc_score < fc_floor or eid in selected:
-                continue
+        def _budget_of(cell: str) -> float:
+            return z_budgets.get(cell, {}).get("budget_km", BASE_KM.get(z, 500.0))
 
-            edge_km = edge.length_m / 1000.0
-            cells = edge_cells.get(eid, set())
+        def _fits(cost: dict[str, float], overdraft: float = 0.0) -> bool:
+            """Can this be admitted?
 
-            # Check if adding this edge exceeds budget in any cell
-            can_add = True
-            for cell in cells:
-                budget_info = z_budgets.get(cell, {})
-                budget_km = budget_info.get("budget_km", BASE_KM.get(z, 500.0))
+            With `overdraft` 0 every cell must afford its share. Above 0, the
+            cells that cannot are allowed to hold up to that FRACTION OF THE
+            CANDIDATE'S LENGTH — so a long road is not refused for clipping one
+            saturated cell, while a candidate that is mostly unaffordable still
+            is. The over-budget cells are charged regardless.
+            """
+            short = sum(
+                km for c, km in cost.items() if cell_used_km[c] + km > _budget_of(c)
+            )
+            if short == 0.0:
+                return True
+            total = sum(cost.values())
+            return total > 0 and short / total <= overdraft
+
+        def _charge(cost: dict[str, float]) -> None:
+            for c, km in cost.items():
+                cell_used_km[c] += km
+
+        # Corridor membership is computed ONCE per zoom and reused by the
+        # sparse-region floor below — rebuilding it per candidate there turned a
+        # linear pass into a quadratic one.
+        corridor_of: dict[int, list[int]] = {}
+        if CORRIDOR_SELECTION:
+            # Greedy selection over CORRIDORS (see CORRIDOR_SELECTION).
+            eligible = {
+                eid
+                for eid in z_scores
+                if eid not in selected
+                and (e := graph.edge_by_id.get(eid)) is not None
+                and e.fc_score >= fc_floor
+            }
+            corridors = build_corridors(graph, eligible)
+            for corridor in corridors:
+                for eid in corridor:
+                    corridor_of[eid] = corridor
+            corridors.sort(key=lambda c: corridor_score(c, z_scores, graph), reverse=True)
+            admitted = rejected = 0
+            for corridor in corridors:
+                cost = _corridor_cell_cost(corridor, graph, edge_cells)
+                if _fits(cost, CORRIDOR_OVERDRAFT):
+                    selected.update(corridor)
+                    _charge(cost)
+                    admitted += 1
+                else:
+                    rejected += 1
+            log.info(
+                "Zoom %d: corridors %d admitted, %d deferred to a later zoom",
+                z, admitted, rejected,
+            )
+        else:
+            # Legacy per-edge greedy (spec §8.1). Kept behind
+            # FW_LZ_CORRIDOR_SELECT=0 so the two can be compared on one run.
+            for eid, _score in candidates:
+                edge = graph.edge_by_id.get(eid)
+                if not edge:
+                    continue
+                if edge.fc_score < fc_floor or eid in selected:
+                    continue
+
+                edge_km = edge.length_m / 1000.0
+                cells = edge_cells.get(eid, set())
                 km_per_cell = edge_km / max(1, len(cells))
-                if cell_used_km[cell] + km_per_cell > budget_km:
-                    can_add = False
-                    break
-
-            if can_add:
-                selected.add(eid)
-                for cell in cells:
-                    km_per_cell = edge_km / max(1, len(cells))
-                    cell_used_km[cell] += km_per_cell
+                cost = {c: km_per_cell for c in cells}
+                if _fits(cost):
+                    selected.add(eid)
+                    _charge(cost)
 
         # Backbone connectivity repair (spec §8.2)
         backbone_added = _backbone_repair(graph, selected, anchors, edge_cells, fc_floor)
@@ -452,18 +653,28 @@ def select_edges(
                     # tertiary and unclassified roads reached zoom 2. Measured
                     # 2026-09-24: this path, not the greedy pass, put most of
                     # them there, because rural cells are the common case.
+                    # ⚠️ Tops up with whole CORRIDORS under corridor selection.
+                    # Adding single edges here would put the holes straight back
+                    # — this path is the common one in rural cells, which is
+                    # where a route most often has only one road to be broken.
                     for eid, _score in candidates:
                         if eid in selected:
                             continue
                         cells = edge_cells.get(eid, set())
-                        if cell in cells:
-                            edge = graph.edge_by_id.get(eid)
-                            if edge and edge.fc_score >= fc_floor:
-                                selected.add(eid)
-                                edge_km = edge.length_m / 1000.0
-                                cell_used_km[cell] += edge_km / max(1, len(cells))
-                                if cell_used_km[cell] >= min_km:
-                                    break
+                        if cell not in cells:
+                            continue
+                        edge = graph.edge_by_id.get(eid)
+                        if not edge or edge.fc_score < fc_floor:
+                            continue
+                        piece = corridor_of.get(eid, [eid]) if CORRIDOR_SELECTION else [eid]
+                        piece = [e for e in piece if e not in selected]
+                        if not piece:
+                            continue
+                        cost = _corridor_cell_cost(piece, graph, edge_cells)
+                        selected.update(piece)
+                        _charge(cost)
+                        if cell_used_km[cell] >= min_km:
+                            break
 
         selected_by_zoom[z] = selected
         if backbone_out is not None:

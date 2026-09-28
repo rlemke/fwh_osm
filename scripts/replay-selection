@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""replay-selection — re-run a finished low-zoom run's SELECTION stage offline.
+
+Routing is the expensive part (New York: 1.8 h, 594,536 routes). Everything
+after it — scoring, budgets, selection, monotonic reveal, prune — is
+deterministic and takes about two minutes, and a finished run leaves every one
+of its inputs on disk: `logical_graph.json`, `sbs_z*.json`, the bypass/ring
+flags and the anchors. So a change to the selection rules can be measured
+against 49 real states without routing any of them again.
+
+It reports the metric the selection rules are actually judged on: how often a
+named route is MORE BROKEN at a zoom than it is complete. A route that the
+ladder admits in pieces reads as a road with holes in it, and because the
+layers are cumulative that is what the map draws at that zoom.
+
+    scripts/replay-selection <run_dir> [label]
+    FW_LZ_CORRIDOR_SELECT=0 scripts/replay-selection <run_dir> per-edge
+
+⚠️ It replays from `logical_graph.json`, so it measures the SELECTION rules,
+not the routing that fed them. A change to SBS, anchors or bypass detection is
+invisible here and needs a real run.
+"""
+import collections
+import json
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+
+def _reexec_into_a_python_that_has_facetwork() -> None:
+    """`#!/usr/bin/env python3` is not the interpreter this package lives in."""
+    import importlib.util
+
+    if importlib.util.find_spec("facetwork") is not None:
+        return
+    if os.environ.get("_FW_REPLAY_REEXEC"):
+        sys.exit("cannot import facetwork even after re-exec — activate the venv")
+    for cand in (
+        os.path.join(os.environ.get("VIRTUAL_ENV", ""), "bin", "python"),
+        os.path.join(os.environ.get("FW_ROOT", ""), ".venv", "bin", "python"),
+        os.path.expanduser("~/facetwork/.venv/bin/python"),
+    ):
+        if cand and os.path.exists(cand) and os.path.realpath(cand) != os.path.realpath(sys.executable):
+            os.environ["_FW_REPLAY_REEXEC"] = "1"
+            os.execv(cand, [cand, os.path.abspath(__file__), *sys.argv[1:]])
+    sys.exit("no python with facetwork found — run this with the venv interpreter")
+
+
+_reexec_into_a_python_that_has_facetwork()
+
+from osm_geocoder.handlers.roads.zoom_graph import RoadGraph
+from osm_geocoder.handlers.roads import zoom_selection as zs
+
+
+def load(RUN):
+    g = RoadGraph.load(f"{RUN}/logical_graph.json")
+    sbs = {}
+    for z in range(2, 7):
+        with open(f"{RUN}/sbs_z{z}.json") as fh:
+            sbs[z] = {int(k): v for k, v in json.load(fh).items()}
+    sbs[7] = sbs[6]
+    with open(f"{RUN}/bypass_flags.json") as fh:
+        bp = {int(k): v for k, v in json.load(fh).items()}
+    with open(f"{RUN}/ring_flags.json") as fh:
+        rf = {int(k): v for k, v in json.load(fh).items()}
+    anchors = {}
+    for z in range(2, 8):
+        p = f"{RUN}/anchors_z{z}.json"
+        anchors[z] = json.load(open(p)) if os.path.exists(p) else []
+        if isinstance(anchors[z], dict):
+            anchors[z] = anchors[z].get("anchors", [])
+    return g, sbs, bp, rf, anchors
+
+def run(g, sbs, bp, rf, anchors):
+    scores = zs.compute_scores(g, sbs, bp, rf)
+    budgets = zs.build_cell_budgets(g, anchors)
+    backbone = {}
+    sel = zs.select_edges(g, scores, budgets, anchors, bp, rf, backbone_out=backbone)
+    a = zs.enforce_monotonic_reveal(sel)
+    a, n, km = zs.prune_assignments(g, a, backbone)
+    return a, n, km
+
+# ---- continuity metric -----------------------------------------------------
+def components(edge_ids, g):
+    par = {}
+    def find(a):
+        while par[a] != a:
+            par[a] = par[par[a]]; a = par[a]
+        return a
+    for eid in edge_ids:
+        e = g.edge_by_id.get(eid)
+        if not e: continue
+        for x in (e.from_node, e.to_node): par.setdefault(x, x)
+        ra, rb = find(e.from_node), find(e.to_node)
+        if ra != rb: par[ra] = rb
+    return len({find(x) for x in par}) if par else 0
+
+def report(tag, assignments, g):
+    dist = collections.Counter(assignments.values())
+    total_km = sum(g.edge_by_id[e].length_m for e in assignments) / 1000
+    print(f"\n[{tag}] {len(assignments)} edges, {total_km:,.0f} km")
+    print("  bands: " + ", ".join(f"z{z}={dist.get(z,0)}" for z in range(2, 8)))
+    byref = collections.defaultdict(list)
+    for eid in assignments:
+        e = g.edge_by_id.get(eid)
+        if e and (e.ref or "").strip(): byref[e.ref.strip()].append(eid)
+    rows = [(r, es) for r, es in byref.items() if len(es) >= 5]
+    print(f"  named routes (>=5 edges): {len(rows)}")
+    out = {}
+    for z in range(2, 8):
+        frag = present = 0
+        for r, es in rows:
+            cur = [e for e in es if assignments[e] <= z]
+            if not cur: continue
+            present += 1
+            if components(cur, g) > components(es, g): frag += 1
+        out[z] = (present, frag)
+        print(f"    z{z}: {present:4d} present, {frag:4d} fragmented "
+              f"({100*frag/max(1,present):.0f}%)  cumulative km="
+              f"{sum(g.edge_by_id[e].length_m for e in assignments if assignments[e]<=z)/1000:,.0f}")
+    return out
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        sys.exit(__doc__)
+    RUN = sys.argv[1]
+    g, sbs, bp, rf, anchors = load(RUN)
+    print(f"graph: {len(g.edges)} logical edges")
+    a, n, km = run(g, sbs, bp, rf, anchors)
+    print(f"pruned {n} orphan edges ({km:.0f} km)")
+    report(sys.argv[2] if len(sys.argv) > 2 else "replay", a, g)

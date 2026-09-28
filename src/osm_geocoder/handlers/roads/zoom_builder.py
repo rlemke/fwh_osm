@@ -85,6 +85,8 @@ def recipe_fingerprint() -> str:
         MIN_COMPONENT_KM,
         MIN_FC_BY_ZOOM,
         MIN_KM,
+        CORRIDOR_OVERDRAFT,
+        CORRIDOR_SELECTION,
         SKELETON_FCS,
         W_FC,
         W_SB,
@@ -102,6 +104,16 @@ def recipe_fingerprint() -> str:
             # CONSTANTS, so a code-only change is invisible to it and every cached
             # layer would come back with the old behaviour.
             "prune_stage": "post-union-monotonic",
+            # ⚠️ Behaviour again, and the same reason: the UNIT OF SELECTION
+            # changed from the edge to the corridor, so a road is admitted whole
+            # or deferred whole. Constants alone cannot see that, and every
+            # cached layer would come back per-edge — fourth time this trap has
+            # been paid for in a month.
+            "selection_unit": (
+                f"corridor/overdraft={CORRIDOR_OVERDRAFT}"
+                if CORRIDOR_SELECTION
+                else "edge"
+            ),
             "anchor_pop": ANCHOR_POP_THRESHOLDS, "anchor_targets": ANCHOR_TARGETS,
             "k_pairs": DEFAULT_K_PAIRS, "min_pair_km": MIN_PAIR_DISTANCE_KM,
             "bypass": [BYPASS_TIME_RATIO, BYPASS_CORE_FRACTION_MAX, BYPASS_FC_ADVANTAGE],
