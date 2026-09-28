@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+"""backfill-layer-toggles — add the per-layer checkboxes to ALREADY-published
+tiled viewers, without re-rendering.
+
+Why a backfill and not a re-run: the page is ~10 KB, the PMTiles beside it are
+the bulk (3.0 GB across the 49 published state maps, 27.6 h of map compute).
+A page-only feature must not cost a re-render, and the render cache would in
+any case refuse to re-emit without the tiles present locally.
+
+How it stays honest: the page is not patched by regex. It is parsed back into
+the `sources` list the renderer works from, rebuilt with
+``map_renderer.build_tiled_html`` — the SAME function a fresh render calls — and
+then the rebuild's ``sources:``/``layers:``/``center``/``zoom`` are compared
+against the original. A mismatch means the parse lost something, and that file
+is REPORTED AND SKIPPED rather than written. So a patched page is identical to
+what a re-render would now produce, not merely similar to it.
+
+    scripts/backfill-layer-toggles --dry s3://afl-cache/cache/osm/maps
+    scripts/backfill-layer-toggles s3://afl-cache/cache/osm/maps
+    scripts/backfill-layer-toggles /Volumes/afl_data/output/maps --only washington
+
+Exit: 0 all candidates converged (written, or already current), 1 at least one
+could not be verified and was skipped, 2 could not survey the location at all.
+"""
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+
+def _reexec_into_a_python_that_has_facetwork() -> None:
+    """⚠️ A bare ``python3`` is not the interpreter this package is installed in.
+
+    ``#!/usr/bin/env python3`` resolves to system/Homebrew python, which has no
+    ``facetwork`` — the failure is a ModuleNotFoundError traceback that reads
+    like a broken script rather than a wrong interpreter. This project has paid
+    for that twice (the `fw` dispatcher and a bare-runner `$PYTHON`), so re-exec
+    into the venv rather than explaining it in a docstring nobody reads first.
+    """
+    import importlib.util
+    import os
+
+    if importlib.util.find_spec("facetwork") is not None:
+        return
+    if os.environ.get("_FW_BACKFILL_REEXEC"):
+        sys.exit("cannot import facetwork even after re-exec — activate the venv "
+                 "that has facetwork + fwh_osm installed and re-run")
+    for cand in (
+        os.path.join(os.environ.get("VIRTUAL_ENV", ""), "bin", "python"),
+        os.path.join(os.environ.get("FW_ROOT", ""), ".venv", "bin", "python"),
+        os.path.expanduser("~/facetwork/.venv/bin/python"),
+    ):
+        if cand and os.path.exists(cand) and os.path.realpath(cand) != os.path.realpath(sys.executable):
+            os.environ["_FW_BACKFILL_REEXEC"] = "1"
+            os.execv(cand, [cand, os.path.abspath(__file__), *sys.argv[1:]])
+    sys.exit("no python with facetwork found — set VIRTUAL_ENV or FW_ROOT, or run "
+             "this with the venv interpreter directly")
+
+
+_reexec_into_a_python_that_has_facetwork()
+
+from osm_geocoder.handlers.visualization.map_renderer import (  # noqa: E402
+    _BASEMAPS,
+    build_tiled_html,
+)
+
+# The page's own generated fragments, as emitted by build_tiled_html.
+_RE_TITLE = re.compile(r"<title>(.*?)</title>", re.S)
+_RE_ABOUT = re.compile(r"<div class='modalbody'>(.*?)</div></div></div>", re.S)
+_RE_CENTER = re.compile(r"center:\[([-\d.e+]+),([-\d.e+]+)\], zoom:([-\d.e+]+)")
+_RE_SOURCES = re.compile(r"sources:Object\.assign\(\{(.*?)\}, \{(.*?)\}\)", re.S)
+_RE_ONE_SOURCE = re.compile(r"(layer\d+):\{type:'vector', url:'pmtiles://' \+ here \+ '([^']+)'\}")
+_RE_LAYERS = re.compile(r"layers:\[(.*?)\]\.concat\((\[.*?\])\)\n", re.S)
+_RE_BLOCK = re.compile(
+    r"\{id:'(layer\d+)(-casing|-dot|-lbl)?',type:'(line|circle|symbol)',"
+    r"source:'layer\d+','source-layer':'([^']+)'"
+)
+_RE_COLOR_LINE = re.compile(r"\{id:'(layer\d+)',type:'line',.*?'line-color':'(#[0-9a-fA-F]{3,8})'")
+_RE_COLOR_DOT = re.compile(r"\{id:'(layer\d+)-dot',type:'circle',.*?'circle-color':'(#[0-9a-fA-F]{3,8})'")
+
+
+class Unparsed(Exception):
+    """The page did not yield everything needed to rebuild it."""
+
+
+def parse_page(html: str) -> dict:
+    """Recover build_tiled_html's inputs from a page it previously emitted."""
+    m = _RE_SOURCES.search(html)
+    if not m:
+        raise Unparsed("no sources object")
+    bg_source_frag, sources_frag = m.group(1), m.group(2)
+
+    files = _RE_ONE_SOURCE.findall(sources_frag)
+    if not files:
+        raise Unparsed("no vector sources")
+
+    lm = _RE_LAYERS.search(html)
+    if not lm:
+        raise Unparsed("no layers array")
+    bg_layer_frag, layers_frag = lm.group(1), lm.group(2)
+
+    kinds: dict[str, str] = {}
+    layer_names: dict[str, str] = {}
+    for sid, suffix, jstype, layer_name in _RE_BLOCK.findall(layers_frag):
+        layer_names[sid] = layer_name
+        if suffix == "-dot" or jstype == "circle":
+            kinds[sid] = "circle"
+        elif sid not in kinds:
+            kinds[sid] = "line"
+
+    colors = dict(_RE_COLOR_LINE.findall(layers_frag))
+    colors.update(dict(_RE_COLOR_DOT.findall(layers_frag)))
+
+    sources = []
+    for sid, fname in files:
+        if sid not in layer_names:
+            raise Unparsed(f"{sid} has a source but no layer block")
+        if sid not in colors:
+            raise Unparsed(f"{sid} has no recoverable colour")
+        sources.append({
+            "id": sid,
+            "file": fname,
+            "layer": layer_names[sid],
+            "color": colors[sid],
+            "kind": kinds.get(sid, "line"),
+        })
+
+    # The basemap is named by its DEFINITION in the page, not by a stored label,
+    # so it round-trips even if the option names change later.
+    basemap = None
+    for name, (_theme, src_frag, layer_frag) in _BASEMAPS.items():
+        if src_frag == bg_source_frag and layer_frag == bg_layer_frag:
+            basemap = name
+            break
+    if basemap is None:
+        raise Unparsed("basemap fragments match no known option")
+
+    cm = _RE_CENTER.search(html)
+    if not cm:
+        raise Unparsed("no center/zoom")
+
+    tm = _RE_TITLE.search(html)
+    am = _RE_ABOUT.search(html)
+    return {
+        "sources": sources,
+        "title": tm.group(1) if tm else "Tiled map",
+        "about": am.group(1) if am else "",
+        "center_lon": float(cm.group(1)),
+        "center_lat": float(cm.group(2)),
+        "zoom": float(cm.group(3)),
+        "basemap": basemap,
+        "fit_to_data": "fitBounds" in html,
+    }
+
+
+def _invariants(html: str) -> dict[str, str]:
+    """The parts a page-only feature must leave untouched.
+
+    ⚠️ This is the whole safety of the backfill. The checkboxes are additive;
+    if the rebuild moved a source URL, a layer id, a colour or the initial
+    view, the parse lost information and the map itself would change. Comparing
+    these is what separates "rebuilt" from "hope the regex was right".
+    """
+    sm = _RE_SOURCES.search(html)
+    lm = _RE_LAYERS.search(html)
+    cm = _RE_CENTER.search(html)
+    return {
+        "bg_source": sm.group(1) if sm else "",
+        "sources": sm.group(2) if sm else "",
+        "bg_layer": lm.group(1) if lm else "",
+        "layers": lm.group(2) if lm else "",
+        "view": cm.group(0) if cm else "",
+    }
+
+
+def rebuild(html: str) -> tuple[str, list[str]]:
+    """Return (new_html, differences_in_the_parts_that_must_not_change)."""
+    new = build_tiled_html(**parse_page(html))
+    before, after = _invariants(html), _invariants(new)
+    diffs = [k for k in before if before[k] != after[k]]
+    return new, diffs
+
+
+# --------------------------------------------------------------------------- IO
+
+def _iter_pages(root: str):
+    """Yield every viewer index.html under `root` (local path or s3://…)."""
+    if root.startswith(("s3://", "hdfs://")):
+        from facetwork.runtime.storage import get_storage_backend
+
+        be = get_storage_backend(root)
+        for name in sorted(be.listdir(root)):
+            page = f"{root.rstrip('/')}/{name}/index.html"
+            if be.exists(page):
+                yield name, page, be
+    else:
+        base = Path(root)
+        if not base.is_dir():
+            return
+        for d in sorted(p for p in base.iterdir() if p.is_dir()):
+            page = d / "index.html"
+            if page.is_file():
+                yield d.name, str(page), None
+
+
+def _read(path: str, be) -> str:
+    if be is None:
+        return Path(path).read_text()
+    with be.open(path, "rb") as fh:
+        return fh.read().decode()
+
+
+def _write(path: str, be, text: str) -> None:
+    if be is None:
+        Path(path).write_text(text)
+        return
+    with be.open(path, "wb") as fh:
+        fh.write(text.encode())
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("root", help="maps directory: a local path or s3://bucket/prefix")
+    ap.add_argument("--dry", "--dry-run", "-n", action="store_true", dest="dry",
+                    help="report what would change, write nothing")
+    ap.add_argument("--only", action="append", default=[],
+                    help="substring filter on the map directory name (repeatable)")
+    args = ap.parse_args()
+
+    pages = list(_iter_pages(args.root))
+    if not pages:
+        print(f"no viewer pages under {args.root} — nothing surveyed", file=sys.stderr)
+        return 2
+
+    written = current = skipped = 0
+    for name, page, be in pages:
+        if args.only and not any(o in name for o in args.only):
+            continue
+        try:
+            html = _read(page, be)
+        except Exception as exc:
+            print(f"  SKIP  {name}: unreadable: {exc}")
+            skipped += 1
+            continue
+        if "const LAYER_IDS=" not in html and "id='legend'" not in html:
+            continue  # not one of ours
+        try:
+            new, diffs = rebuild(html)
+        except Unparsed as exc:
+            print(f"  SKIP  {name}: cannot rebuild ({exc})")
+            skipped += 1
+            continue
+        if diffs:
+            print(f"  SKIP  {name}: rebuild would change {', '.join(diffs)} — parse lost data")
+            skipped += 1
+            continue
+        if new == html:
+            current += 1
+            continue
+        boxes = new.count("type='checkbox' class='lyr'")
+        if args.dry:
+            print(f"  would patch {name}: +{boxes} layer checkbox(es)")
+        else:
+            _write(page, be, new)
+            print(f"  patched {name}: {boxes} layer checkbox(es)")
+        written += 1
+
+    verb = "would patch" if args.dry else "patched"
+    print(f"\n{verb} {written}, already current {current}, skipped {skipped}")
+    return 1 if skipped else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

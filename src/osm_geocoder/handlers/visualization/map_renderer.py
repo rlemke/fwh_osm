@@ -5,6 +5,7 @@ or static PNG images using contextily + matplotlib.
 """
 
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -589,7 +590,13 @@ _TILED_HTML_TEMPLATE = """<!DOCTYPE html>
         font-size:12px;line-height:1.55}
 #legend b{display:block;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#aaa;margin-bottom:4px}
 #legend .row{display:flex;align-items:center;gap:7px}
+#legend label.row{cursor:pointer;-webkit-user-select:none;user-select:none}
+#legend label.row:hover{color:#fff}
+#legend input.lyr{margin:0;width:13px;height:13px;flex:none;cursor:pointer;accent-color:#9ecbff}
 #legend .sw{width:13px;height:13px;border-radius:3px;border:1px solid rgba(255,255,255,.35);flex:none}
+#legend .lyrbtns{margin-top:6px;padding-top:5px;border-top:1px solid rgba(255,255,255,.14);font-size:11px;color:#888}
+#legend .lyrbtns a{color:#9ecbff;text-decoration:none}
+#legend .lyrbtns a:hover{text-decoration:underline}
 #err{position:absolute;bottom:10px;left:10px;right:10px;z-index:2;background:#fee;color:#900;padding:8px;
      border:1px solid #c66;border-radius:4px;font-family:monospace;font-size:12px;display:none;white-space:pre-wrap}
 .infobtn{margin-top:6px;padding:5px 9px;font-size:12px;cursor:pointer;background:#fff8e1;border:1px solid #f6c343;border-radius:4px;color:#5d4b00}
@@ -632,6 +639,37 @@ map.on('error',e=>showErr('map error: '+(e.error&&e.error.message||JSON.stringif
 __FIT__
 map.addControl(new maplibregl.NavigationControl());
 map.addControl(new maplibregl.ScaleControl());
+// Per-layer checkboxes. Each legend row toggles ONE source's MapLibre layers,
+// so a single band can be examined ALONE at any view zoom — z2 roads seen at a
+// z7 view, which the graded reveal never shows together on its own.
+//
+// ⚠️ A band's tileset carries its OWN minzoom (the z7 tiles begin at map zoom
+// 7, the z2 tiles at 2), so checking a DEEPER band while zoomed out shows
+// nothing however the box is ticked. That is the tiles, not the checkbox —
+// isolation works downward (z2 at z7), not upward.
+//
+// ⚠️ One source is SEVERAL MapLibre layers: a line band carries its casing, a
+// city layer its dot AND its label. The map is built in Python, so the id list
+// is injected rather than guessed here — hiding only the main id leaves the
+// casing drawn, which reads as "the filter is broken" rather than as a bug.
+const LAYER_IDS=__TOGGLES__;
+function applyLayer(src,on){(LAYER_IDS[src]||[]).forEach(function(id){
+  // getLayer() is undefined until the style loads, so this is a no-op before
+  // then rather than a throw; map.on('load') does the first real apply.
+  if(map.getLayer(id))map.setLayoutProperty(id,'visibility',on?'visible':'none');});}
+function syncLayers(){document.querySelectorAll('#legend input.lyr').forEach(function(cb){
+  applyLayer(cb.getAttribute('data-layer'),cb.checked);});}
+document.querySelectorAll('#legend input.lyr').forEach(function(cb){
+  cb.addEventListener('change',function(){applyLayer(cb.getAttribute('data-layer'),cb.checked);});});
+(function(){function setAll(v){return function(e){e.preventDefault();
+   document.querySelectorAll('#legend input.lyr').forEach(function(cb){cb.checked=v;});
+   syncLayers();};}
+ var a=document.getElementById('lyr-all'),n=document.getElementById('lyr-none');
+ if(a)a.onclick=setAll(true); if(n)n.onclick=setAll(false);})();
+map.on('load',syncLayers);
+// A style reload (basemap swap, sprite reload) rebuilds the layers with their
+// authored visibility, so re-apply what the boxes actually say.
+map.on('styledata',syncLayers);
 // "About this data" popup: shown on load, reopened via the ℹ️ button, dismissed
 // by × or a backdrop click.
 (function(){var im=document.getElementById('infomodal');if(!im)return;
@@ -642,6 +680,55 @@ map.addControl(new maplibregl.ScaleControl());
 </script>
 </body></html>
 """
+
+
+def _pretty_layer(name: str) -> str:
+    """Human label for a vector-tile layer name (`washington_roads_z2` -> words)."""
+    return name.replace("_", " ").strip()
+
+
+def _maplibre_layer_ids(s: dict) -> list[str]:
+    """Every MapLibre layer id emitted for one source.
+
+    A source is never one layer: a line band also carries its casing, a city
+    layer its dot AND its label. The per-layer checkbox has to hide all of
+    them, so the list is derived HERE — beside the code that emits the blocks —
+    and injected into the page, never re-guessed in JS.
+    """
+    if s["kind"] == "circle":
+        return [f"{s['id']}-dot", f"{s['id']}-lbl"]
+    return [f"{s['id']}-casing", s["id"]]
+
+
+def _legend_html(sources: list[dict]) -> str:
+    """Legend rows, each a checkbox that isolates one layer.
+
+    The rows double as the layer switcher: unticking the other five leaves one
+    zoom band drawn at whatever zoom the map is at, which is the only way to
+    inspect a band's road selection closely (the graded reveal shows z2 only
+    when zoomed out too far to see it).
+    """
+    if not sources:
+        return ""
+    rows = "".join(
+        f"<label class='row'>"
+        f"<input type='checkbox' class='lyr' data-layer='{s['id']}' checked>"
+        f"<span class='sw' style='background:{s['color']}'></span>"
+        f"<span>{_pretty_layer(s['layer'])}</span>"
+        f"</label>"
+        for s in sources
+    )
+    switch = ("<div class='lyrbtns'><a href='#' id='lyr-all'>all</a> &middot; "
+              "<a href='#' id='lyr-none'>none</a></div>") if len(sources) > 1 else ""
+    return f"<b>Layers</b>{rows}{switch}"
+
+
+def _layer_toggles_js(sources: list[dict]) -> str:
+    """`{source_id: [maplibre layer ids]}` for the checkbox handler."""
+    return "{" + ",".join(
+        "{}:[{}]".format(s["id"], ",".join(f"'{lid}'" for lid in _maplibre_layer_ids(s)))
+        for s in sources
+    ) + "}"
 
 
 def _infer_layer_kind(layer_name: str) -> str:
@@ -717,101 +804,51 @@ def page_fingerprint() -> str:
     render cache keys on the facet's parameters, so a change to the HTML/JS
     itself — a fixed overlay, a new fit-to-bounds block — is invisible to it and
     every re-render serves the old page. Measured 2026-09-24 twice in one day.
+
+    ⚠️ It hashes the template AND the helpers that BUILD the markup injected
+    into it. Those live in Python, outside the template string, so hashing the
+    template alone reproduces this very trap one level further out: the legend
+    gained checkboxes and every cached map would have kept the old legend with
+    the fingerprint unchanged. Only the page-structure helpers are included —
+    hashing the whole module would invalidate 49 state maps (~49 min of
+    tile/render each) for an edit to an unrelated function. ``build_tiled_html``
+    is in the list because it now holds the JS assembly (layer blocks, the
+    fit-to-bounds call) that used to sit unhashed inside ``render_tiled_map``.
     """
-    return hashlib.sha256(_TILED_HTML_TEMPLATE.encode()).hexdigest()[:12]
+    parts = [_TILED_HTML_TEMPLATE]
+    for fn in (_pretty_layer, _maplibre_layer_ids, _legend_html, _layer_toggles_js,
+               build_tiled_html):
+        parts.append(inspect.getsource(fn))
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:12]
 
 
-def render_tiled_map(
-    tile_paths: list[str | Path],
-    layer_names: list[str] | None = None,
-    colors: list[str] | None = None,
+def build_tiled_html(
+    sources: list[dict],
+    *,
     title: str = "Tiled map",
-    output_path: str | Path | None = None,
+    about: str = "",
     center_lon: float = 0.0,
     center_lat: float = 20.0,
     zoom: float = 2.0,
     basemap: str = "dark",
     fit_to_data: bool = True,
-    about: str = "",
-) -> MapResult:
-    """Render a MapLibre + PMTiles viewer page for a set of vector-tile layers.
+) -> str:
+    """Build the viewer page from an already-resolved layer list.
 
-    The companion to :func:`render_layers` (folium, single-HTML): produces a
-    zoom-tiled viewer where the browser fetches *only the tiles intersecting
-    the current viewport at the current zoom*, via HTTP Range requests against
-    the PMTiles archives. As you zoom in you get more detail (deeper tiles)
-    AND less data (smaller viewport = fewer tiles).
-
-    The output is a **directory**: an ``index.html`` plus a relative reference
-    (symlink, falling back to a copy) to each input PMTiles archive. **The
-    directory must be served over HTTP with Range support** — PMTiles relies on
-    HTTP Range requests, and stdlib ``python -m http.server`` does NOT honor
-    them (it returns ``200 OK`` with the full file, silently breaking the
-    viewer). Use ``scripts/serve-tiled-map`` shipped with this package, or any
-    Range-capable static server (nginx, caddy, ``npx http-server``). ``file://``
-    is also unreliable across browsers.
+    Split out of :func:`render_tiled_map` so the PAGE can be rebuilt without the
+    PMTiles: the archives are the bulk (3.0 GB across the 49 published state
+    maps) and the page is 10 KB, so adding a page feature to already-published
+    maps must not mean re-downloading or re-rendering the tiles. The backfill
+    (``scripts/backfill-layer-toggles``) parses an existing index.html back into
+    ``sources`` and calls this, which is what makes the patched page IDENTICAL
+    to what a fresh render would now emit rather than merely similar.
 
     Args:
-        tile_paths: PMTiles archive paths (one per layer).
-        layer_names: layer name *inside* each PMTiles (the ``-l`` value
-            passed to tippecanoe in BuildVectorTiles). If empty/short, the
-            file stem is used as a fallback.
-        colors: per-layer color; defaults to a small palette.
-        title: page title.
-        center_lon, center_lat, zoom: initial view, used when the tiles carry
-            no bounds or ``fit_to_data`` is off.
-        fit_to_data: frame the first archive's own bounds on load (default).
-        basemap: backdrop — ``"dark"`` (default), ``"light"``, ``"osm"`` or
-            ``"none"``. A muted/dark backdrop keeps the thematic dots and routes
-            legible; the full-colour ``"osm"`` raster competes with them.
+        sources: one dict per layer — ``id`` (``layer0``…), ``file`` (PMTiles
+            basename, resolved relative to the page), ``layer`` (the layer name
+            INSIDE the archive), ``color``, ``kind`` (``line``/``circle``).
     """
-    import shutil
-
     theme, bg_source, bg_layer = _BASEMAPS.get(basemap, _BASEMAPS["dark"])
-
-    # PMTiles archives may live on the object store (s3://) / HDFS when storage is
-    # remote — BuildVectorTiles writes there so any runner can read them. Localize
-    # each to a real local file first: the viewer dir is assembled with local
-    # symlinks/copies and the index.html is built against on-disk archives.
-    tile_paths = [
-        localize(str(p)) if str(p).startswith(("s3://", "hdfs://")) else str(p)
-        for p in tile_paths
-    ]
-    tile_paths = [Path(p) for p in tile_paths]
-    if not tile_paths:
-        raise ValueError("render_tiled_map: no tile paths provided")
-    for p in tile_paths:
-        if not p.exists():
-            raise FileNotFoundError(f"PMTiles missing: {p}")
-
-    # Output dir: a per-render subfolder under the local maps dir, named for the
-    # first layer's stem (deterministic + human-readable).
-    if output_path is None:
-        base = resolve_local_output_dir("maps", "tiled")
-        out_dir = Path(base) / tile_paths[0].stem
-    else:
-        out_dir = Path(str(output_path))
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    # Place each PMTiles next to index.html (symlink, fall back to copy).
-    sources = []
-    for i, p in enumerate(tile_paths):
-        dst = out_dir / p.name
-        if dst.resolve() != p.resolve():
-            if dst.exists() or dst.is_symlink():
-                dst.unlink()
-            try:
-                dst.symlink_to(p.resolve())
-            except OSError:
-                shutil.copy2(p, dst)
-        layer_name = (layer_names[i] if layer_names and i < len(layer_names) and layer_names[i] else p.stem)
-        sources.append({
-            "id": f"layer{i}",
-            "file": p.name,
-            "layer": layer_name,
-            "color": (colors[i] if colors and i < len(colors) and colors[i] else _default_palette(i)),
-            "kind": _infer_layer_kind(layer_name),
-        })
 
     # Build the JS substitutions. Sources use absolute URLs assembled at runtime
     # from JS `here` (the page's own origin+path) — relative `./` URLs are
@@ -882,23 +919,17 @@ def render_tiled_map(
     dot_blocks = [_layer_block(s) for s in sources if s["kind"] == "circle"]
     layers_arr = "[" + ",".join(line_blocks + dot_blocks) + "]"
 
-    # Legend: one row per layer (swatch + human label), so it's obvious what the
-    # dots and routes are. Layer names like `cities_5M` / `routes_5M` are
-    # prettified for display.
-    def _pretty(name: str) -> str:
-        return name.replace("_", " ").replace("cities", "cities").strip()
-    legend_rows = "".join(
-        f"<div class='row'><span class='sw' style='background:{s['color']}'></span>{_pretty(s['layer'])}</div>"
-        for s in sources
-    )
-    legend = f"<b>Layers</b>{legend_rows}" if sources else ""
+    # Legend: one row per layer (checkbox + swatch + human label). The checkbox
+    # is the layer switcher — see _legend_html.
+    legend = _legend_html(sources)
+    toggles = _layer_toggles_js(sources)
 
     # "About this data" popup body — reuse the title + layer set + provenance (no
     # per-map prose needed; callers may override via `about`).
     if about:
         about_html = about
     else:
-        layer_list = ", ".join(_pretty(s["layer"]) for s in sources) or "the selected layers"
+        layer_list = ", ".join(_pretty_layer(s["layer"]) for s in sources) or "the selected layers"
         about_html = (
             f"<b>{title}</b><br>Populated places from <a href='https://www.openstreetmap.org/'>OpenStreetMap</a>, "
             f"tiered by population and served as <b>zoom-tiled PMTiles vector tiles</b>: only the tiles "
@@ -915,11 +946,117 @@ def render_tiled_map(
             .replace("__BG_SOURCE__", bg_source)
             .replace("__BG_LAYER__", bg_layer)
             .replace("__LEGEND__", legend)
+            .replace("__TOGGLES__", toggles)
             .replace("__SOURCES__", "{" + sources_obj + "}")
             .replace("__LAYERS__", layers_arr)
             .replace("__CENTER_LON__", repr(float(center_lon)))
             .replace("__CENTER_LAT__", repr(float(center_lat)))
             .replace("__ZOOM__", repr(float(zoom))))
+
+    return html
+
+
+def render_tiled_map(
+    tile_paths: list[str | Path],
+    layer_names: list[str] | None = None,
+    colors: list[str] | None = None,
+    title: str = "Tiled map",
+    output_path: str | Path | None = None,
+    center_lon: float = 0.0,
+    center_lat: float = 20.0,
+    zoom: float = 2.0,
+    basemap: str = "dark",
+    fit_to_data: bool = True,
+    about: str = "",
+) -> MapResult:
+    """Render a MapLibre + PMTiles viewer page for a set of vector-tile layers.
+
+    The companion to :func:`render_layers` (folium, single-HTML): produces a
+    zoom-tiled viewer where the browser fetches *only the tiles intersecting
+    the current viewport at the current zoom*, via HTTP Range requests against
+    the PMTiles archives. As you zoom in you get more detail (deeper tiles)
+    AND less data (smaller viewport = fewer tiles).
+
+    The output is a **directory**: an ``index.html`` plus a relative reference
+    (symlink, falling back to a copy) to each input PMTiles archive. **The
+    directory must be served over HTTP with Range support** — PMTiles relies on
+    HTTP Range requests, and stdlib ``python -m http.server`` does NOT honor
+    them (it returns ``200 OK`` with the full file, silently breaking the
+    viewer). Use ``scripts/serve-tiled-map`` shipped with this package, or any
+    Range-capable static server (nginx, caddy, ``npx http-server``). ``file://``
+    is also unreliable across browsers.
+
+    Args:
+        tile_paths: PMTiles archive paths (one per layer).
+        layer_names: layer name *inside* each PMTiles (the ``-l`` value
+            passed to tippecanoe in BuildVectorTiles). If empty/short, the
+            file stem is used as a fallback.
+        colors: per-layer color; defaults to a small palette.
+        title: page title.
+        center_lon, center_lat, zoom: initial view, used when the tiles carry
+            no bounds or ``fit_to_data`` is off.
+        fit_to_data: frame the first archive's own bounds on load (default).
+        basemap: backdrop — ``"dark"`` (default), ``"light"``, ``"osm"`` or
+            ``"none"``. A muted/dark backdrop keeps the thematic dots and routes
+            legible; the full-colour ``"osm"`` raster competes with them.
+    """
+    import shutil
+
+
+    # PMTiles archives may live on the object store (s3://) / HDFS when storage is
+    # remote — BuildVectorTiles writes there so any runner can read them. Localize
+    # each to a real local file first: the viewer dir is assembled with local
+    # symlinks/copies and the index.html is built against on-disk archives.
+    tile_paths = [
+        localize(str(p)) if str(p).startswith(("s3://", "hdfs://")) else str(p)
+        for p in tile_paths
+    ]
+    tile_paths = [Path(p) for p in tile_paths]
+    if not tile_paths:
+        raise ValueError("render_tiled_map: no tile paths provided")
+    for p in tile_paths:
+        if not p.exists():
+            raise FileNotFoundError(f"PMTiles missing: {p}")
+
+    # Output dir: a per-render subfolder under the local maps dir, named for the
+    # first layer's stem (deterministic + human-readable).
+    if output_path is None:
+        base = resolve_local_output_dir("maps", "tiled")
+        out_dir = Path(base) / tile_paths[0].stem
+    else:
+        out_dir = Path(str(output_path))
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Place each PMTiles next to index.html (symlink, fall back to copy).
+    sources = []
+    for i, p in enumerate(tile_paths):
+        dst = out_dir / p.name
+        if dst.resolve() != p.resolve():
+            if dst.exists() or dst.is_symlink():
+                dst.unlink()
+            try:
+                dst.symlink_to(p.resolve())
+            except OSError:
+                shutil.copy2(p, dst)
+        layer_name = (layer_names[i] if layer_names and i < len(layer_names) and layer_names[i] else p.stem)
+        sources.append({
+            "id": f"layer{i}",
+            "file": p.name,
+            "layer": layer_name,
+            "color": (colors[i] if colors and i < len(colors) and colors[i] else _default_palette(i)),
+            "kind": _infer_layer_kind(layer_name),
+        })
+
+    html = build_tiled_html(
+        sources,
+        title=title,
+        about=about,
+        center_lon=center_lon,
+        center_lat=center_lat,
+        zoom=zoom,
+        basemap=basemap,
+        fit_to_data=fit_to_data,
+    )
 
     index = out_dir / "index.html"
     index.write_text(html)

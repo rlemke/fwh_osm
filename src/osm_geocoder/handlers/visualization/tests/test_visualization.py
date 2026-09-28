@@ -459,17 +459,33 @@ class TestRenderTiledMap:
         assert "fitBounds" not in html
         assert "__FIT__" not in html, "the placeholder must always be substituted"
 
-    def test_page_fingerprint_tracks_the_template(self):
+    def test_page_fingerprint_tracks_the_template(self, monkeypatch):
         """The render cache keys on parameters, so a template change is invisible
         to it — measured twice on 2026-09-24, where a re-render served the old
         page. The fingerprint is what makes an edit here invalidate it."""
-        import hashlib
-
         from osm_geocoder.handlers.visualization import map_renderer as mr
 
-        assert mr.page_fingerprint() == hashlib.sha256(
-            mr._TILED_HTML_TEMPLATE.encode()
-        ).hexdigest()[:12]
+        before = mr.page_fingerprint()
+        monkeypatch.setattr(mr, "_TILED_HTML_TEMPLATE", mr._TILED_HTML_TEMPLATE + "<!--x-->")
+        assert mr.page_fingerprint() != before
+
+    def test_page_fingerprint_also_tracks_the_markup_HELPERS(self, monkeypatch):
+        """⚠️ The same trap one level further out.
+
+        The legend and the toggle map are built in PYTHON, outside the template
+        string. A fingerprint over the template alone would not move when the
+        legend gained checkboxes, so every cached map would have kept the old
+        legend — exactly the failure the template hash was added to fix.
+        """
+        from osm_geocoder.handlers.visualization import map_renderer as mr
+
+        before = mr.page_fingerprint()
+
+        def _legend_html(sources):  # a different implementation, same name
+            return "<b>Layers</b>"
+
+        monkeypatch.setattr(mr, "_legend_html", _legend_html)
+        assert mr.page_fingerprint() != before
 
     def test_routes_drawn_under_dots_with_casing(self, tmp_path):
         html = self._render(tmp_path)
@@ -489,6 +505,60 @@ class TestRenderTiledMap:
         html = self._render(tmp_path)
         assert "id='legend'" in html
         assert "routes 5M" in html and "cities 5M" in html
+
+    def test_every_layer_gets_a_checkbox(self, tmp_path):
+        """One row per layer, ticked, so the legend doubles as the switcher."""
+        html = self._render(tmp_path)
+        assert html.count("type='checkbox' class='lyr'") == 2
+        assert "data-layer='layer0' checked" in html
+        assert "data-layer='layer1' checked" in html
+        assert "__TOGGLES__" not in html, "the placeholder must always be substituted"
+
+    def test_a_checkbox_hides_EVERY_layer_of_its_source(self, tmp_path):
+        """⚠️ The defect this guards against is a half-hidden layer.
+
+        One source emits several MapLibre layers — a line band also has its
+        casing, a city layer its dot AND its label. Toggling only the main id
+        leaves the casing drawn, which reads as "the filter is broken". So the
+        injected id map must cover exactly the ids the page emits: no layer
+        untoggleable, and no id in the map that no longer exists.
+        """
+        import re
+
+        html = self._render(tmp_path)
+        emitted = set(re.findall(r"\{id:'([^']+)'", html))
+        emitted -= {"bg"}  # the basemap backdrop is not a data layer
+        ids_js = re.search(r"const LAYER_IDS=\{(.*?)\};", html, re.S).group(1)
+        covered = set(re.findall(r"'([^']+)'", ids_js))
+        assert emitted == covered, (
+            f"untoggleable: {sorted(emitted - covered)}; stale: {sorted(covered - emitted)}"
+        )
+
+    def test_isolating_a_band_is_what_the_switcher_is_for(self, tmp_path):
+        """The point of the checkboxes: one zoom band, examined at any zoom.
+
+        The graded reveal only ever shows z2 while zoomed out too far to see it,
+        so the switcher is the only way to look at a band's selection closely.
+        """
+        html = self._render(tmp_path, layers=("roads_z2", "roads_z7"))
+        # the toggle sets MapLibre visibility rather than removing the layer,
+        # so unticking is reversible and costs no re-fetch
+        assert "setLayoutProperty" in html and "'visibility'" in html
+        # and it is re-applied after a style reload, which rebuilds layers with
+        # their AUTHORED visibility
+        assert "map.on('styledata',syncLayers)" in html
+
+    def test_single_layer_map_gets_no_all_none_shortcut(self, tmp_path):
+        """One checkbox needs no bulk control."""
+        from osm_geocoder.handlers.visualization.map_renderer import render_tiled_map
+
+        t = tmp_path / "only.pmtiles"
+        t.write_bytes(b"x")
+        out = tmp_path / "one"
+        render_tiled_map([t], layer_names=["only"], output_path=out)
+        html = (out / "index.html").read_text()
+        assert "type='checkbox' class='lyr'" in html
+        assert "id='lyr-all'" not in html
 
     def test_basemap_osm_and_none(self, tmp_path):
         osm = self._render(tmp_path, basemap="osm")
