@@ -7,7 +7,8 @@
 # from source inside the image — no local mvn, ~/.m2, or pre-built target/ jar
 # needed. Build context is THIS directory (java/osm-gh-router):
 #
-#   docker build -t osm-gh-router:latest .
+#   docker build -t osm-gh-router:latest .              # local, this host's arch
+#   fw fleet agent-image gh-router                        # fleet: multi-arch + push
 #
 # Run it against the shared infra (mirrors the env the Python osm runners use):
 #   docker run -d --name gh-router --network <osm-net> \
@@ -18,7 +19,11 @@
 #     osm-gh-router:latest
 
 # ── Stage 1: build the fat jar (fw-agent SDK + graphhopper-core + AWS SDK) ────
-FROM maven:3.9-eclipse-temurin-17 AS build
+# Pinned to the BUILD host's platform: the jar is architecture-neutral bytecode,
+# so it is compiled ONCE, natively, and copied into every target platform's
+# runtime stage. Without the pin a multi-arch build runs Maven under QEMU for
+# the foreign half, which is slow and buys nothing.
+FROM --platform=$BUILDPLATFORM maven:3.9-eclipse-temurin-17 AS build
 
 # The fw-agent SDK lives in the facetwork repo; build + install it to the local
 # Maven repo so this module can depend on afl:fw-agent. Pin a ref with
@@ -37,6 +42,12 @@ COPY src ./src
 RUN mvn -q -DskipTests clean package
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────────────
+# Resolved per TARGET platform (eclipse-temurin publishes amd64 + arm64), so a
+# `--platform linux/amd64,linux/arm64` build yields one manifest list and every
+# fleet host pulls its native JRE. A single-arch push of this image is what put
+# `exec format error` crash-loops on the x86 hosts (2026-09-29): build it with
+# `fw fleet agent-image gh-router`, which refuses to publish fewer platforms
+# than the fleet runs.
 FROM eclipse-temurin:17-jre
 WORKDIR /app
 COPY --from=build /build/target/osm-gh-router.jar /app/osm-gh-router.jar
