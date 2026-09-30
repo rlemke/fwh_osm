@@ -102,7 +102,9 @@ def test_route_and_accumulate_streams_snaps_and_retains_nothing(monkeypatch):
     heartbeats; nothing about the routes is kept (the 25 GB OOM shape)."""
     monkeypatch.setattr(zoom_sbs, "HAS_REQUESTS", True)
     monkeypatch.setattr(zoom_sbs, "HEARTBEAT_EVERY", 2)
-    monkeypatch.setattr(zoom_sbs, "_route_pair", lambda a, b, nc, gd, pr: _route_along_10())
+    monkeypatch.setattr(
+        zoom_sbs, "_route_pair", lambda a, b, nc, gd, pr, tally=None, detail=None: _route_along_10()
+    )
     idx = zoom_sbs.SegmentIndex(_graph())
     pairs = [(i, i + 1) for i in range(9)]
     beats: list[str] = []
@@ -121,3 +123,22 @@ def test_route_and_accumulate_streams_snaps_and_retains_nothing(monkeypatch):
 
     with pytest.raises(Cancelled):
         zoom_sbs.route_and_accumulate(pairs * 10, {}, "g", "car", idx, 2, check_cancel=cancel)
+
+
+def test_a_raising_route_call_fails_the_run_instead_of_scoring_zero(monkeypatch):
+    """An exception escaping _route_pair is a code error, never "no route".
+
+    It used to be swallowed as a missing route, which left the outcome tally
+    empty; the server-fault guard read that as "nothing answered", and a run in
+    which EVERY call raised returned zero votes as a success -- a hollow map.
+    This file's own mock hid it for days: its signature went stale, every call
+    raised TypeError, and the function still returned cleanly."""
+    monkeypatch.setattr(zoom_sbs, "HAS_REQUESTS", True)
+
+    def broken(*_a, **_k):
+        raise TypeError("wrong signature")
+
+    monkeypatch.setattr(zoom_sbs, "_route_pair", broken)
+    idx = zoom_sbs.SegmentIndex(_graph())
+    with pytest.raises(TypeError, match="wrong signature"):
+        zoom_sbs.route_and_accumulate([(1, 2), (2, 3)], {}, "g", "car", idx, max_concurrent=2)

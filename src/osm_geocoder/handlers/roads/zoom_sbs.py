@@ -629,10 +629,16 @@ def route_and_accumulate(
     def _consume(fut) -> None:
         nonlocal routed, done
         done += 1
-        try:
-            coords = fut.result()
-        except Exception:
-            coords = None
+        # NOT caught. _route_pair classifies every routing outcome itself (no
+        # path, out of bounds, transport) into `tally` and returns None, so
+        # anything that escapes it is a CODE error, not a pair without a route.
+        # Swallowing it here counted every such failure as "no route" and left
+        # `tally` empty -- which the server-fault guard below reads as "nothing
+        # answered", so a run in which every call raised reported SUCCESS with
+        # zero votes and published a hollow map (found 2026-09-30 when a stale
+        # test mock raised TypeError on every call and the suite still saw a
+        # clean return). The pool is shut down by the except below.
+        coords = fut.result()
         if coords:
             routed += 1
             for eid in segment_index.snap_route(coords):
