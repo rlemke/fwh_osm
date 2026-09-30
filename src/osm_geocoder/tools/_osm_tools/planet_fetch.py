@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import os
 import subprocess
+import sys
 import urllib.request
 import time
 import uuid
@@ -28,6 +29,8 @@ from typing import Callable
 
 import osmium.replication as _repl
 from osmium.replication.server import ReplicationServer
+
+from .cancellation import raise_if_cancelled, run_cancellable
 
 PLANET_MIRROR = os.environ.get("FW_PLANET_MIRROR", "https://planet.openstreetmap.org/pbf").rstrip("/")
 PLANET_FILE = "planet-latest.osm.pbf"
@@ -163,25 +166,24 @@ def update_planet(planet_path: str, *, replication: str = PLANET_REPLICATION,
     # ALLOWED by contract and handler idempotency is required. This is that
     # idempotency: cheap to be correct, expensive to be redundant.
     #
-    # A temp file still growing means a live writer -- refuse, and let the retry
-    # find the planet already advanced. One that has stopped growing is debris
-    # from a killed execution: remove it, because nothing else ever did (6.6 GB of
-    # it was recovered by hand).
-    _now, _stale_s = time.time(), 600
-    for _old in Path(planet_path).parent.glob("_planet_update_tmp.*.osm.pbf"):
-        try:
-            _age = _now - _old.stat().st_mtime
-        except OSError:
-            continue
-        if _age < _stale_s:
-            log(f"planet update skipped — another update is in flight "
-                f"({_old.name}, written {_age:.0f}s ago)")
-            return PlanetUpdate("concurrent update in flight", ts_iso, None, False)
-        log(f"removing abandoned planet temp {_old.name} ({_age / 3600:.1f}h old)")
-        try:
-            _old.unlink()
-        except OSError:
-            pass
+    # A temp file still growing means a live writer: WAIT for it, then report
+    # what it produced. One that has stopped growing is debris from a killed
+    # execution: remove it, because nothing else ever did (6.6 GB of it was
+    # recovered by hand).
+    #
+    # ⚠️ It used to RETURN "concurrent update in flight" -- a normal status, so the
+    # step completed and the workflow moved on to cut extracts from the OLD
+    # planet while the real update was still being written (2026-09-30: a reclaim
+    # 6 min into a rewrite; ExtractRegions started at once on the stale file).
+    # Refusing is right; succeeding is not. Waiting is both: the step completes
+    # only once the planet it hands downstream is the updated one.
+    other = _wait_for_inflight_update(planet_path, log)
+    if other is not None:
+        h2 = _repl.get_replication_header(planet_path)
+        if h2.sequence is not None and h2.sequence >= start + 1:
+            log(f"planet advanced to replication sequence {h2.sequence} by a concurrent execution")
+            return PlanetUpdate("updated by a concurrent execution", ts_iso, h2.sequence, True)
+        log("the concurrent update ended without advancing the planet — updating here")
 
     # PER-CALL temp name. A fixed one collided when two UpdatePlanet executions
     # ran against the same tree — and the `finally: unlink(tmp)` below would then
@@ -190,7 +192,7 @@ def update_planet(planet_path: str, *, replication: str = PLANET_REPLICATION,
     # not hypothetical. Same lesson `_scratch_dir()` already encodes with a uuid.
     tmp = str(Path(planet_path).with_name(f"_planet_update_tmp.{uuid.uuid4().hex}.osm.pbf"))
     try:
-        newseq = server.apply_diffs_to_file(planet_path, tmp, start + 1, max_size=max_diff_mb * 1024)
+        newseq = _apply_diffs(planet_path, tmp, start + 1, max_diff_mb * 1024, replication)
     except Exception as exc:
         if os.path.exists(tmp):
             os.unlink(tmp)
@@ -200,3 +202,76 @@ def update_planet(planet_path: str, *, replication: str = PLANET_REPLICATION,
     os.replace(tmp, planet_path)
     log(f"planet advanced to replication sequence {newseq}")
     return PlanetUpdate("updated", ts_iso, newseq, True)
+
+
+_INFLIGHT_POLL_S = 30
+_INFLIGHT_STALE_S = 600
+
+
+def _wait_for_inflight_update(planet_path: str, log: Callable[[str], None]) -> Path | None:
+    """Block while another execution is rewriting the planet; return its temp path.
+
+    Returns None when no update is in flight. Abandoned temps (not written for
+    ``_INFLIGHT_STALE_S``) are removed. Polls at a pace that keeps the caller's
+    heartbeat and cancellation live -- this thread sleeps, it does not hold the
+    GIL -- so waiting out a 30-minute rewrite is safe."""
+    waited_on: Path | None = None
+    while True:
+        live = None
+        for old in Path(planet_path).parent.glob("_planet_update_tmp.*.osm.pbf"):
+            try:
+                age = time.time() - old.stat().st_mtime
+            except OSError:
+                continue  # finished (renamed into place) between glob and stat
+            if age < _INFLIGHT_STALE_S:
+                live = old
+                continue
+            log(f"removing abandoned planet temp {old.name} ({age / 3600:.1f}h old)")
+            try:
+                old.unlink()
+            except OSError:
+                pass
+        if live is None:
+            return waited_on
+        if waited_on is None:
+            log(f"another planet update is in flight ({live.name}) — waiting for it")
+        waited_on = live
+        raise_if_cancelled()
+        time.sleep(_INFLIGHT_POLL_S)
+
+
+def _apply_diffs(planet_path: str, tmp: str, start: int, max_kb: int, replication: str) -> int | None:
+    """Apply replication diffs from ``start`` into ``tmp``, IN A CHILD PROCESS.
+
+    Returns the new sequence (read back from ``tmp``'s header), or None when
+    there was nothing to apply.
+
+    ⚠️ Not in-process. pyosmium's merge ran at ~590% CPU inside the runner and
+    starved its liveness signal: 6 minutes into a rewrite (2026-09-30) the
+    dead-server reaper, 120 s on another host, reclaimed the task and a second
+    execution started. A child process keeps the runner's own threads (server
+    ping, task heartbeat, cancellation) running, and run_cancellable kills the
+    child's whole process group if the run is terminated."""
+    cmd = [sys.executable, "-m", __name__, "apply", planet_path, tmp,
+           str(start), str(max_kb), replication]
+    try:
+        run_cancellable(cmd)
+    except subprocess.CalledProcessError as exc:
+        if exc.returncode == _EXIT_NOTHING_TO_APPLY:
+            return None
+        raise
+    return _repl.get_replication_header(tmp).sequence
+
+
+_EXIT_NOTHING_TO_APPLY = 3
+
+
+def _apply_main(argv: list[str]) -> int:
+    src, dst, start, max_kb, replication = argv
+    newseq = ReplicationServer(replication).apply_diffs_to_file(
+        src, dst, int(start), max_size=int(max_kb))
+    return 0 if newseq is not None else _EXIT_NOTHING_TO_APPLY
+
+
+if __name__ == "__main__" and sys.argv[1:2] == ["apply"]:
+    sys.exit(_apply_main(sys.argv[2:]))

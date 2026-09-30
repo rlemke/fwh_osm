@@ -2,6 +2,7 @@
 extract, and handler dispatch. Network-free (urllib mocked)."""
 import io
 import os
+import time
 
 import pytest
 
@@ -536,22 +537,66 @@ def test_update_planet_advances_from_a_sequence_without_a_timestamp(tmp_path, mo
         timestamp = None
     applied = {}
 
-    class Server:
-        def __init__(self, url):
-            pass
-
-        def apply_diffs_to_file(self, src, dst, start, max_size):
-            applied["start"] = start
-            open(dst, "wb").write(b"new")
-            return 5131
+    def apply(src, dst, start, max_kb, replication):
+        applied["start"] = start
+        open(dst, "wb").write(b"new")
+        return 5131
 
     planet = tmp_path / "planet.osm.pbf"
     planet.write_bytes(b"old")
     monkeypatch.setattr(plf._repl, "get_replication_header", lambda p: H())
-    monkeypatch.setattr(plf, "ReplicationServer", Server)
+    monkeypatch.setattr(plf, "_apply_diffs", apply)
     u = plf.update_planet(str(planet))
     assert applied["start"] == 5121, "resume from the sequence, not a timestamp lookup"
     assert u.advanced is True and planet.read_bytes() == b"new"
+
+
+class _SeqHeader:
+    def __init__(self, seq):
+        self.url, self.sequence, self.timestamp = "https://planet.example/replication/day", seq, None
+
+
+def test_a_concurrent_update_is_WAITED_for_not_reported_as_done(tmp_path, monkeypatch):
+    """2026-09-30: a reclaim 6 min into a rewrite; the second execution returned
+    "concurrent update in flight" as a normal status and the workflow cut
+    extracts from the OLD planet. It must wait, then report the advanced planet."""
+    planet = tmp_path / "planet-latest.osm.pbf"
+    planet.write_bytes(b"old")
+    live = tmp_path / "_planet_update_tmp.other.osm.pbf"
+    live.write_bytes(b"partial")
+    headers = {"seq": 5120}
+    polls = {"n": 0}
+
+    def fake_sleep(_s):
+        polls["n"] += 1
+        live.replace(planet)          # the other execution finishes while we wait
+        headers["seq"] = 5131
+
+    monkeypatch.setattr(plf._repl, "get_replication_header", lambda p: _SeqHeader(headers["seq"]))
+    monkeypatch.setattr(plf.time, "sleep", fake_sleep)
+    monkeypatch.setattr(plf, "_apply_diffs",
+                        lambda *a: (_ for _ in ()).throw(AssertionError("must not start a 2nd rewrite")))
+    u = plf.update_planet(str(planet))
+    assert polls["n"] >= 1, "it must have waited"
+    assert u.advanced is True and u.new_sequence == 5131 and "concurrent" in u.status
+
+
+def test_an_abandoned_temp_is_removed_and_the_update_runs(tmp_path, monkeypatch):
+    planet = tmp_path / "planet-latest.osm.pbf"
+    planet.write_bytes(b"old")
+    dead = tmp_path / "_planet_update_tmp.dead.osm.pbf"
+    dead.write_bytes(b"partial")
+    old = time.time() - 3600
+    os.utime(dead, (old, old))
+    monkeypatch.setattr(plf._repl, "get_replication_header", lambda p: _SeqHeader(5120))
+
+    def apply(src, dst, start, max_kb, replication):
+        open(dst, "wb").write(b"new")
+        return 5131
+
+    monkeypatch.setattr(plf, "_apply_diffs", apply)
+    u = plf.update_planet(str(planet))
+    assert not dead.exists() and u.advanced is True and planet.read_bytes() == b"new"
 
 
 def test_download_planet_keeps_a_sequenced_planet_without_a_timestamp(tmp_path, monkeypatch):

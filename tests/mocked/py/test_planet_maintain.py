@@ -230,27 +230,38 @@ def _planet_with_header(tmp_path, monkeypatch):
     class _Server:
         def __init__(self, *a, **k): pass
         def timestamp_to_sequence(self, _ts): return 5000
-        def apply_diffs_to_file(self, src, dst, start, max_size=None):
-            applied.append(dst)
-            open(dst, "wb").write(b"updated")
-            return 5001
     monkeypatch.setattr(pf, "ReplicationServer", _Server)
+
+    # The merge runs in a CHILD process (so it cannot starve the runner's
+    # heartbeat); tests replace that one call.
+    def _apply(src, dst, start, max_kb, replication):
+        applied.append(dst)
+        open(dst, "wb").write(b"updated")
+        return 5001
+    monkeypatch.setattr(pf, "_apply_diffs", _apply)
     return pf, planet, applied
 
 
-def test_update_planet_refuses_while_another_update_is_in_flight(tmp_path, monkeypatch):
-    """A temp file still being written means a live writer. Refusing is what
-    stops a reclaim from starting a second full-planet copy."""
+def test_update_planet_never_starts_a_second_copy_while_one_is_in_flight(tmp_path, monkeypatch):
+    """A temp file still being written means a live writer: no second full-planet
+    copy may start while it exists. It WAITS rather than refusing -- a refusal was
+    reported as a completed step and the workflow cut extracts from the old
+    planet (2026-09-30). Here the other writer dies without advancing the
+    planet, so once it is gone this execution does the update itself."""
     pf, planet, applied = _planet_with_header(tmp_path, monkeypatch)
     inflight = tmp_path / "_planet_update_tmp.deadbeef.osm.pbf"
     inflight.write_bytes(b"partial")          # mtime = now => a live writer
+    seen = []
 
+    def _sleep(_s):
+        seen.append(list(applied))            # nothing may start while we wait
+        inflight.unlink()                     # the other writer goes away
+
+    monkeypatch.setattr(pf.time, "sleep", _sleep)
     out = pf.update_planet(str(planet))
 
-    assert applied == [], "started a second full copy while one was in flight"
-    assert "concurrent" in out.status
-    assert out.advanced is False
-    assert inflight.exists(), "must not touch the other execution's output"
+    assert seen == [[]], "started a second full copy while one was in flight"
+    assert len(applied) == 1 and out.advanced is True
 
 
 def test_update_planet_removes_abandoned_temp_and_proceeds(tmp_path, monkeypatch):
