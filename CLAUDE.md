@@ -2,7 +2,7 @@
 
 This repository is a **standalone Facetwork example package**. The Facetwork
 platform (workflow compiler + runtime) lives at
-`/Users/ralph_lemke/facetwork`; this repo only contains the OSM-specific
+[github.com/rlemke/facetwork](https://github.com/rlemke/facetwork); this repo only contains the OSM-specific
 FFL, handlers, and tools. The two are wired together via the
 `facetwork.domains` entry point in `pyproject.toml`.
 

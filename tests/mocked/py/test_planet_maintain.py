@@ -26,7 +26,7 @@ SOURCE_XML = """<?xml version='1.0' encoding='UTF-8'?>
 </osm>
 """
 
-BASE_URL = "http://server3.local:8080/osm"
+BASE_URL = "http://afl-extracts:8080/osm"  # service alias, never a site host name
 MASTER_SEQ = 500
 # RFC 2606 reserved TLD — guaranteed not to resolve, so update_master fails fast.
 UNREACHABLE = "http://replication.invalid/planet"

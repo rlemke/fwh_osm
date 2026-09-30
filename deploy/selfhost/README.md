@@ -66,7 +66,7 @@ Set `FW_GEOFABRIK_BASE_URL` to `BASE_URL` on consumers. The download path fetche
 `<base>/<region>-latest.osm.pbf` and the delta path follows the stamped
 `<base>/<region>-updates/` — one base URL, both paths. **Docker runners** don't
 resolve `.local` mDNS inside the VM (same caveat as the registry) — point them at
-the infra IP or an `afl-*` alias mapped via `extra_hosts`, not `server3.local`.
+the infra IP or an `afl-*` alias mapped via `extra_hosts`, not a `.local` name.
 
 Strategy A publishes **no per-region diffs**: regions refresh by whole-extract
 re-download (the download path revalidates via `Last-Modified`), which avoids the

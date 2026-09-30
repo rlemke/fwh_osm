@@ -42,7 +42,7 @@ NAMESPACE = "osm.planet"
 # CATASTROPHIC inside a container, where it does not exist: os.makedirs happily
 # creates it in the container's WRITABLE LAYER, so an ~80 GB planet streams into
 # the Docker VM's overlay instead of the mounted data volume. On 2026-08-29 that
-# filled server3's 58 GB VM disk and took the fleet's MongoDB down with ENOSPC
+# filled the infra host's 58 GB VM disk and took the fleet's MongoDB down with ENOSPC
 # (WiredTiger error 28 -> WT_PANIC -> fassert), while 3.6 TiB sat free on the
 # external volume bind-mounted at /scratch two directories away.
 #
@@ -209,7 +209,7 @@ def _is_maintained_planet(path: str) -> bool:
        applying replication diffs, so its md5 will NEVER equal the published
        planet-latest.osm.pbf.md5 again. The check is guaranteed to report "not
        cached" and re-download ~92 GB, forever.
-    2. It cannot finish. Measured 2026-08-30 on server3: hashing the mounted
+    2. It cannot finish. Measured 2026-08-30 on the infra host: hashing the mounted
        planet runs at 27 MB/s, so a full pass takes ~57 min — nearly DOUBLE the
        30-minute stuck-task timeout. Every attempt was reclaimed mid-hash, and
        each reclaim started another concurrent hash of the same file.

@@ -12,7 +12,7 @@ def _load(monkeypatch, base=None, provider=None, offline="1"):
 @pytest.mark.parametrize("base,expect_third_party", [
     ("https://download.geofabrik.de", True),
     ("http://afl-minio:9000/osm-extracts", False),
-    ("http://server3.local:8088", False),
+    ("http://afl-extracts:8088", False),       # the self-hosted mirror, by service alias
     ("https://download.openstreetmap.fr", True),
 ])
 def test_base_classification(monkeypatch, base, expect_third_party):

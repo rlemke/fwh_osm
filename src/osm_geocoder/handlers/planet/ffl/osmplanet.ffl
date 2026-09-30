@@ -46,8 +46,8 @@ namespace osm.planet {
         `Requires(memory_gb = 10)` matches BuildAdminSet: same osmium work, same
         `complete_ways` strategy, at PLANET scale over more regions, so it cannot
         need less. Measured 2026-08-26/29 — BuildAdminSet peaked at 7.7 GB against
-        server3's 10.2 GB budget, and OOM'd on MaxPro's 7.75 GiB at Laender scale.
-        Without the floor MaxPro claims a job it cannot finish and only discovers
+        the infra host's 10.2 GB budget, and OOM'd on a laptop's 7.75 GiB at Laender
+        scale. Without the floor the laptop claims a job it cannot finish and only discovers
         that after the planet download, which is hours of wasted work before the
         retry lands where it should have started. */
     event facet ExtractRegions(
@@ -219,7 +219,7 @@ namespace osm.planet {
         country_regions: [String] = ["europe", "africa", "asia", "australia-oceania", "south-america", "central-america"],
         /* Concurrent country regions. Raised 2 -> 4 on 2026-09-15 after the
            first post-move run: FOUR hosts clear the country tier's 10 GB memory
-           floor (MaxPro 31.3, beelink01 30.5, macmini02 30.7, server3 23.4), so
+           floor (31.3, 30.5, 30.7 and 23.4 GiB), so
            four slots can land one per host. ⚠️ The floor is a claim-time FILTER,
            not a reservation -- advertised capacity is static per process and does
            not account for what a runner is already doing, so a much higher width

@@ -19,7 +19,7 @@ Usage::
         --source /data/planet-latest.osm.pbf \
         --out /data/extracts \
         --regions regions.json \
-        --base-url http://server3.local:8080/osm
+        --base-url http://<extracts-host>:8080/osm
 
     # regions.json:
     #   [{"key": "europe/germany",           "poly": "poly/germany.poly"},
@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--regions", required=True,
                     help="JSON file: [{key, bbox:[min_lon,min_lat,max_lon,max_lat] | poly:path}, ...]")
     ap.add_argument("--base-url", required=True,
-                    help="our extract+replication server base, e.g. http://server3.local:8080/osm")
+                    help="our extract+replication server base, e.g. http://<extracts-host>:8080/osm")
     ap.add_argument("--strategy", default="smart", choices=STRATEGIES,
                     help="osmium extract strategy (default: smart — reference-complete)")
     args = ap.parse_args(argv)

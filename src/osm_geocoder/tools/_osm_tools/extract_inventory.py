@@ -58,7 +58,11 @@ DEFAULT_REGIONS = (
 # not match ours; keep the exceptions as an explicit mapping.
 TREE_NAME_OVERRIDES = {"australia-oceania": "oceania"}
 
-DEFAULT_TREE_BASE = "http://server3.local:8088"
+# The self-hosted extract server by its SERVICE alias, which runner containers
+# resolve to whichever host serves the tree (the fleet-agent maps it from the
+# server catalog). A deployment names its own host with FW_OSM_EXTRACT_BASE; no
+# site's host name belongs in the repo.
+DEFAULT_TREE_BASE = "http://afl-extracts:8088"
 DEFAULT_BUCKET = "osm-extracts"
 DEFAULT_OVERPASS = (
     "https://overpass-api.de/api/interpreter",

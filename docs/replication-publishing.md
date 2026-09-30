@@ -31,7 +31,7 @@ precisely what Geofabrik does, and precisely what `pbf_update.update_region`
 publish-replication.sh --status                 # how far behind is each region
 publish-replication.sh --anchor 5051            # ONE-TIME baseline
 publish-replication.sh --stamp-extracts \
-    --base-url http://server3.local:8088        # ONE-TIME, rewrites each PBF
+    --base-url http://afl-extracts:8088         # ONE-TIME, rewrites each PBF
 publish-replication.sh --days 7                 # nightly
 ```
 

@@ -28,7 +28,7 @@ SOURCE_XML = """<?xml version='1.0' encoding='UTF-8'?>
 </osm>
 """
 
-BASE_URL = "http://server3.local:8080/osm"
+BASE_URL = "http://afl-extracts:8080/osm"  # service alias, never a site host name
 SRC_SEQ = 1000
 
 

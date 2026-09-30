@@ -15,7 +15,7 @@ Usage::
         --master /data/planet-latest.osm.pbf \
         --out /data/extracts \
         --regions regions.json \
-        --base-url http://server3.local:8080/osm
+        --base-url http://<extracts-host>:8080/osm
 
     # regions.json — same spec as planet_bootstrap:
     #   [{"key": "europe/germany", "poly": "poly/germany.poly"}, ...]
@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", required=True, help="output root (Geofabrik-style layout)")
     ap.add_argument("--regions", required=True, help="JSON file: [{key, bbox|poly}, ...]")
     ap.add_argument("--base-url", required=True,
-                    help="our extract+replication server base, e.g. http://server3.local:8080/osm")
+                    help="our extract+replication server base, e.g. http://<extracts-host>:8080/osm")
     ap.add_argument("--strategy", default="smart", choices=STRATEGIES)
     ap.add_argument("--max-diff-mb", type=int, default=1024,
                     help="cap per-run replication catch-up (default 1024)")
