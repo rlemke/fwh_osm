@@ -249,11 +249,18 @@ namespace osm.planet {
            us-states tier came back ~36% refreshed with every step green. */
         pub = osm.planet.PublishExtracts(out = extract.out, bucket = $.bucket) with Requires(dataset_planet_gb = 80)
 
+        /* ⚠️ `after pub` is load-bearing. The gate checks the continents IN THE
+           BUCKET, which `pub` writes -- but no value flows from pub to the gate,
+           so without `after` nothing ordered them. On the first real run
+           (2026-09-30) the gate ran in the first minute, found the continents
+           14.7 days old (they were about to be republished) and burned its
+           retries before the planet update had even started: the country tier
+           could never run. */
         gate = osm.planet.RequireFresh(
             patterns = $.country_regions,
             bucket = $.bucket,
             max_age_days = $.max_age_days
-        ) andThen foreach c in $$.country_regions limit $$.country_width {
+        ) after pub andThen foreach c in $$.country_regions limit $$.country_width {
             set = osm.planet.BuildAdminSet(
                 source_region = $.c,
                 admin_level = 2,

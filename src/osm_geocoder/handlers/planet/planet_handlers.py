@@ -222,7 +222,12 @@ def _is_maintained_planet(path: str) -> bool:
         return False
     try:
         import osmium.replication as _repl
-        return _repl.get_replication_header(path).timestamp is not None
+        h = _repl.get_replication_header(path)
+        # A SEQUENCE is a replication position just as much as a timestamp is.
+        # Keying on the timestamp alone judged a maintained planet (seq 5120, no
+        # timestamp -- 2026-09-30) to be absent, and DownloadPlanet began
+        # re-downloading all ~90 GB of it.
+        return h.timestamp is not None or (bool(h.url) and h.sequence is not None)
     except Exception:
         return False
 

@@ -517,14 +517,56 @@ def test_planet_md5(tmp_path):
     assert plf._md5(str(p)) == "5d41402abc4b2a76b9719d911017c592"
 
 
-def test_update_planet_no_timestamp_is_graceful(monkeypatch):
+def test_update_planet_no_position_is_graceful(monkeypatch):
     class H:
         url = None
         sequence = None
         timestamp = None
     monkeypatch.setattr(plf._repl, "get_replication_header", lambda p: H())
     u = plf.update_planet("planet.pbf")
-    assert u.advanced is False and "no timestamp" in u.status
+    assert u.advanced is False and "no replication position" in u.status
+
+
+def test_update_planet_advances_from_a_sequence_without_a_timestamp(tmp_path, monkeypatch):
+    """The real header of 2026-09-30: sequence 5120, EMPTY timestamp. It used to
+    return "no timestamp" without advancing -- as a normal status."""
+    class H:
+        url = "https://planet.example/replication/day"
+        sequence = 5120
+        timestamp = None
+    applied = {}
+
+    class Server:
+        def __init__(self, url):
+            pass
+
+        def apply_diffs_to_file(self, src, dst, start, max_size):
+            applied["start"] = start
+            open(dst, "wb").write(b"new")
+            return 5131
+
+    planet = tmp_path / "planet.osm.pbf"
+    planet.write_bytes(b"old")
+    monkeypatch.setattr(plf._repl, "get_replication_header", lambda p: H())
+    monkeypatch.setattr(plf, "ReplicationServer", Server)
+    u = plf.update_planet(str(planet))
+    assert applied["start"] == 5121, "resume from the sequence, not a timestamp lookup"
+    assert u.advanced is True and planet.read_bytes() == b"new"
+
+
+def test_download_planet_keeps_a_sequenced_planet_without_a_timestamp(tmp_path, monkeypatch):
+    """A maintained planet with no header timestamp must not be re-downloaded."""
+    from osm_geocoder.handlers.planet import planet_handlers as ph
+
+    class H:
+        url = "https://planet.example/replication/day"
+        sequence = 5120
+        timestamp = None
+    p = tmp_path / "planet-latest.osm.pbf"
+    p.write_bytes(b"x" * 10)
+    import osmium.replication as repl
+    monkeypatch.setattr(repl, "get_replication_header", lambda path: H())
+    assert ph._is_maintained_planet(str(p)) is True
 
 
 # --- handler dispatch ---

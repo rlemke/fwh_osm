@@ -119,22 +119,29 @@ def update_planet(planet_path: str, *, replication: str = PLANET_REPLICATION,
                   max_diff_mb: int = 4096, on_log: Callable[[str], None] | None = None) -> PlanetUpdate:
     """Advance the planet in place by applying replication diffs.
 
-    The planet's header carries a timestamp but no sequence, so the start point is
-    derived from the timestamp via ``timestamp_to_sequence`` against the planet
-    replication server. Never raises on a flaky/unreachable replication host —
+    The start point is the header's replication SEQUENCE when it has one, else it
+    is derived from the header's timestamp via ``timestamp_to_sequence``. Either
+    is enough: a planet written by an earlier update carries a sequence and may
+    carry NO timestamp (measured 2026-09-30: seq 5120, empty timestamp), and
+    requiring the timestamp made this return "no timestamp" without advancing --
+    as a normal status, so RefreshChain would have re-cut every continent from an
+    11-day-old planet and reported success. Never raises on a flaky/unreachable
+    replication host —
     returns a ``status`` and leaves the planet untouched, so a scheduled run
     degrades to "re-extract at the current snapshot" instead of failing.
     """
     log = on_log or (lambda _m: None)
     h = _repl.get_replication_header(planet_path)
     ts = h.timestamp
-    if ts is None:
-        return PlanetUpdate("no timestamp in planet header", None, None, False)
-    ts_iso = ts.isoformat()
+    has_seq = bool(h.url) and h.sequence is not None
+    if ts is None and not has_seq:
+        return PlanetUpdate("no replication position (sequence or timestamp) in planet header",
+                            None, None, False)
+    ts_iso = ts.isoformat() if ts is not None else None
 
     server = ReplicationServer(replication)
     try:
-        start = h.sequence if (h.url and h.sequence is not None) else server.timestamp_to_sequence(ts)
+        start = h.sequence if has_seq else server.timestamp_to_sequence(ts)
     except Exception as exc:
         log(f"planet update skipped — replication unreachable ({type(exc).__name__})")
         return PlanetUpdate(f"unreachable: {type(exc).__name__}", ts_iso, None, False)
