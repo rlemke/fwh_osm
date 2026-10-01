@@ -184,6 +184,20 @@ namespace osm.planet {
     ) => (checked: Long, stale: Long, oldest_days: Double)
         with Effect(kind = "io") with Cost(tier = "free")
 
+    // Re-publish named regions from the planet host's served tree to the bucket,
+    // without re-cutting anything. For when the tree is current and the bucket is
+    // not -- e.g. 2026-10-01, when a publish was stopped part-way and russia and
+    // south-america were left a day behind. Scoped to exactly `regions`; the
+    // publisher also refuses to replace newer published data with older.
+    // Example inputs: {"regions": [{"key": "russia", "poly": ""}]}
+    workflow PublishRegions(
+        regions: [Region],
+        bucket: String = "osm-extracts"
+    ) => (published: Long) andThen {
+        pub = osm.planet.PublishExtracts(bucket = $.bucket, regions = $.regions) with Requires(dataset_planet_gb = 80)
+        yield PublishRegions(published = pub.published)
+    }
+
     // The nightly half of RefreshChain: advance the planet, re-cut the
     // continents into the served tree, publish them to the bucket. No country
     // tier -- that is hours of work and runs weekly (osm-admin-regen).
