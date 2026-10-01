@@ -980,3 +980,112 @@ def test_a_failed_pass_removes_its_raw_outputs(tmp_path, monkeypatch):
                      base_url="http://example.test/osm")
     assert not (out / "r0.osm.pbf").exists()
     assert published.read_bytes() == b"published"
+
+
+# --- PublishExtracts never replaces newer remote data (2026-10-01) ------------
+
+ph = None
+
+
+@pytest.fixture(autouse=True)
+def _ph():
+    global ph
+    from osm_geocoder.handlers.planet import planet_handlers
+    ph = planet_handlers
+
+class _StoreS3:
+    """In-memory bucket: key -> bytes."""
+
+    def __init__(self, objects=None):
+        self.objects = dict(objects or {})
+        self.uploads: list[str] = []
+
+    def head_bucket(self, Bucket):
+        return {}
+
+    def get_bucket_policy(self, Bucket):
+        return {"Policy": "{}"}
+
+    def put_bucket_policy(self, Bucket, Policy):
+        pass
+
+    def create_bucket(self, Bucket):
+        pass
+
+    def get_object(self, Bucket, Key):
+        if Key not in self.objects:
+            raise KeyError(Key)
+        return {"Body": io.BytesIO(self.objects[Key])}
+
+    def upload_file(self, src, Bucket, Key, Config=None):
+        self.uploads.append(Key)
+        with open(src, "rb") as fh:
+            self.objects[Key] = fh.read()
+
+
+def _local_extract(out, key, ts):
+    p = out / f"{key}-latest.osm.pbf"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"pbf-" + ts.encode())
+    st = out / f"{key}-updates" / "state.txt"
+    st.parent.mkdir(parents=True, exist_ok=True)
+    st.write_text(f"sequenceNumber=1\ntimestamp={ts.replace(':', chr(92) + ':')}\n")
+
+
+def _state(ts):
+    return f"sequenceNumber=9\ntimestamp={ts.replace(':', chr(92) + ':')}\n".encode()
+
+
+def test_an_older_local_extract_never_replaces_newer_published_data(tmp_path, monkeypatch):
+    """The served tree held 09-14 US states; an unscoped publish overwrote 49 of
+    the 51 the us-states tier had just published."""
+    monkeypatch.setattr(ph, "_ensure_public_bucket", lambda s3, b: None)
+    out = tmp_path / "www"
+    _local_extract(out, "north-america/us/ohio", "2026-09-14T00:00:00Z")
+    _local_extract(out, "africa", "2026-10-01T00:00:00Z")
+    s3 = _StoreS3({
+        "north-america/us/ohio-updates/state.txt": _state("2026-09-30T00:00:00Z"),
+        "africa-updates/state.txt": _state("2026-09-30T00:00:00Z"),
+    })
+    published, missing = ph._publish_tree(s3, str(out), "b", lambda m: None)
+    assert published == 1 and missing == []
+    assert "north-america/us/ohio-latest.osm.pbf" not in s3.uploads
+    assert "africa-latest.osm.pbf" in s3.uploads
+
+
+def test_unknown_local_age_does_not_replace_a_known_remote_age(tmp_path, monkeypatch):
+    monkeypatch.setattr(ph, "_ensure_public_bucket", lambda s3, b: None)
+    out = tmp_path / "www"
+    (out / "r-latest.osm.pbf").parent.mkdir(parents=True)
+    (out / "r-latest.osm.pbf").write_bytes(b"x")          # no state.txt at all
+    s3 = _StoreS3({"r-updates/state.txt": _state("2026-09-30T00:00:00Z")})
+    assert ph._publish_tree(s3, str(out), "b", lambda m: None)[0] == 0
+    assert s3.uploads == []
+
+
+def test_a_first_publish_and_an_equal_republish_both_go_through(tmp_path, monkeypatch):
+    monkeypatch.setattr(ph, "_ensure_public_bucket", lambda s3, b: None)
+    out = tmp_path / "www"
+    _local_extract(out, "new", "2026-10-01T00:00:00Z")
+    _local_extract(out, "same", "2026-10-01T00:00:00Z")
+    s3 = _StoreS3({"same-updates/state.txt": _state("2026-10-01T00:00:00Z")})
+    assert ph._publish_tree(s3, str(out), "b", lambda m: None)[0] == 2
+
+
+def test_a_cancelled_publish_stops_between_objects(tmp_path, monkeypatch):
+    monkeypatch.setattr(ph, "_ensure_public_bucket", lambda s3, b: None)
+    out = tmp_path / "www"
+    for k in ("a", "b", "c"):
+        _local_extract(out, k, "2026-10-01T00:00:00Z")
+    s3 = _StoreS3()
+    calls = {"n": 0}
+
+    def cancel_after_first():
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise ph.HandlerCancelled("terminated")
+
+    monkeypatch.setattr(ph, "raise_if_cancelled", cancel_after_first)
+    with pytest.raises(ph.HandlerCancelled):
+        ph._publish_tree(s3, str(out), "b", lambda m: None)
+    assert [k for k in s3.uploads if k.endswith(".pbf")] == ["a-latest.osm.pbf"]

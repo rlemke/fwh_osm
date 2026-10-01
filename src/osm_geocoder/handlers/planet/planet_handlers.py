@@ -561,15 +561,57 @@ def _ensure_public_bucket(s3, bucket: str) -> None:
         pass
 
 
-def _publish_one(s3, out: str, key: str, bucket: str) -> None:
-    """Upload one region's ``<key>-latest.osm.pbf`` + ``<key>-updates/state.txt``."""
+def _state_timestamp(text: str) -> str | None:
+    """The ``timestamp=`` of an osmosis ``state.txt`` (ISO, colons unescaped), or None.
+
+    Timestamps, not sequence numbers: a sequence is only comparable within one
+    replication source (planet day vs a provider's minutely), a timestamp always is.
+    """
+    for line in text.splitlines():
+        if line.startswith("timestamp="):
+            v = line.split("=", 1)[1].replace("\\:", ":").strip()
+            return v or None
+    return None
+
+
+def _remote_state_timestamp(s3, bucket: str, key: str) -> str | None:
+    try:
+        body = s3.get_object(Bucket=bucket, Key=f"{key}-updates/state.txt")["Body"].read()
+    except Exception:  # noqa: BLE001 - absent remote state: nothing to protect
+        return None
+    return _state_timestamp(body.decode("utf-8", "replace"))
+
+
+def _publish_one(s3, out: str, key: str, bucket: str) -> str | None:
+    """Upload one region's ``<key>-latest.osm.pbf`` + ``<key>-updates/state.txt``.
+
+    Returns None when published, else why it was NOT.
+
+    ⚠️ Never replaces a remote extract with an OLDER one. Measured 2026-10-01: a
+    publish over the served tree (no region scope) uploaded that host's 09-14 US
+    states over the 51 the us-states tier had published the evening before, and
+    49 were overwritten before it was stopped. Scoping the callers fixes that
+    caller; this is the invariant, so the next unscoped caller cannot repeat it.
+    A local copy of UNKNOWN age may not replace a remote copy of known age.
+    """
     pbf = os.path.join(out, f"{key}-latest.osm.pbf")
     if not os.path.exists(pbf):
-        return
+        return "absent"
+    state = os.path.join(out, f"{key}-updates", "state.txt")
+    remote_ts = _remote_state_timestamp(s3, bucket, key)
+    if remote_ts:
+        try:
+            with open(state, encoding="utf-8") as fh:
+                local_ts = _state_timestamp(fh.read())
+        except OSError:
+            local_ts = None
+        if local_ts is None or local_ts < remote_ts:
+            return f"local data {local_ts or 'of unknown age'} is older than the published {remote_ts}"
     s3.upload_file(pbf, bucket, f"{key}-latest.osm.pbf", Config=_tc())
     state = os.path.join(out, f"{key}-updates", "state.txt")
     if os.path.exists(state):
         s3.upload_file(state, bucket, f"{key}-updates/state.txt")
+    return None
 
 
 def _published_region_ages(s3, bucket: str, prefix: str) -> dict[str, float]:
@@ -672,7 +714,12 @@ def _publish_tree(s3, out: str, bucket: str, log, only_keys=None) -> tuple[int, 
     wanted = set(only_keys) if only_keys else None
     seen: set[str] = set()
     published = skipped_foreign = skipped_empty = 0
+    refused_older: list[str] = []
     for pbf in sorted(glob.glob(os.path.join(out, "**", "*-latest.osm.pbf"), recursive=True)):
+        # Between objects, not only around the call: a cancelled publish otherwise
+        # keeps uploading until the tree is exhausted (2026-10-01: it went on for
+        # minutes after the run was terminated, overwriting as it went).
+        raise_if_cancelled()
         key = os.path.relpath(pbf, out)[: -len("-latest.osm.pbf")]
         if wanted is not None and key not in wanted:
             skipped_foreign += 1
@@ -684,8 +731,12 @@ def _publish_tree(s3, out: str, bucket: str, log, only_keys=None) -> tuple[int, 
                 continue
         except OSError:
             continue
-        _publish_one(s3, out, key, bucket)
+        refused = _publish_one(s3, out, key, bucket)
         seen.add(key)
+        if refused:
+            refused_older.append(key)
+            log(f"NOT publishing {key}: {refused}")
+            continue
         published += 1
         if published % 10 == 0:
             log(f"published {published} extracts")
@@ -693,6 +744,10 @@ def _publish_tree(s3, out: str, bucket: str, log, only_keys=None) -> tuple[int, 
         log(f"scoped publish: {published} published, {skipped_foreign} file(s) outside this run left alone")
     if skipped_empty:
         log(f"⚠️ {skipped_empty} zero-length extract(s) NOT published")
+    if refused_older:
+        log(f"⚠️ {len(refused_older)} extract(s) NOT published because the bucket already "
+            f"holds newer data: {', '.join(refused_older[:8])}"
+            + (f" (+{len(refused_older) - 8} more)" if len(refused_older) > 8 else ""))
     # A requested key is missing whether it was absent from this host's disk or
     # present but zero-length -- either way it did NOT reach the bucket, which is
     # the only thing the caller can act on.
