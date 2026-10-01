@@ -31,6 +31,16 @@ deploy/selfhost/maintain-wrapper.sh ~/.facetwork/osm-selfhost/config.env
 curl -sI http://<host>:<PORT>/<region>-latest.osm.pbf   # served
 ```
 
+The nightly job **submits the `osm.planet.RefreshContinents` workflow** and waits
+for it; it no longer runs `osmium` itself. The work is the same (advance the
+planet, re-cut the continents into the served tree, publish them), but it now
+runs on a fleet runner where it is placed, retried and visible — so this host
+needs a runner advertising the `planet` dataset, and `fw` checked out at
+`$FW_BIN` (default `~/facetwork/fw`). The wrapper skips when a `RefreshChain`
+or `RefreshContinents` is already in flight, and records the workflow's real
+outcome in `maintain-health.txt` for the watchdog. `tools/planet_maintain.py`
+remains the standalone path for a host with no fleet.
+
 ## The master planet
 
 `MASTER` is a PBF **with a replication header** that the nightly job advances in

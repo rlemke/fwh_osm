@@ -64,18 +64,84 @@ if [ ! -f "$REGIONS" ]; then
     exit 2
 fi
 
-# Invoke the tool directly with the pyosmium-capable interpreter (PYTHON), rather
-# than planet-maintain.sh, whose venv-activation assumes a fwh_osm-local .venv.
-"${PYTHON:-python3}" "$REPO/src/osm_geocoder/tools/planet_maintain.py" \
-    --master "$MASTER" \
-    --out "$WWW" \
-    --regions "$REGIONS" \
-    --base-url "$BASE_URL" \
-    ${STRATEGY:+--strategy "$STRATEGY"} && rc=0 || rc=$?
+# The re-split runs as the osm.planet.RefreshContinents WORKFLOW, not as osmium
+# called from here. Until 2026-10-01 this wrapper ran planet_maintain.py
+# directly: an ~11 GB osmium the runtime could not see, sharing the planet host
+# with country cuts that sized themselves against the whole machine. The global
+# OOM killer fired 14 times in 30 minutes and finally killed this job. As a
+# workflow the same work (advance the planet, re-cut the continents into the
+# served tree, publish them) is placed, retried, cancellable and on the
+# dashboard like everything else.
+#
+# This still WAITS for the outcome, because maintain-health.txt is what the
+# watchdog reads: recording "submitted" as success would hide a failed run the
+# same way the stream hid one before this file existed.
+FW_BIN="${FW_BIN:-$HOME/facetwork/fw}"
+FFL="${FFL:-$REPO/src/osm_geocoder/handlers/planet/ffl/osmplanet.ffl}"
+WAIT_H="${FW_OSM_MAINTAIN_WAIT_HOURS:-10}"
+if [ ! -x "$FW_BIN" ]; then
+    echo "osm-maintain: fw not found at $FW_BIN (set FW_BIN)" >&2
+    _record 2 "fw not found"
+    exit 2
+fi
 
-_record "$rc"
+# One refresh at a time: RefreshChain does this same work as its first tier.
+# Same query as osm-admin-regen's guard: the field is NESTED (workflow.name) --
+# a flat workflow_name matches nothing and the guard would silently never fire.
+inflight="$("${PYTHON:-python3}" - <<'PYEOF' 2>/dev/null
+import os, sys
+try:
+    import pymongo
+    db = pymongo.MongoClient(os.environ.get("FW_MONGODB_URL") or "mongodb://localhost:27017",
+                             serverSelectionTimeoutMS=8000).get_database(
+        os.environ.get("FW_MONGODB_DATABASE") or "facetwork")
+    r = db.runners.find_one({"workflow.name": {"$in": ["osm.planet.RefreshChain",
+                                                      "osm.planet.RefreshContinents"]},
+                             "state": {"$nin": ["completed", "failed", "terminated"]}})
+except Exception:
+    print("?")
+    sys.exit(0)
+if r:
+    print(f"{r['workflow']['name']} {r.get('uuid', '')}")
+PYEOF
+)"
+if [ "$inflight" = "?" ]; then
+    echo "[maintain] WARNING: could not check for an in-flight refresh (no pymongo / Mongo unreachable) - submitting anyway"
+elif [ -n "$inflight" ]; then
+    echo "[maintain] skipping: $inflight is already in flight and does this work"
+    _record 0 "skipped: in flight $inflight"
+    exit 0
+fi
+
+so="$("$FW_BIN" ffl run --primary "$FFL" --workflow osm.planet.RefreshContinents \
+        --inputs '{"bucket": "'"${BUCKET:-osm-extracts}"'"}' 2>&1)" && rc=0 || rc=$?
+runner="$(printf '%s' "$so" | grep -oE '[0-9a-f]{8}-[0-9a-f-]{27}' | head -1)"
+if [ "$rc" -ne 0 ] || [ -z "$runner" ]; then
+    printf '%s\n' "$so" >&2
+    _record 1 "submit failed"
+    echo "=== [$(date '+%F %T')] osm-maintain FAILED (submit) ===" >&2
+    exit 1
+fi
+echo "[maintain] submitted osm.planet.RefreshContinents $runner"
+
+deadline=$(( $(date +%s) + WAIT_H * 3600 ))
+state=""
+while :; do
+    state="$("$FW_BIN" maint workflow-stats "$runner" --json 2>/dev/null \
+        | "${PYTHON:-python3}" -c 'import json,sys; print(json.load(sys.stdin).get("state",""))' 2>/dev/null || true)"
+    case "$state" in completed|failed|cancelled|terminated) break ;; esac
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+        echo "[maintain] $runner still ${state:-unknown} after ${WAIT_H}h" >&2
+        _record 124 "still running after ${WAIT_H}h: $runner"
+        exit 124
+    fi
+    sleep 60
+done
+echo "[maintain] $runner $state"
+[ "$state" = completed ] && rc=0 || rc=1
+_record "$rc" "runner=$runner state=$state"
 if [ "$rc" -ne 0 ]; then
-    echo "=== [$(date '+%F %T')] osm-maintain FAILED (rc=$rc) ===" >&2
+    echo "=== [$(date '+%F %T')] osm-maintain FAILED ($state) ===" >&2
     exit "$rc"
 fi
 echo "=== [$(date '+%F %T')] osm-maintain done ==="
@@ -87,7 +153,6 @@ echo "=== [$(date '+%F %T')] osm-maintain done ==="
 # Best-effort by design: this leg must NOT be able to turn a successful re-split
 # into a failed one. A missing `fw` (this wrapper also runs where the framework
 # repo is not checked out) is a skip, not an error.
-FW_BIN="${FW_BIN:-$HOME/facetwork/fw}"
 if [ -x "$FW_BIN" ]; then
     if "$FW_BIN" svc osm-report --publish --tree-dir "$WWW" >/dev/null 2>&1; then
         echo "    store status report refreshed"

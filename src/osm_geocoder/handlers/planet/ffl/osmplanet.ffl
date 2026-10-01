@@ -184,6 +184,37 @@ namespace osm.planet {
     ) => (checked: Long, stale: Long, oldest_days: Double)
         with Effect(kind = "io") with Cost(tier = "free")
 
+    // The nightly half of RefreshChain: advance the planet, re-cut the
+    // continents into the served tree, publish them to the bucket. No country
+    // tier -- that is hours of work and runs weekly (osm-admin-regen).
+    //
+    // Exists so the nightly re-split runs INSIDE the runtime instead of as a
+    // cron job calling osmium directly. Measured 2026-10-01: that cron job's
+    // osmium (~11 GB) shared the planet host with country cuts that sized
+    // themselves against the whole machine, and the global OOM killer fired 14
+    // times in 30 minutes. As a workflow its steps carry the same placement
+    // (Requires(dataset_planet_gb)), retries and cancellation as everything
+    // else, and they are visible on the dashboard.
+    workflow RefreshContinents(
+        bucket: String = "osm-extracts",
+        strategy: String = "complete_ways",
+        batch_size: Long = 2
+    ) => (continents: Long) andThen {
+        planet = osm.planet.DownloadPlanet() with Requires(dataset_planet_gb = 80)
+        updated = osm.planet.UpdatePlanet(planet_path = planet.planet_path) with Requires(dataset_planet_gb = 80)
+        polys = osm.planet.DownloadPolygons(scope = "continents")
+        extract = osm.planet.ExtractRegions(
+            planet_path = updated.planet_path,
+            regions = polys.regions,
+            strategy = $.strategy,
+            batch_size = $.batch_size
+        ) with Requires(dataset_planet_gb = 80)
+        /* Same host as the extract: it uploads the LOCAL tree just written. */
+        pub = osm.planet.PublishExtracts(out = extract.out, bucket = $.bucket) with Requires(dataset_planet_gb = 80)
+        yield RefreshContinents(continents = pub.published)
+    }
+
+
     /** THE top-level entry point: planet -> continents -> countries -> US states,
         in one submission, with the ordering and placement rules the chain has
         always had but that a human had to enforce by hand.
