@@ -24,6 +24,13 @@ importable, the gate is a *no-op*: ``acquire_slot`` returns a sentinel token and
 ``release_slot``/``renew_slot`` do nothing, and ``download_slot`` is a plain
 pass-through. Local dev and the offline test suite never block on Mongo.
 
+**Named gates.** The same mechanism caps other shared, bandwidth-bound resources:
+``gate="object-store"`` caps concurrent multi-GB reads from the fleet's object
+store, whose disk turns seek-bound when many large streams interleave
+(measured 2026-09-30: ~12 MB/s total, ~3 MB/s per stream, with seven continents
+being pulled at once). The default (unnamed) gate is the Geofabrik one and keeps
+its original slot ids.
+
 Config (env):
     FW_MONGODB_URL                 Mongo connection string (gate active iff set)
     FW_OSM_DOWNLOAD_CONCURRENCY    max concurrent fleet downloads (default 3)
@@ -132,7 +139,11 @@ def _resolve_collection():
         return coll
 
 
-def _ensure_slots(coll, max_concurrency: int) -> None:
+def _slot_id(gate: str, i: int) -> str:
+    return f"slot-{i}" if not gate else f"{gate}:slot-{i}"
+
+
+def _ensure_slots(coll, max_concurrency: int, gate: str = "") -> None:
     """Idempotently create slot docs ``slot-0 .. slot-(N-1)``.
 
     Uses upsert-on-insert so concurrent runners racing to seed the collection
@@ -142,7 +153,7 @@ def _ensure_slots(coll, max_concurrency: int) -> None:
     """
     for i in range(max_concurrency):
         coll.update_one(
-            {"_id": f"slot-{i}"},
+            {"_id": _slot_id(gate, i)},
             {"$setOnInsert": {"holder": None, "lease_expires": 0}},
             upsert=True,
         )
@@ -155,6 +166,8 @@ def acquire_slot(
     deadline_s: float | None = None,
     poll_min_s: float = 1.0,
     poll_max_s: float = 15.0,
+    gate: str = "",
+    while_waiting=None,
 ) -> SlotToken:
     """Claim one of ``max_concurrency`` fleet-wide download slots.
 
@@ -176,7 +189,7 @@ def acquire_slot(
     n = max(1, n)
 
     try:
-        _ensure_slots(coll, n)
+        _ensure_slots(coll, n, gate)
     except Exception as exc:
         logger.warning("Download gate: slot-seeding failed, proceeding ungated (%s).", exc)
         return _NOOP_TOKEN
@@ -189,7 +202,7 @@ def acquire_slot(
         try:
             doc = coll.find_one_and_update(
                 {
-                    "_id": {"$in": [f"slot-{i}" for i in range(n)]},
+                    "_id": {"$in": [_slot_id(gate, i) for i in range(n)]},
                     "$or": [{"holder": None}, {"lease_expires": {"$lt": now}}],
                 },
                 {"$set": {"holder": holder, "lease_expires": now + lease}},
@@ -210,6 +223,8 @@ def acquire_slot(
             )
             return _NOOP_TOKEN
 
+        if while_waiting is not None:
+            while_waiting()  # e.g. raise_if_cancelled: a queued task must stay stoppable
         sleep_for = min(poll_max_s, backoff) * (0.5 + random.random())
         time.sleep(sleep_for)
         backoff = min(poll_max_s, backoff * 2)
@@ -269,6 +284,8 @@ def download_slot(
     lease_ms: int | None = None,
     deadline_s: float | None = None,
     renew_interval_s: float | None = None,
+    gate: str = "",
+    while_waiting=None,
 ):
     """Context manager: hold a fleet-wide download slot for the wrapped block.
 
@@ -287,6 +304,8 @@ def download_slot(
         max_concurrency=max_concurrency,
         lease_ms=lease,
         deadline_s=deadline_s,
+        gate=gate,
+        while_waiting=while_waiting,
     )
     stop = threading.Event()
     hb: threading.Thread | None = None

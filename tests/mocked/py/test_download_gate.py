@@ -145,3 +145,30 @@ def test_noop_when_mongo_url_unset(monkeypatch):
             assert not t.active
     finally:
         mod._collection_cache = None
+
+
+def test_named_gates_have_independent_slots(gate):
+    """The object-store read cap must not consume Geofabrik slots, or vice versa."""
+    mod, _ = gate
+    geofabrik = mod.acquire_slot(max_concurrency=1, lease_ms=60_000)
+    store = mod.acquire_slot(max_concurrency=1, lease_ms=60_000, gate="object-store")
+    assert geofabrik.active and store.active
+    assert geofabrik.slot_id == "slot-0", "the default gate keeps its original slot ids"
+    assert store.slot_id == "object-store:slot-0"
+
+
+def test_a_queued_acquire_runs_the_waiting_hook(gate):
+    """A task queued for a slot must stay cancellable: the hook runs each poll."""
+    mod, _ = gate
+    held = mod.acquire_slot(max_concurrency=1, lease_ms=60_000, gate="object-store")
+    assert held.active
+
+    class Stop(Exception):
+        pass
+
+    def cancel():
+        raise Stop()
+
+    with pytest.raises(Stop):
+        mod.acquire_slot(max_concurrency=1, lease_ms=60_000, gate="object-store",
+                         while_waiting=cancel)

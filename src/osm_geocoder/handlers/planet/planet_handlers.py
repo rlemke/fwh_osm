@@ -22,7 +22,7 @@ from typing import Any
 
 from ...tools._osm_tools.planet_fetch import fetch_planet, update_planet
 from ...tools._osm_tools.polygon_fetch import fetch_polygons, fetch_country_subregions
-from ...tools._osm_tools.cancellation import cancellable, raise_if_cancelled
+from ...tools._osm_tools.cancellation import HandlerCancelled, cancellable, raise_if_cancelled
 from ...tools._osm_tools.planet_bootstrap import bootstrap_batched
 from ...tools._osm_tools.boundary_gen import generate_polygons
 
@@ -350,16 +350,14 @@ def _resolve_extract_source(source_region: str, planet_path: str, on_log=None, *
         log(f"reusing already-localised {source_region} ({os.path.getsize(dst)/1e9:.1f} GB)")
         return dst
 
-    def _abort_if_cancelled(_bytes: int) -> None:
-        # Same contract as BuildAdminSet's fetch: boto3 calls this per chunk, and
-        # raising aborts the transfer. Without it a terminate leaves a multi-GB
-        # download running — the longest uninterruptible stretch in this path.
-        raise_if_cancelled()
-
-    log(f"cutting from {source_region}: downloading s3://{bucket}/{key}")
+    log(f"cutting from {source_region}: fetching s3://{bucket}/{key}")
     try:
-        with _heartbeating(params or {}, f"downloading {source_region}"):
-            s3.download_file(bucket, key, dst, Callback=_abort_if_cancelled)
+        # Cancellation still aborts the transfer chunk by chunk (inside the
+        # cache or the direct fallback): a terminate must not leave a multi-GB
+        # download running.
+        dst = _fetch_source(s3, bucket, key, dst, params or {}, log, source_region)
+    except HandlerCancelled:
+        raise
     except Exception as exc:
         raise PermanentError(
             f"source_region={source_region!r} is neither on this host nor readable at "
@@ -470,15 +468,42 @@ def _scratch_dir() -> str:
     in-flight download (and boto3 temp files collide), corrupting both. Per-task
     isolation makes concurrent extraction on a host safe."""
     import uuid
-    for base in (os.environ.get("FW_LOCAL_SCRATCH"), "/scratch"):
-        if base and os.path.isdir(base):
-            root = base
-            break
-    else:
-        root = "/tmp"
-    p = os.path.join(root, "osm-admin-set", uuid.uuid4().hex)
+    p = os.path.join(_scratch_base(), "osm-admin-set", uuid.uuid4().hex)
     os.makedirs(p, exist_ok=True)
     return p
+
+
+def _scratch_base() -> str:
+    """The host-local scratch root shared by every osm runner on this host."""
+    for base in (os.environ.get("FW_LOCAL_SCRATCH"), "/scratch"):
+        if base and os.path.isdir(base):
+            return base
+    return "/tmp"
+
+
+def _fetch_source(s3, bucket: str, key: str, fallback_dst: str, params: dict, log,
+                  what: str) -> str:
+    """A source extract from the object store: the host cache's copy when it can
+    hold one (one download per host per version, gated fleet-wide), else a
+    direct download into this task's scratch -- the previous behaviour."""
+    from osm_geocoder.tools._osm_tools.source_cache import fetch as _cache_fetch
+
+    def _abort_if_cancelled(_bytes: int = 0) -> None:
+        raise_if_cancelled()
+
+    with _heartbeating(params or {}, f"downloading {what}"):
+        try:
+            cached = _cache_fetch(s3, bucket, key, scratch_base=_scratch_base(), log=log,
+                                  check_cancel=raise_if_cancelled)
+        except HandlerCancelled:
+            raise
+        except Exception as exc:  # noqa: BLE001 - the cache must never be why a task fails
+            log(f"source cache unavailable ({type(exc).__name__}: {exc}) — downloading directly")
+            cached = None
+        if cached:
+            return cached
+        s3.download_file(bucket, key, fallback_dst, Callback=_abort_if_cancelled)
+    return fallback_dst
 
 
 def _s3_client(endpoint: str | None = None):
@@ -850,17 +875,12 @@ def _build_admin_set(params: dict[str, Any]) -> dict[str, Any]:
 
     work = _scratch_dir()
     src = os.path.join(work, f"{source_region.replace('/', '__')}.osm.pbf")
-    log(f"downloading source {source_region} from s3://{bucket}")
-
-    def _abort_if_cancelled(_bytes: int) -> None:
-        # boto3 invokes this per chunk; raising aborts the transfer. Checking
-        # only around the call would leave a ~30 min download running after a
-        # terminate — the single longest uninterruptible stretch in this handler.
-        raise_if_cancelled()
-
-    with _heartbeating(params, f"downloading {source_region}"):
-        s3.download_file(bucket, f"{source_region}-latest.osm.pbf", src,
-                         Callback=_abort_if_cancelled)
+    log(f"fetching source {source_region} from s3://{bucket}")
+    # Cancellation aborts the transfer chunk by chunk, inside the cache or the
+    # direct fallback: checking only around the call would leave a ~30 min
+    # download running after a terminate.
+    src = _fetch_source(s3, bucket, f"{source_region}-latest.osm.pbf", src, params, log,
+                        source_region)
 
     # country_prefix=source_region → sub-regions key consistently under the source
     # country (fixes the ISO→continent quirk, e.g. mexico) and lets county-level
