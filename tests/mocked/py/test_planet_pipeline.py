@@ -908,3 +908,75 @@ def test_publish_extracts_succeeds_when_every_region_is_present(tmp_path, monkey
 
     assert out["published"] == 2
     assert sorted(uploaded) == ["north-america/us/texas", "north-america/us/utah"]
+
+
+# --- the batcher sizes against LIVE available memory (2026-10-01 OOM loop) ---
+
+_GB = 1 << 30
+
+
+def test_a_busy_host_shrinks_the_pass_to_what_is_available(monkeypatch):
+    """A co-tenant (the nightly re-split) held ~11 GB while country cuts sized
+    against the full ceiling; the kernel killed osmium 14 times in 30 minutes."""
+    calls = []
+    monkeypatch.setattr(pb, "_memory_ceiling_bytes", lambda: 10 * _GB)   # static budget 7 GB
+    monkeypatch.setattr(pb, "_available_bytes", lambda: 5 * _GB)         # live: 4 GB usable
+    monkeypatch.setattr(pb, "_load_region_cost", lambda d: 2 * _GB)
+    monkeypatch.setattr(pb, "bootstrap", _fake_bootstrap_ok(calls))
+    regions = [{"key": f"r{i}", "poly": "p"} for i in range(4)]
+    pb.bootstrap_batched(source="s", out="o", regions=regions, base_url="b", batch_size=0)
+    assert calls == [2, 2], "4 GB usable / 2 GB per region => 2 per pass, not 3"
+
+
+def test_no_room_for_one_region_waits_then_runs_one(monkeypatch):
+    calls, slept = [], []
+    monkeypatch.setattr(pb, "_memory_ceiling_bytes", lambda: 10 * _GB)
+    monkeypatch.setattr(pb, "_available_bytes", lambda: 1 * _GB)        # never enough
+    monkeypatch.setattr(pb, "_load_region_cost", lambda d: 2 * _GB)
+    monkeypatch.setattr(pb, "_MEM_WAIT_S", 60.0)
+    monkeypatch.setattr(pb.time, "sleep", lambda s: slept.append(s))
+    monkeypatch.setattr(pb, "bootstrap", _fake_bootstrap_ok(calls))
+    pb.bootstrap_batched(source="s", out="o", regions=[{"key": "r0", "poly": "p"}],
+                         base_url="b", batch_size=0)
+    assert sum(slept) >= 60.0, "must wait for memory before starting a doomed pass"
+    assert calls == [1], "after the wait it degrades to one region -- slow, not stuck"
+
+
+def test_an_oom_under_a_co_tenant_does_not_persist_an_inflated_cost(monkeypatch):
+    calls, saved = [], []
+    avail = iter([5 * _GB, 50 * _GB, 50 * _GB, 50 * _GB])
+    monkeypatch.setattr(pb, "_memory_ceiling_bytes", lambda: 10 * _GB)
+    monkeypatch.setattr(pb, "_available_bytes", lambda: next(avail, 50 * _GB))
+    monkeypatch.setattr(pb, "_load_region_cost", lambda d: 1 * _GB)
+    monkeypatch.setattr(pb, "_save_region_cost", lambda d, v: saved.append(v))
+    monkeypatch.setattr(pb, "bootstrap", _fake_bootstrap_ok(calls, oom_at=4))
+    regions = [{"key": f"r{i}", "poly": "p"} for i in range(4)]
+    pb.bootstrap_batched(source="s", out="o", regions=regions, base_url="b", batch_size=0)
+    assert calls[0] == 4 and saved == [], "a squeezed pass's OOM is not a cost measurement"
+
+
+def test_a_failed_pass_removes_its_raw_outputs(tmp_path, monkeypatch):
+    """An OOM-killed pass left ~64 GB of truncated <region>.osm.pbf in the served
+    tree (2026-10-01). The published -latest files must survive; the raw ones go."""
+    out = tmp_path / "www"
+    out.mkdir()
+    published = out / "r0-latest.osm.pbf"
+    published.write_bytes(b"published")
+    src = tmp_path / "planet.osm.pbf"
+    src.write_bytes(b"pbf")
+
+    def dies_midway(cmd, *a, **k):
+        (out / "r0.osm.pbf").write_bytes(b"truncat")      # osmium got this far
+        raise pb._OOMError("killed")
+
+    monkeypatch.setattr(pb, "_run", dies_midway)
+    monkeypatch.setattr(pb, "_run_measured", dies_midway)
+    class _Hdr:
+        url, sequence, timestamp = "https://planet.example/replication/day", 5132, None
+
+    monkeypatch.setattr(pb, "get_replication_header", lambda s: _Hdr())
+    with pytest.raises(pb._OOMError):
+        pb.bootstrap(source=str(src), out=str(out), regions=[{"key": "r0", "bbox": [0, 0, 1, 1]}],
+                     base_url="http://example.test/osm")
+    assert not (out / "r0.osm.pbf").exists()
+    assert published.read_bytes() == b"published"

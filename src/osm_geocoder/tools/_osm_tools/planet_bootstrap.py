@@ -52,6 +52,11 @@ STRATEGIES = ("simple", "complete_ways", "smart")
 # MEASURE the pass's real peak, and learn a per-region cost — self-healing on OOM.
 _MEM_FRACTION = float(os.environ.get("FW_OSM_MEM_FRACTION", "0.7"))
 _DEFAULT_REGION_BYTES = int(2.0 * (1 << 30))   # cold-start estimate (2 GiB/region)
+# Share of the host's LIVE available memory a pass may plan for, and how long to
+# wait for memory before running a single-region pass anyway.
+_AVAIL_FRACTION = float(os.environ.get("FW_OSM_AVAIL_FRACTION", "0.8"))
+_MEM_WAIT_S = float(os.environ.get("FW_OSM_MEM_WAIT_S", "1800"))
+_MEM_POLL_S = 30.0
 _MAX_REGIONS_PER_PASS = 64                     # backstop so tiny regions don't over-pack
 _COST_SIDECAR = ".region_cost_est.json"        # persists the learned per-region cost
 
@@ -137,6 +142,54 @@ def _memory_ceiling_bytes() -> int:
         return int(psutil.virtual_memory().total)
     except Exception:
         return 8 * (1 << 30)   # conservative fallback
+
+
+def _available_bytes() -> int | None:
+    """Memory the HOST can give right now (``MemAvailable``), or None if unknown.
+
+    The ceiling above is what this process may use at most; it says nothing about
+    what OTHER work on the host already holds. On a shared host that gap is the
+    whole story: measured 2026-10-01, a nightly re-split held ~11 GB while country
+    cuts sized themselves against the full 30 GB ceiling, and the global OOM
+    killer fired 14 times in 30 minutes. /proc/meminfo inside a container reports
+    the host (or the Docker VM), which is exactly the pool being contended for."""
+    try:
+        for line in open("/proc/meminfo"):
+            if line.startswith("MemAvailable"):
+                return int(line.split()[1]) * 1024
+    except OSError:
+        pass
+    try:
+        import psutil
+        return int(psutil.virtual_memory().available)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _pass_budget(static_budget: int, est: int, log) -> int:
+    """This pass's budget: the static one, capped by live available memory.
+
+    If not even ONE region fits, wait for memory (cancellation stays live; the
+    callers heartbeat) rather than start a pass the kernel will kill -- and after
+    ``_MEM_WAIT_S`` run a single region anyway, so a host that never frees up
+    degrades to slow, not stuck."""
+    waited = 0.0
+    while True:
+        avail = _available_bytes()
+        if avail is None:
+            return static_budget
+        budget = min(static_budget, int(avail * _AVAIL_FRACTION))
+        if budget >= est or waited >= _MEM_WAIT_S:
+            if budget < static_budget:
+                log(f"adaptive: host has {avail / 1e9:.1f}GB available -> pass budget "
+                    f"{budget / 1e9:.1f}GB (static {static_budget / 1e9:.1f}GB)")
+            return max(budget, 1)
+        if waited == 0.0:
+            log(f"adaptive: only {avail / 1e9:.1f}GB available, a region needs ~"
+                f"{est / 1e9:.1f}GB -- waiting for memory (up to {_MEM_WAIT_S / 60:.0f} min)")
+        raise_if_cancelled()
+        time.sleep(_MEM_POLL_S)
+        waited += _MEM_POLL_S
 
 
 def _run_measured(cmd: list[str]) -> int:
@@ -344,10 +397,20 @@ def bootstrap(
     log(f"osmium extract ({strategy}) -> {len(extracts)} region(s)")
     extract_cmd = ["osmium", "extract", "-c", str(cfg_path), source,
                    "--strategy", strategy, "--overwrite"]
-    if pass_stats is not None:
-        pass_stats["peak_bytes"] = _run_measured(extract_cmd)
-    else:
-        _run(extract_cmd)
+    try:
+        if pass_stats is not None:
+            pass_stats["peak_bytes"] = _run_measured(extract_cmd)
+        else:
+            _run(extract_cmd)
+    except BaseException:
+        # A pass that dies (OOM-killed, cancelled, failed) leaves osmium's raw
+        # outputs half-written. They are never renamed to -latest, so readers are
+        # safe, but nothing removed them either: measured 2026-10-01, an OOM-killed
+        # nightly re-split left ~64 GB of truncated `<region>.osm.pbf` in the
+        # SERVED tree, publicly listed. The published -latest files are untouched.
+        for e in extracts:
+            (out_dir / e["output"]).unlink(missing_ok=True)
+        raise
 
     # 4. Stamp OUR replication header on each output, publish the Geofabrik-style
     #    layout, and verify the round-trip through the delta path's reader.
@@ -459,10 +522,11 @@ def _bootstrap_adaptive(*, source, out, regions, base_url, strategy, cost_state_
     total = len(remaining)
     done = 0
     while remaining:
-        n = max(1, min(len(remaining), _MAX_REGIONS_PER_PASS, int(budget // max(est, 1))))
+        pass_budget = _pass_budget(budget, est, log)
+        n = max(1, min(len(remaining), _MAX_REGIONS_PER_PASS, int(pass_budget // max(est, 1))))
         batch = remaining[:n]
         log(f"adaptive pass: {n} region(s) [{done}/{total} done] "
-            f"(est {est * n / 1e9:.1f}GB vs budget {budget / 1e9:.1f}GB)")
+            f"(est {est * n / 1e9:.1f}GB vs budget {pass_budget / 1e9:.1f}GB)")
         stats: dict = {}
         try:
             res = bootstrap(source=source, out=out, regions=batch, base_url=base_url,
@@ -474,9 +538,13 @@ def _bootstrap_adaptive(*, source, out, regions, base_url, strategy, cost_state_
                     f"{batch[0].get('key')!r}") from exc
             # Raise the estimate so the retry packs fewer, then re-run the SAME
             # remaining regions (nothing consumed) in a smaller pass.
-            est = max(int(est * 1.8), budget // (n - 1) + 1)
+            est = max(int(est * 1.8), pass_budget // (n - 1) + 1)
             log(f"adaptive: OOM at {n} region(s) → raise est to {est / 1e9:.2f}GB/region, retry smaller")
-            _save_region_cost(cost_state_dir, est)
+            # Persist the raised cost only when this pass had the host to itself.
+            # A pass squeezed by a co-tenant tells us nothing about what a region
+            # costs, and saving it would make every later run needlessly small.
+            if pass_budget >= budget:
+                _save_region_cost(cost_state_dir, est)
             continue
         on_pass(res)                      # publish this pass now (durable progress)
         results.extend(res)
