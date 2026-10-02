@@ -1127,3 +1127,18 @@ def test_publish_describes_the_extract_not_the_diff_head(tmp_path, monkeypatch):
     s3 = _StoreS3({"europe-updates/state.txt": _state("2026-10-01T00:00:00Z")})
     assert ph._publish_tree(s3, str(out), "b", lambda m: None)[0] == 1
     assert b"5133" in s3.objects["europe-updates/state.txt"]
+
+
+def test_match_owner_hands_root_written_files_to_the_tree_owner(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(pb.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(pb.os, "chown", lambda p, u, g: calls.append((str(p), u, g)))
+    st = os.stat(tmp_path)
+    f = tmp_path / "x"
+    f.write_text("y")
+    pb._match_owner([f], tmp_path)
+    assert calls == ([(str(f), st.st_uid, st.st_gid)] if st.st_uid != 0 else [])
+    calls.clear()
+    monkeypatch.setattr(pb.os, "geteuid", lambda: 1000)
+    pb._match_owner([f], tmp_path)
+    assert calls == [], "a non-root process changes nothing"

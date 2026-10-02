@@ -93,6 +93,30 @@ def bbox_poly(name: str, bbox: Iterable[float]) -> str:
     return "\n".join(body)
 
 
+def _match_owner(paths: Iterable[Path], ref: Path) -> None:
+    """Give ``paths`` the owner of ``ref`` when this process runs as root.
+
+    Runners write this tree as root through a bind mount, while the host's own
+    jobs (the replication publisher, the nightly wrapper) run as the tree's
+    owner. Measured 2026-10-02: a root-created ``australia-oceania-updates/``
+    meant the publisher could never write that continent's diffs. Best-effort:
+    a failure here must not fail a successful extract.
+    """
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return
+    try:
+        st = ref.stat()
+    except OSError:
+        return
+    if st.st_uid == 0:
+        return
+    for p in paths:
+        try:
+            os.chown(p, st.st_uid, st.st_gid)
+        except OSError:
+            pass
+
+
 def _has_sequence(state: Path) -> bool:
     try:
         return any(line.startswith("sequenceNumber=") and line.split("=", 1)[1].strip()
@@ -466,6 +490,7 @@ def bootstrap(
         head = upd / "state.txt"
         if not _has_sequence(head):
             head.write_text(state_txt(seq, ts_iso))
+        _match_owner([final, upd, upd / "extract.state.txt", head], out_dir)
 
         h = get_replication_header(str(final))
         header_ok = (h.url == repl_url and h.sequence == seq)
