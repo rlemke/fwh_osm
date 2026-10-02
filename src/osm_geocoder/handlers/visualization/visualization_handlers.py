@@ -285,6 +285,18 @@ def _make_render_tiled_map_handler(facet_name: str):
         if hit is not None:
             return hit
 
+        # A band with no roads produced no tiles (an empty path): leave it out of
+        # the viewer along with its name and colour, rather than fail the map.
+        if tiles and any(not t for t in tiles):
+            keep = [i for i, t in enumerate(tiles) if t]
+            if step_log:
+                step_log(f"{facet_name}: {len(tiles) - len(keep)} empty layer(s) left out",
+                         level="warning")
+            layer_names = [layer_names[i] for i in keep if i < len(layer_names)] if layer_names else layer_names
+            colors = [colors[i] for i in keep if i < len(colors)] if colors else colors
+            tiles = [tiles[i] for i in keep]
+            if not tiles:
+                raise RuntimeError("every layer is empty: this region has no roads to map")
         if not tiles:
             return {"result": _empty_result(title, "html-tiled")}
         if step_log:

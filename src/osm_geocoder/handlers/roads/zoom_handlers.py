@@ -14,6 +14,26 @@ from facetwork.config import get_output_base
 from facetwork.runtime.handler_context import HandlerCancelled, HandlerContext
 
 from ..shared._output import ensure_dir, open_output, read_storage_json
+
+
+def _is_remote(path: str) -> bool:
+    return path.startswith(("s3://", "hdfs://"))
+
+
+def _publish_dir(local_dir: str, remote_dir: str) -> int:
+    """Upload every file under ``local_dir`` to ``remote_dir``; return the count."""
+    from facetwork.runtime.storage import get_storage_backend
+
+    be = get_storage_backend(remote_dir)
+    n = 0
+    for root, _dirs, files in os.walk(local_dir):
+        for name in files:
+            src = os.path.join(root, name)
+            rel = os.path.relpath(src, local_dir).replace(os.sep, "/")
+            with open(src, "rb") as fh, be.open(remote_dir.rstrip("/") + "/" + rel, "wb") as out:
+                out.write(fh.read())
+            n += 1
+    return n
 from ..shared.output_cache import cached_result, save_result_meta, with_output_cache
 from .zoom_builder import (
     _empty_result,
@@ -553,16 +573,40 @@ def _make_build_zoom_layers_handler(facet_name: str):
         # (step logs alone do not count as progress).
         ctx = HandlerContext.from_payload(payload)
 
+        # A remote output_dir (s3://, hdfs://) is what lets the NEXT steps run on
+        # any host. Measured 2026-10-02 on the fleet: the layers were written to
+        # one host's local scratch, the six tile steps were claimed by three
+        # different hosts, and each failed on a missing file until a retry
+        # happened to land back on the host that had it. So: build in local
+        # scratch (the pipeline writes with local file APIs), upload, and hand
+        # back the remote paths, which BuildVectorTiles localizes anywhere.
+        work_dir = output_dir
+        if _is_remote(output_dir):
+            import tempfile
+
+            work_dir = tempfile.mkdtemp(prefix="zoom-layers-",
+                                        dir=os.environ.get("FW_LOCAL_SCRATCH") or None)
         try:
             result, metrics = build_zoom_layers(
                 cache=cache,
                 graph_config=gh_config,
                 min_population=min_population,
-                output_dir=output_dir,
+                output_dir=work_dir,
                 max_concurrent=max_concurrent,
                 heartbeat=lambda msg: ctx.heartbeat(progress_message=msg),
                 check_cancel=ctx.raise_if_cancelled,
             )
+            if work_dir != output_dir:
+                ctx.heartbeat(progress_message=f"uploading layers to {output_dir}")
+                n = _publish_dir(work_dir, output_dir)
+                result = {k: (v.replace(work_dir, output_dir.rstrip("/"), 1)
+                              if isinstance(v, str) and v.startswith(work_dir) else v)
+                          for k, v in result.items()}
+                if step_log:
+                    step_log(f"{facet_name}: uploaded {n} file(s) to {output_dir}")
+                import shutil
+
+                shutil.rmtree(work_dir, ignore_errors=True)
             if step_log:
                 # A run with no cities is WEAKER, not failed: anchors fall back
                 # to high-degree graph nodes and bypass/ring detection returns

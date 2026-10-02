@@ -31,6 +31,21 @@ def _file_size(path: str) -> int:
         return 0
 
 
+def _feature_count(path: str) -> int | None:
+    """Features in a GeoJSON file, or None when it is too big to check cheaply
+    (a big file is not empty, and the tiler will say so if it is)."""
+    try:
+        if os.path.getsize(path) > 20_000_000:
+            return None
+        import json
+
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        return len(doc.get("features") or []) if isinstance(doc, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
 def _run_with_heartbeat(payload: dict, fn):
     hb = payload.get("_task_heartbeat")
     if not callable(hb):
@@ -90,6 +105,17 @@ def _make_build_handler(facet_name: str):
 
         from facetwork.runtime.storage import localize
         local_input = localize(geojson_path)
+
+        # A zoom band with no roads is a fact about the region, not a failure:
+        # zoom 2 is motorway-only, and most small countries have no motorway.
+        # tippecanoe refuses an empty input ("Did not read any valid
+        # geometries"), which dead-lettered the step and failed the whole map.
+        if _feature_count(local_input) == 0:
+            if step_log:
+                step_log(f"{facet_name}: {geojson_path} has no features -- no tiles for "
+                         f"this band", level="warning")
+            return {"result": {"output_path": "", "format": "empty", "size_bytes": 0,
+                               "min_zoom": min_zoom, "max_zoom": max_zoom, "layer": layer_name}}
 
         result = _run_with_heartbeat(
             payload,
