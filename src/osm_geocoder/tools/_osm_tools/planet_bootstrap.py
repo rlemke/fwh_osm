@@ -93,6 +93,14 @@ def bbox_poly(name: str, bbox: Iterable[float]) -> str:
     return "\n".join(body)
 
 
+def _has_sequence(state: Path) -> bool:
+    try:
+        return any(line.startswith("sequenceNumber=") and line.split("=", 1)[1].strip()
+                   for line in state.read_text(encoding="utf-8", errors="replace").splitlines())
+    except OSError:
+        return False
+
+
 def state_txt(seq: int | None, ts_iso: str | None) -> str:
     """OSM replication ``state.txt`` (Java-properties: colons in the timestamp escaped)."""
     out = ""
@@ -444,7 +452,20 @@ def bootstrap(
 
         upd = out_dir / f"{key}-updates"
         upd.mkdir(parents=True, exist_ok=True)
-        (upd / "state.txt").write_text(state_txt(seq, ts_iso))
+        # extract.state.txt records what THIS FILE's data is at; state.txt is the
+        # head of the published diff stream, which the replication publisher
+        # owns. Overwriting the head here jumped it from 5116 to 5131+ on
+        # 2026-09-30 while no diffs existed in between: every consumer holding an
+        # extract from that range asked for a diff that was never cut, and the
+        # publisher (which starts from the head) could never fill the hole. And
+        # extract.state.txt was left at 5090 under data at 5133, so `--apply`
+        # would have re-applied 43 old diffs over newer data. So: always record
+        # the extract; create the head only when there is none, and otherwise
+        # leave it for the publisher to advance through every sequence.
+        (upd / "extract.state.txt").write_text(state_txt(seq, ts_iso))
+        head = upd / "state.txt"
+        if not _has_sequence(head):
+            head.write_text(state_txt(seq, ts_iso))
 
         h = get_replication_header(str(final))
         header_ok = (h.url == repl_url and h.sequence == seq)

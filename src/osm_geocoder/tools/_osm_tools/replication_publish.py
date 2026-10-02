@@ -310,6 +310,26 @@ def extract_state(region: str, www: Path | None = None) -> tuple[int | None, str
     return parse_state(f.read_text(encoding="utf-8", errors="replace"))
 
 
+def missing_diffs(region: str, www: Path | None = None) -> list[int]:
+    """Sequences with no diff file between the region's first published diff and
+    its head. A consumer whose extract falls in a hole asks for a diff that is
+    not there and falls back to re-downloading the whole extract -- and a check
+    that reads only state.txt reports such a stream as current (measured
+    2026-10-02: 7 continents "0 behind" over a 16-diff hole)."""
+    w = www or www_root()
+    head, _ts = region_state(region, w)
+    d = w / f"{region}-updates"
+    if head is None or not d.is_dir():
+        return []
+    have = set()
+    for f in d.glob("[0-9][0-9][0-9]/[0-9][0-9][0-9]/[0-9][0-9][0-9].osc.gz"):
+        a, b = f.parent.parent.name, f.parent.name
+        have.add(int(a + b + f.name[:3]))
+    if not have:
+        return []
+    return [s for s in range(min(have), head + 1) if s not in have]
+
+
 def region_state(region: str, www: Path | None = None) -> tuple[int | None, str]:
     w = www or www_root()
     state = w / f"{region}-updates" / "state.txt"

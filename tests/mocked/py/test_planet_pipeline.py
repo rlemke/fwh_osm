@@ -1089,3 +1089,41 @@ def test_a_cancelled_publish_stops_between_objects(tmp_path, monkeypatch):
     with pytest.raises(ph.HandlerCancelled):
         ph._publish_tree(s3, str(out), "b", lambda m: None)
     assert [k for k in s3.uploads if k.endswith(".pbf")] == ["a-latest.osm.pbf"]
+
+
+# --- a re-cut records the extract and leaves the published head (2026-10-02) ---
+
+def test_has_sequence_reads_a_state_file(tmp_path):
+    s = tmp_path / "state.txt"
+    assert pb._has_sequence(s) is False
+    s.write_text("sequenceNumber=5116\ntimestamp=x\n")
+    assert pb._has_sequence(s) is True
+    s.write_text("timestamp=x\n")
+    assert pb._has_sequence(s) is False
+
+
+def test_missing_diffs_finds_a_hole_below_the_head(tmp_path):
+    from osm_geocoder.tools._osm_tools import replication_publish as rp
+    upd = tmp_path / "europe-updates"
+    for seq in (5115, 5116, 5133):
+        f = upd / rp.sequence_path(seq)
+        f = f.with_name(f.name + ".osc.gz")
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"x")
+    (upd / "state.txt").write_text("sequenceNumber=5133\n")
+    assert rp.missing_diffs("europe", tmp_path) == list(range(5117, 5133))
+    (upd / "state.txt").write_text("sequenceNumber=5116\n")
+    assert rp.missing_diffs("europe", tmp_path) == []
+
+
+def test_publish_describes_the_extract_not_the_diff_head(tmp_path, monkeypatch):
+    """On the served tree the head can lag the extract; the bucket has no diffs,
+    so it must carry (and be compared on) extract.state.txt."""
+    monkeypatch.setattr(ph, "_ensure_public_bucket", lambda s3, b: None)
+    out = tmp_path / "www"
+    _local_extract(out, "europe", "2026-09-15T00:00:00Z")          # head lags
+    (out / "europe-updates" / "extract.state.txt").write_text(
+        "sequenceNumber=5133\ntimestamp=2026-10-02T00\\:00\\:00Z\n")
+    s3 = _StoreS3({"europe-updates/state.txt": _state("2026-10-01T00:00:00Z")})
+    assert ph._publish_tree(s3, str(out), "b", lambda m: None)[0] == 1
+    assert b"5133" in s3.objects["europe-updates/state.txt"]

@@ -597,7 +597,14 @@ def _publish_one(s3, out: str, key: str, bucket: str) -> str | None:
     pbf = os.path.join(out, f"{key}-latest.osm.pbf")
     if not os.path.exists(pbf):
         return "absent"
-    state = os.path.join(out, f"{key}-updates", "state.txt")
+    # What the EXTRACT's data is at. On the served tree state.txt is the head of
+    # the diff stream, which can lag the extract (a re-cut leaves the head for
+    # the publisher to advance); extract.state.txt records the file itself. The
+    # bucket holds no diffs, so its state.txt must describe the extract.
+    upd = os.path.join(out, f"{key}-updates")
+    state = os.path.join(upd, "extract.state.txt")
+    if not os.path.exists(state):
+        state = os.path.join(upd, "state.txt")
     remote_ts = _remote_state_timestamp(s3, bucket, key)
     if remote_ts:
         try:
@@ -608,7 +615,6 @@ def _publish_one(s3, out: str, key: str, bucket: str) -> str | None:
         if local_ts is None or local_ts < remote_ts:
             return f"local data {local_ts or 'of unknown age'} is older than the published {remote_ts}"
     s3.upload_file(pbf, bucket, f"{key}-latest.osm.pbf", Config=_tc())
-    state = os.path.join(out, f"{key}-updates", "state.txt")
     if os.path.exists(state):
         s3.upload_file(state, bucket, f"{key}-updates/state.txt")
     return None

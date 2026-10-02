@@ -140,6 +140,11 @@ def cmd_check(args) -> int:
         print(f"  stream {r:<18} {seq}  ({behind} behind){flag}")
         if behind > behind_limit:
             problems.append(f"{r}: stream {behind} days behind (limit {behind_limit})")
+        holes = rp.missing_diffs(r, www)
+        if holes:
+            print(f"         {'':<18} {len(holes)} diff(s) MISSING ({holes[0]}..{holes[-1]})  <-- HOLE")
+            problems.append(f"{r}: {len(holes)} diff(s) missing between {holes[0]} and "
+                            f"{holes[-1]} -- consumers in that range must re-download")
 
     names = [i for i in (args.check_index or []) if i]
     if not names:

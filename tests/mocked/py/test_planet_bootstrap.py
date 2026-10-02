@@ -249,3 +249,23 @@ def test_probe_region_still_detects_a_genuinely_empty_extract(tmp_path, monkeypa
     nodes, ways, size = pb._probe_region(small)
     assert (nodes, ways) == (0, 0), "an empty extract must still be detected"
     assert size == 200
+
+
+def test_a_recut_records_the_extract_and_leaves_the_published_head(tmp_path):
+    """2026-09-30: a re-cut overwrote the head (state.txt) from 5116 to 5131+
+    while no diffs existed in between, leaving a hole the publisher -- which
+    starts from the head -- could never fill; and extract.state.txt was left at
+    5090 under newer data, so --apply would have re-applied old diffs."""
+    source = _make_source(tmp_path)
+    out = tmp_path / "out"
+    upd = out / "demo/west-updates"
+    upd.mkdir(parents=True)
+    (upd / "state.txt").write_text("sequenceNumber=990\ntimestamp=2025-12-01T00\\:00\\:00Z\n")
+    pb.bootstrap(source=source, out=str(out), base_url=BASE_URL, strategy="simple",
+                 regions=[{"key": "demo/west", "bbox": [0.0, 0.0, 0.5, 1.0]},
+                          {"key": "demo/east", "bbox": [0.5, 0.0, 1.0, 1.0]}])
+    assert "sequenceNumber=990" in (upd / "state.txt").read_text(), "head is the publisher's"
+    assert f"sequenceNumber={SRC_SEQ}" in (upd / "extract.state.txt").read_text()
+    east = out / "demo/east-updates"
+    assert f"sequenceNumber={SRC_SEQ}" in (east / "state.txt").read_text(), "a new region gets a head"
+    assert f"sequenceNumber={SRC_SEQ}" in (east / "extract.state.txt").read_text()
