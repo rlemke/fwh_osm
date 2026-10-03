@@ -159,3 +159,32 @@ class TestServerFaultFloor:
             [(1, 2)] * 100, COORDS, "/graph", "car", _NullIndex(), max_concurrent=2
         )
         assert routed == 50
+
+
+class TestOutOfBoundsPointsInASmallRegion:
+    """2026-10-03: small regions (islands, provinces of a country cut into pieces)
+    had 3-9 of 7-13 pairs out of bounds on EVERY host while other pairs routed."""
+
+    def _mixed(self, monkeypatch, *, server_moves: bool):
+        ok = _Resp(200, {"paths": [{"points": {"coordinates": [[-122.68, 45.52]]}}]})
+        oob = _Resp(400, text=OOB)
+        calls = {"n": 0}
+
+        def get(url, params=None, timeout=None):
+            calls["n"] += 1
+            if calls["n"] > 12:  # the re-check after the run
+                return oob if server_moves else ok
+            return ok if calls["n"] % 3 == 0 else oob
+
+        monkeypatch.setattr(zoom_sbs, "HAS_REQUESTS", True)
+        monkeypatch.setattr(zoom_sbs.requests, "get", get)
+        return route_and_accumulate([(1, 2)] * 12, COORDS, "/graph", "car", _NullIndex(),
+                                    max_concurrent=1)
+
+    def test_points_outside_the_network_do_not_fail_a_serving_server(self, monkeypatch):
+        votes, routed = self._mixed(monkeypatch, server_moves=False)
+        assert routed == 4
+
+    def test_a_server_that_no_longer_routes_a_known_pair_still_fails(self, monkeypatch):
+        with pytest.raises(PermanentError, match="stopped serving this region"):
+            self._mixed(monkeypatch, server_moves=True)

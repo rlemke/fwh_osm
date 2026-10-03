@@ -387,6 +387,24 @@ def cut_diff(planet_diff: Path, poly: Path, out: Path, *, osmium_bin: str | None
     return out.stat().st_size
 
 
+#: Memory one region costs in a multi-region diff cut. osmium extract keeps a
+#: per-extract id bitmap sized by the highest OSM id, so the cost scales with the
+#: number of REGIONS, not the size of the day's diff. Measured 2026-10-03: 8
+#: regions in one pass reached 19.7 GB resident and were OOM-killed on a 30 GB
+#: host shared with the fleet (it fitted on the 64 GB host that ran this before).
+_REGION_CUT_BYTES = int(float(os.environ.get("FW_OSM_DIFF_CUT_GB_PER_REGION", "2.6")) * 1e9)
+
+
+def _mem_available() -> int | None:
+    try:
+        for line in open("/proc/meminfo"):
+            if line.startswith("MemAvailable"):
+                return int(line.split()[1]) * 1024
+    except OSError:
+        pass
+    return None
+
+
 def cut_diff_multi(
     planet_diff: Path,
     regions: list[str],
@@ -395,13 +413,14 @@ def cut_diff_multi(
     *,
     osmium_bin: str | None = None,
 ) -> dict[str, Path]:
-    """Cut one planet diff to MANY region polygons in a single osmium pass.
+    """Cut one planet diff to MANY region polygons, as few osmium passes as fit.
 
     The dominant cost is decoding the day's diff, not testing points against a
     polygon, so cutting N regions one at a time pays that cost N times for no
     reason. Measured: one region 27.3s, three regions 29.3s — the marginal
-    region is about a second. Over a 39-day catch-up across 8 regions that is
-    the difference between ~20 minutes and ~2.3 hours.
+    region is about a second. But each region also costs ~2.6 GB of id bitmaps,
+    so the regions are cut in groups sized to the memory actually available,
+    and a group that is killed anyway is retried at half the size.
 
     Outputs land in ``staging`` and are moved into place by the caller, so a
     failed pass leaves no half-written diff where a consumer could fetch it.
@@ -415,31 +434,43 @@ def cut_diff_multi(
     usable = [r for r in regions if (polys / f"{r}.poly").exists()]
     if not usable:
         return {}
-    cfg = {
-        "directory": str(staging),
-        "extracts": [
-            {
-                "output": f"{r}.osc.gz",
-                "output_format": "osc.gz",
-                "polygon": {"file_name": str(polys / f"{r}.poly"), "file_type": "poly"},
-            }
-            for r in usable
-        ],
-    }
-    cfg_path = staging / "extract-config.json"
-    cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
-    try:
-        subprocess.run(
-            [osmium_bin, "extract", "--with-history", "-c", str(cfg_path),
-             "--overwrite", str(planet_diff)],
-            check=True, capture_output=True, text=True,
-        )
-    except subprocess.CalledProcessError as exc:
-        raise ReplicationError(
-            f"osmium extract (multi) failed: {(exc.stderr or '').strip()[:300]}"
-        ) from exc
-    except FileNotFoundError as exc:
-        raise ReplicationError(f"osmium not found ({osmium_bin})") from exc
+    avail = _mem_available()
+    size = len(usable) if avail is None else max(1, min(len(usable), int(avail * 0.7 // _REGION_CUT_BYTES)))
+    pending = list(usable)
+    while pending:
+        group, rest = pending[:size], pending[size:]
+        cfg = {
+            "directory": str(staging),
+            "extracts": [
+                {
+                    "output": f"{r}.osc.gz",
+                    "output_format": "osc.gz",
+                    "polygon": {"file_name": str(polys / f"{r}.poly"), "file_type": "poly"},
+                }
+                for r in group
+            ],
+        }
+        cfg_path = staging / "extract-config.json"
+        cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
+        try:
+            subprocess.run(
+                [osmium_bin, "extract", "--with-history", "-c", str(cfg_path),
+                 "--overwrite", str(planet_diff)],
+                check=True, capture_output=True, text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            if exc.returncode in (-9, 137) and size > 1:
+                size = max(1, size // 2)
+                log.warning("osmium extract killed (likely OOM) at %d region(s); retrying "
+                            "%d at a time", len(group), size)
+                continue
+            raise ReplicationError(
+                f"osmium extract (multi) failed (exit {exc.returncode}): "
+                f"{(exc.stderr or '').strip()[:300]}"
+            ) from exc
+        except FileNotFoundError as exc:
+            raise ReplicationError(f"osmium not found ({osmium_bin})") from exc
+        pending = rest
     return {r: staging / f"{r}.osc.gz" for r in usable
             if (staging / f"{r}.osc.gz").exists()}
 

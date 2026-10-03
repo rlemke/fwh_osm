@@ -380,3 +380,32 @@ def test_a_failing_index_does_not_stop_the_stream(tmp_path, monkeypatch):
     assert res.days == 1, "the day still published"
     assert res.regions[0].published == [5090]
     assert res.index_errors and "disk on fire" in res.index_errors[0]
+
+
+def test_a_diff_cut_is_grouped_by_available_memory_and_halved_when_killed(tmp_path, monkeypatch):
+    """2026-10-03: 8 regions in one osmium pass reached 19.7 GB and were OOM-killed."""
+    import json
+    import subprocess as sp
+    from osm_geocoder.tools._osm_tools import replication_publish as rp
+
+    polys = tmp_path / "polys"
+    polys.mkdir()
+    regions = [f"r{i}" for i in range(8)]
+    for r in regions:
+        (polys / f"{r}.poly").write_text("x\n1\n0 0\nEND\nEND\n")
+    monkeypatch.setattr(rp, "_mem_available", lambda: int(4.5 * rp._REGION_CUT_BYTES / 0.7))
+    groups = []
+
+    def fake_run(cmd, **kw):
+        cfg = json.loads((tmp_path / "st" / "extract-config.json").read_text())
+        names = [e["output"].split(".")[0] for e in cfg["extracts"]]
+        groups.append(names)
+        if len(names) == 4 and len(groups) == 1:
+            raise sp.CalledProcessError(-9, cmd, stderr="")
+        for n in names:
+            (tmp_path / "st" / f"{n}.osc.gz").write_bytes(b"x")
+
+    monkeypatch.setattr(rp.subprocess, "run", fake_run)
+    out = rp.cut_diff_multi(tmp_path / "d.osc.gz", regions, polys, tmp_path / "st", osmium_bin="osmium")
+    assert sorted(out) == regions
+    assert [len(g) for g in groups] == [4, 2, 2, 2, 2], groups

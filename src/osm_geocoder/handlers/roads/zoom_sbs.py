@@ -625,6 +625,8 @@ def route_and_accumulate(
     total = len(pairs)
     routed = 0
     done = 0
+    pair_of: dict = {}
+    witness: list[tuple[int, int]] = []  # one pair that routed: proof of the region
 
     def _consume(fut) -> None:
         nonlocal routed, done
@@ -639,8 +641,11 @@ def route_and_accumulate(
         # test mock raised TypeError on every call and the suite still saw a
         # clean return). The pool is shut down by the except below.
         coords = fut.result()
+        pair = pair_of.pop(fut, None)
         if coords:
             routed += 1
+            if not witness and pair is not None:
+                witness.append(pair)
             for eid in segment_index.snap_route(coords):
                 bc[eid] += 1
         if done % 1000 == 0:
@@ -657,7 +662,9 @@ def route_and_accumulate(
         it = iter(pairs)
         try:
             for a, b in it:
-                pending.add(pool.submit(_route_pair, a, b, node_coords, graph_dir, profile, tally))
+                fut = pool.submit(_route_pair, a, b, node_coords, graph_dir, profile, tally)
+                pair_of[fut] = (a, b)
+                pending.add(fut)
                 if len(pending) >= submit_window:
                     finished = next(as_completed(pending))
                     pending.discard(finished)
@@ -683,6 +690,25 @@ def route_and_accumulate(
     # blanket "under 5% returned a path" floor failed that state on 2026-09-25.
     # Out-of-bounds and transport failures are the ones that mean this run cannot
     # produce betweenness, and a repointed or dead server drives them to ~100%.
+    if answered and faults * 5 > answered and witness:
+        # A high out-of-bounds share is NOT proof of a wrong server. Measured
+        # 2026-10-03 on small regions (islands, the provinces of a country cut
+        # into pieces): 3-9 of 7-13 pairs were out of bounds on EVERY host while
+        # other pairs in the same run routed -- points with no car road near
+        # them, which a small sample makes a large fraction. So ask the server
+        # directly: re-route a pair that already succeeded in this run. If it
+        # still routes, the region is loaded and the faults were data.
+        recheck: dict[str, int] = {}
+        a, b = witness[0]
+        if _route_pair(a, b, node_coords, graph_dir, profile, recheck):
+            log.warning(
+                "%d of %d routing requests were refused (%s), but the server still "
+                "routes a pair from this run, so it is serving this region: treating "
+                "them as points outside the routable network",
+                faults, answered, ", ".join(f"{k}={v}" for k, v in sorted(tally.items())))
+            if heartbeat is not None:
+                heartbeat(f"routed {routed:,}/{total:,} pairs")
+            return dict(bc), routed
     if answered and faults * 5 > answered:
         raise PermanentError(
             f"the routing server at {GRAPHHOPPER_API_URL} stopped serving this region "
