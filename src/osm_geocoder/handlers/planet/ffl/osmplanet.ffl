@@ -62,6 +62,10 @@ namespace osm.planet {
         force_rebuild: Boolean = false
     ) => (region_count: Long, out: String) with Effect(kind = "io") with Cost(tier = "expensive") with Requires(memory_gb = 10)
 
+    // Publish the next per-region replication diffs (<region>-updates/) from
+    // the served tree, and advance the tag indexes kept beside it.
+    event facet PublishReplication(days: Long = 4, indexes: [String] = []) => (upstream: Long, from_sequence: Long, to_sequence: Long, days: Long, regions: Long) with Effect(kind = "io") with Cost(tier = "expensive")
+
     /** Upload the extracted tree from `out` to the S3/MinIO `bucket`
         (anonymous-read), so FW_GEOFABRIK_BASE_URL consumers can fetch them. */
     event facet PublishExtracts(out: String = "", bucket: String = "osm-extracts", regions: [Region] = []) => (bucket: String, published: Long) with Effect(kind = "io") with Cost(tier = "expensive")
@@ -196,6 +200,16 @@ namespace osm.planet {
     ) => (published: Long) andThen {
         pub = osm.planet.PublishExtracts(bucket = $.bucket, regions = $.regions) with Requires(dataset_planet_gb = 80)
         yield PublishRegions(published = pub.published)
+    }
+
+    // The nightly replication publish (fw svc osm-replicate). A workflow, not a
+    // cron job running osmium on the host: measured 2026-10-03 the host job's
+    // 8-region cut reached 19.7 GB and the kernel killed four runner processes
+    // before it. Here it runs where the tree is (dataset floor) and only when
+    // the memory is FREE (memory floor; claims compare against live memory).
+    workflow PublishReplicationDiffs(days: Long = 4) => (to_sequence: Long, regions: Long) andThen {
+        pub = osm.planet.PublishReplication(days = $.days) with Requires(dataset_planet_gb = 80, memory_gb = 6)
+        yield PublishReplicationDiffs(to_sequence = pub.to_sequence, regions = pub.regions)
     }
 
     // The nightly half of RefreshChain: advance the planet, re-cut the

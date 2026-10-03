@@ -1151,7 +1151,69 @@ def handle_require_fresh(params: dict[str, Any]) -> dict[str, Any]:
     return {"checked": len(seen), "stale": 0, "oldest_days": round(oldest, 2)}
 
 
+def handle_publish_replication(params: dict[str, Any]) -> dict[str, Any]:
+    """Publish the next per-region replication diffs from the served tree.
+
+    Was a cron job running osmium on the planet host, outside the runtime:
+    measured 2026-10-03 its 8-region cut reached 19.7 GB and the kernel killed
+    four runner processes and then the job. As a task it is claimed only where
+    the tree is (dataset floor) and only when the memory is free (memory floor,
+    against LIVE availability), heartbeats, can be cancelled, and is visible.
+    """
+    from pathlib import Path as _Path
+
+    from ...tools._osm_tools import replication_publish as rp
+
+    root = _Path(params.get("root") or _PLANET_DIR)
+    www, polys, idx_root = root / "www", root / "polys", root / "indexes"
+    os.environ.setdefault("FW_OSM_INDEX_ROOT", str(idx_root))
+    indexes = [i for i in (params.get("indexes") or []) if i]
+    if not indexes and idx_root.is_dir():
+        # An index kept beside the tree exists to be kept current.
+        indexes = sorted(p.stem for p in idx_root.glob("*.sqlite"))
+    log = _log(params)
+    with cancellable(params.get("_cancellation_check")):
+        with _heartbeating(params, "publishing replication diffs"):
+            res = rp.publish(max_days=int(params.get("days") or 4), www=www, polys=polys,
+                             update_indexes=indexes)
+    published = [r for r in res.regions if r.published]
+    log(f"upstream {res.upstream_sequence}; published {res.from_sequence} -> "
+        f"{res.to_sequence} ({res.days} day(s), {len(published)} region(s), "
+        f"indexes: {', '.join(indexes) or 'none'})")
+    _hand_tree_to_owner(www)
+    anchorless = [r.region for r in res.regions if r.skipped and "anchor" in (r.reason or "")]
+    if res.index_errors or anchorless:
+        raise RuntimeError(
+            "replication published, but: "
+            + "; ".join([f"index {e}" for e in res.index_errors[:5]]
+                        + [f"{r} has no anchor" for r in anchorless]))
+    return {"upstream": res.upstream_sequence, "from_sequence": res.from_sequence,
+            "to_sequence": res.to_sequence, "days": res.days, "regions": len(published)}
+
+
+def _hand_tree_to_owner(www) -> None:
+    """Runners write as root through the bind mount; the host's jobs and the
+    served tree belong to its owner (2026-10-02: a root-owned -updates dir the
+    host publisher could never write). Best-effort, and only when running as root."""
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return
+    try:
+        st = os.stat(www)
+    except OSError:
+        return
+    if st.st_uid == 0:
+        return
+    for d in www.glob("*-updates"):
+        for p in [d, *d.rglob("*")]:
+            try:
+                if p.stat().st_uid == 0:
+                    os.chown(p, st.st_uid, st.st_gid)
+            except OSError:
+                pass
+
+
 _DISPATCH = {
+    f"{NAMESPACE}.PublishReplication": handle_publish_replication,
     f"{NAMESPACE}.DownloadPlanet": handle_download_planet,
     f"{NAMESPACE}.UpdatePlanet": handle_update_planet,
     f"{NAMESPACE}.DownloadPolygons": handle_download_polygons,

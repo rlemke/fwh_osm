@@ -623,7 +623,7 @@ def test_handler_dispatch_routes_and_rejects_unknown():
         "osm.planet.DownloadPolygons", "osm.planet.GenerateRegionPolygons",
         "osm.planet.ExtractRegions", "osm.planet.PublishExtracts",
         "osm.planet.BuildAdminSet", "osm.planet.ListExtracts",
-        "osm.planet.RequireFresh",
+        "osm.planet.RequireFresh", "osm.planet.PublishReplication",
     }
     with pytest.raises(ValueError):
         ph.handle({"_facet_name": "osm.planet.Nope"})
@@ -1142,3 +1142,33 @@ def test_match_owner_hands_root_written_files_to_the_tree_owner(tmp_path, monkey
     monkeypatch.setattr(pb.os, "geteuid", lambda: 1000)
     pb._match_owner([f], tmp_path)
     assert calls == [], "a non-root process changes nothing"
+
+
+def test_publish_replication_task_finds_the_indexes_beside_the_tree(tmp_path, monkeypatch):
+    from types import SimpleNamespace as NS
+    from osm_geocoder.tools._osm_tools import replication_publish as rp
+
+    (tmp_path / "www").mkdir()
+    (tmp_path / "indexes").mkdir()
+    (tmp_path / "indexes" / "alpr.sqlite").write_bytes(b"")
+    seen = {}
+
+    def fake_publish(**kw):
+        seen.update(kw)
+        return NS(upstream_sequence=5134, from_sequence=5133, to_sequence=5134, days=1,
+                  regions=[NS(region="europe", published=[5134], skipped=False, reason="")],
+                  index_errors=[])
+
+    monkeypatch.setattr(rp, "publish", fake_publish)
+    out = ph.handle_publish_replication({"root": str(tmp_path), "days": 4})
+    assert seen["update_indexes"] == ["alpr"] and seen["max_days"] == 4
+    assert out == {"upstream": 5134, "from_sequence": 5133, "to_sequence": 5134, "days": 1, "regions": 1}
+
+    def failing(**kw):
+        r = fake_publish(**kw)
+        r.index_errors = ["alpr@5134: boom"]
+        return r
+
+    monkeypatch.setattr(rp, "publish", failing)
+    with pytest.raises(RuntimeError, match="index alpr@5134"):
+        ph.handle_publish_replication({"root": str(tmp_path)})
