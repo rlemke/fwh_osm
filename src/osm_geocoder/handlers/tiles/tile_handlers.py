@@ -103,7 +103,21 @@ def _make_build_handler(facet_name: str):
         if step_log:
             step_log(f"{facet_name}: tiling {geojson_path} -> {ext} (z{min_zoom}-{max_zoom})")
 
-        from facetwork.runtime.storage import localize
+        from facetwork.runtime.storage import get_storage_backend, localize
+
+        # A zoom band with no roads may not be written at all (measured
+        # 2026-10-03, Tokelau: "404 HeadObject" on a band file). Absent is the
+        # same fact as empty -- no tiles for this band -- not a failed map.
+        try:
+            absent = not get_storage_backend(geojson_path).exists(geojson_path)
+        except Exception:  # noqa: BLE001 - cannot tell: let localize report it
+            absent = False
+        if absent:
+            if step_log:
+                step_log(f"{facet_name}: {geojson_path} does not exist -- no tiles for "
+                         "this band", level="warning")
+            return {"result": {"output_path": "", "format": "empty", "size_bytes": 0,
+                               "min_zoom": min_zoom, "max_zoom": max_zoom, "layer": layer_name}}
         local_input = localize(geojson_path)
 
         # A zoom band with no roads is a fact about the region, not a failure:

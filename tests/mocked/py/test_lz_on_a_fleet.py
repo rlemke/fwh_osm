@@ -78,3 +78,10 @@ def test_remote_output_dir_is_built_locally_then_uploaded(monkeypatch, tmp_path)
     assert rv["csv_path"] == "s3://bucket/lz/haiti/segment_scores.csv"
     assert "s3://bucket/lz/haiti/roads_z2.geojson" in written
     assert not [p for p in tmp_path.iterdir() if p.name.startswith("zoom-layers-")], "scratch cleaned"
+
+
+def test_a_band_file_that_was_never_written_yields_no_tiles(tmp_path):
+    rv = T.handle({"_facet_name": "osm.Tiles.BuildVectorTiles",
+                   "geojson_path": str(tmp_path / "roads_z2.geojson"),
+                   "layer_name": "x_roads_z2", "min_zoom": 2})["result"]
+    assert rv["output_path"] == "" and rv["format"] == "empty"

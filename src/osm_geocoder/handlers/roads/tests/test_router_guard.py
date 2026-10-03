@@ -188,3 +188,25 @@ class TestOutOfBoundsPointsInASmallRegion:
     def test_a_server_that_no_longer_routes_a_known_pair_still_fails(self, monkeypatch):
         with pytest.raises(PermanentError, match="stopped serving this region"):
             self._mixed(monkeypatch, server_moves=True)
+
+
+class TestProbeAsksTheServerWhatItHolds:
+    """2026-10-03: island regions failed the probe on 1-2 out-of-bounds pairs."""
+
+    def _server(self, monkeypatch, bbox):
+        def get(url, params=None, timeout=None):
+            if url.endswith("/info"):
+                return _Resp(200, {"bbox": bbox})
+            return _Resp(400, text=OOB)
+
+        monkeypatch.setattr(zoom_sbs, "HAS_REQUESTS", True)
+        monkeypatch.setattr(zoom_sbs.requests, "get", get)
+
+    def test_a_server_whose_bounds_cover_the_region_passes(self, monkeypatch):
+        self._server(monkeypatch, [-124.0, 43.0, -122.0, 46.0])
+        probe_router(COORDS, PAIRS, "car")  # no raise
+
+    def test_a_server_holding_another_region_still_fails(self, monkeypatch):
+        self._server(monkeypatch, [10.0, 50.0, 11.0, 51.0])
+        with pytest.raises(PermanentError, match="cannot serve this region"):
+            probe_router(COORDS, PAIRS, "car")

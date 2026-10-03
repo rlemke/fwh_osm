@@ -521,6 +521,25 @@ def route_batch_parallel(
     return results
 
 
+def _server_covers(node_coords: dict[int, tuple[float, float]]) -> float | None:
+    """Fraction of ``node_coords`` inside the routing server's bbox (/info), or
+    None if the server cannot be asked. A server holding another region covers
+    ~0% of these nodes; one holding this region covers ~100%."""
+    try:
+        r = requests.get(f"{GRAPHHOPPER_API_URL}/info", timeout=10)
+        bbox = r.json().get("bbox") if r.status_code == 200 else None
+    except Exception:  # noqa: BLE001 - unanswerable is "unknown", not "covered"
+        return None
+    if not bbox or len(bbox) != 4 or not node_coords:
+        return None
+    minlon, minlat, maxlon, maxlat = bbox
+    pts = list(node_coords.values())
+    step = max(1, len(pts) // 2000)
+    sample = pts[::step]
+    inside = sum(1 for lon, lat in sample if minlon <= lon <= maxlon and minlat <= lat <= maxlat)
+    return inside / len(sample)
+
+
 def probe_router(
     node_coords: dict[int, tuple[float, float]],
     pairs: list[tuple[int, int]],
@@ -577,6 +596,20 @@ def probe_router(
 
     if not probed:
         return  # nothing had usable coordinates; nothing to prove
+
+    # Every probe pair refused is weak evidence when there were only one or two:
+    # on an island region the sampled points can all lie off the car network.
+    # Measured 2026-10-03: Tonga, Vanuatu and Kiribati failed here on 1-2 pairs.
+    # Ask the server what it holds: if its bounds cover most of THIS region's
+    # nodes, it is serving this region, whatever those pairs said.
+    covered = _server_covers(node_coords)
+    if covered is not None and covered >= 0.8:
+        log.warning(
+            "Router probe: %d probe pair(s) refused (%s), but the server's bounds cover "
+            "%.0f%% of this region's nodes -- it is serving this region; the refused "
+            "points are off the routable network",
+            probed, ", ".join(f"{k}={v}" for k, v in sorted(tally.items())), covered * 100)
+        return
 
     faults = ", ".join(f"{k}={v}" for k, v in sorted(tally.items()))
     raise PermanentError(
@@ -708,6 +741,14 @@ def route_and_accumulate(
                 faults, answered, ", ".join(f"{k}={v}" for k, v in sorted(tally.items())))
             if heartbeat is not None:
                 heartbeat(f"routed {routed:,}/{total:,} pairs")
+            return dict(bc), routed
+    if answered and faults * 5 > answered and not witness:
+        covered = _server_covers(node_coords)
+        if covered is not None and covered >= 0.8:
+            log.warning(
+                "%d of %d routing requests were refused and none routed, but the server's "
+                "bounds cover %.0f%% of this region's nodes: it is serving this region",
+                faults, answered, covered * 100)
             return dict(bc), routed
     if answered and faults * 5 > answered:
         raise PermanentError(
