@@ -183,7 +183,12 @@ namespace osm.Roads.ZoomBuilder {
         graph: GraphHopperCache,
         min_population: Long = 50000,
         output_dir: String = "/Volumes/afl_data/output/osm/zoom-builder",
-        max_concurrent: Long = 16
+        max_concurrent: Long = 16,
+        // Expected peak memory, GB. Not read by the handler: it exists so a call
+        // site can make it this step's resource FLOOR -- `with Requires(memory_gb
+        // = "$.memory_gb")` -- and the step is claimed only where that much is
+        // free now. 0 = no floor.
+        memory_gb: Long = 0
     ) => (
         result: ZoomBuilderResult,
         metrics: ZoomBuilderMetrics
