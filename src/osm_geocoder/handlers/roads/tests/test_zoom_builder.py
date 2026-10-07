@@ -720,6 +720,37 @@ class TestExport:
         finally:
             os.unlink(temp_path)
 
+    def test_export_zoom_geojson_marks_edges_routes_rode_at_their_reveal_zoom(self):
+        """`routed` reads the SBS of the zoom an edge was revealed at, not any zoom."""
+        graph = _make_test_graph()
+        assignments = {0: 2, 1: 3, 2: 4}
+        # edge 0: routed at z2. edge 1: routed only at z4, AFTER its z3 reveal,
+        # so it got in on name/kind. edge 2: routed at its own z4.
+        sbs = {2: {0: 0.4}, 3: {}, 4: {1: 0.9, 2: 0.1}}
+        with tempfile.NamedTemporaryFile(suffix=".geojson", delete=False) as f:
+            temp_path = f.name
+        try:
+            _export_zoom_geojson(graph, assignments, 4, temp_path, sbs)
+            with open(temp_path, encoding="utf-8") as f:
+                feats = json.load(f)["features"]
+            got = {ft["properties"]["edge_id"]: ft["properties"]["routed"] for ft in feats}
+            assert got == {0: True, 1: False, 2: True}
+        finally:
+            os.unlink(temp_path)
+
+    def test_export_zoom_geojson_without_sbs_carries_no_routed_flag(self):
+        """No SBS means unknown, which must not be written as `routed: false`."""
+        graph = _make_test_graph()
+        with tempfile.NamedTemporaryFile(suffix=".geojson", delete=False) as f:
+            temp_path = f.name
+        try:
+            _export_zoom_geojson(graph, {0: 2}, 4, temp_path)
+            with open(temp_path, encoding="utf-8") as f:
+                feats = json.load(f)["features"]
+            assert "routed" not in feats[0]["properties"]
+        finally:
+            os.unlink(temp_path)
+
     def test_empty_result_structure(self):
         """_empty_result has all expected keys."""
         result = _empty_result("/tmp/test")

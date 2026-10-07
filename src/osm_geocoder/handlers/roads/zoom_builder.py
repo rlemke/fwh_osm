@@ -114,6 +114,10 @@ def recipe_fingerprint() -> str:
                 if CORRIDOR_SELECTION
                 else "edge"
             ),
+            # Output shape, not selection: the zoom layers now carry `routed`,
+            # which the viewer splits each band on. A cached layer from before
+            # would come back without it and the split would show nothing.
+            "layer_props": "routed",
             "anchor_pop": ANCHOR_POP_THRESHOLDS, "anchor_targets": ANCHOR_TARGETS,
             "k_pairs": DEFAULT_K_PAIRS, "min_pair_km": MIN_PAIR_DISTANCE_KM,
             "bypass": [BYPASS_TIME_RATIO, BYPASS_CORE_FRACTION_MAX, BYPASS_FC_ADVANTAGE],
@@ -439,7 +443,7 @@ def _export_results(
     # Per-zoom GeoJSON (cumulative)
     for z in range(2, 8):
         geojson_path = str(out / f"roads_z{z}.geojson")
-        _export_zoom_geojson(graph, assignments, z, geojson_path)
+        _export_zoom_geojson(graph, assignments, z, geojson_path, sbs_by_zoom)
 
     # Compute statistics
     zoom_dist: dict[int, int] = defaultdict(int)
@@ -622,8 +626,17 @@ def _export_zoom_geojson(
     assignments: dict[int, int],
     zoom: int,
     path: str,
+    sbs_by_zoom: dict[int, dict[int, float]] | None = None,
 ) -> None:
-    """Export cumulative GeoJSON for a zoom level (includes all z <= zoom)."""
+    """Export cumulative GeoJSON for a zoom level (includes all z <= zoom).
+
+    With ``sbs_by_zoom``, each edge also carries ``routed``: whether sampled
+    routes rode it at the zoom it was REVEALED at -- the zoom whose selection
+    admitted it. False means it got in on name/kind alone (the motorway/trunk
+    skeleton, class score, backbone repair, the sparse-cell top-up, or a
+    corridor whose other edges were routed). The viewer splits each band on it,
+    so the router's contribution can be seen apart from the rules'.
+    """
     features = []
     for edge in graph.edges:
         eid = edge.edge_id
@@ -631,17 +644,20 @@ def _export_zoom_geojson(
         if min_z is None or min_z > zoom:
             continue
 
+        props = {
+            "edge_id": eid,
+            "fc": edge.fc,
+            "min_zoom": min_z,
+            "ref": edge.ref,
+            "name": edge.name,
+            "length_m": round(edge.length_m, 1),
+        }
+        if sbs_by_zoom is not None:
+            props["routed"] = sbs_by_zoom.get(min_z, {}).get(eid, 0.0) > 0.0
         features.append(
             {
                 "type": "Feature",
-                "properties": {
-                    "edge_id": eid,
-                    "fc": edge.fc,
-                    "min_zoom": min_z,
-                    "ref": edge.ref,
-                    "name": edge.name,
-                    "length_m": round(edge.length_m, 1),
-                },
+                "properties": props,
                 "geometry": {
                     "type": "LineString",
                     "coordinates": list(edge.coords),
