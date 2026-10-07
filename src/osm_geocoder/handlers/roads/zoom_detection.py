@@ -15,6 +15,7 @@ log = logging.getLogger(__name__)
 from ..shared._output import ensure_dir, open_output, read_storage_json
 from .zoom_graph import RoadGraph, _haversine_m
 from .zoom_sbs import (
+    is_settlement,
     HAS_REQUESTS,
     SegmentIndex,
     _route_pair_with_time,
@@ -314,6 +315,8 @@ def _load_settlements(
         if len(coords) < 2:
             continue
 
+        if not is_settlement(props):
+            continue
         name = props.get("name", "")
         pop = props.get("population", 0)
         if not isinstance(pop, (int, float)):

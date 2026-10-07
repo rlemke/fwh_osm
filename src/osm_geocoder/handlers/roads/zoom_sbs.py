@@ -45,6 +45,22 @@ ANCHOR_POP_THRESHOLDS: dict[int, int] = {
     7: 5_000,
 }
 
+# OSM `place` values that are SETTLEMENTS -- what routes run between. The cities
+# scan keeps every place node carrying `population`, and that includes admin
+# areas: measured 2026-10-07 across the 51 US-state scans, 48 `state` nodes
+# (each state's centroid, e.g. "Washington" at 7,958,180 -- the largest
+# "city" in the state, so a z2 anchor), 2,983 `county`, 323 `municipality`, and
+# `country` "United States" at 331,893,745, sitting in Kansas. Routing to a
+# state's centroid is not routing between cities. A feature with NO place tag
+# is kept: unknown is not evidence of an admin area.
+SETTLEMENT_PLACES: frozenset[str] = frozenset({"city", "town", "village", "hamlet"})
+
+
+def is_settlement(props: dict) -> bool:
+    place = props.get("place", props.get("place_type"))
+    return not place or place in SETTLEMENT_PLACES
+
+
 # Target anchor counts per zoom (approximate upper bounds)
 ANCHOR_TARGETS: dict[int, int] = {
     2: 50,
@@ -208,6 +224,8 @@ def build_anchors(graph: RoadGraph, cities_path: str, zoom_level: int) -> list[i
         geojson = read_storage_json(cities_path)
         for feat in geojson.get("features", []):
             props = feat.get("properties", {})
+            if not is_settlement(props):
+                continue
             pop = props.get("population", 0)
             if not isinstance(pop, (int, float)):
                 try:
@@ -234,21 +252,17 @@ def build_anchors(graph: RoadGraph, cities_path: str, zoom_level: int) -> list[i
         if best_node is not None and best_node not in anchors:
             anchors.append(best_node)
 
-    # Fallback: if too few anchors, add high-degree nodes
-    if len(anchors) < max(10, target_count // 10):
+    # No topology top-up. This used to pad any zoom with fewer than
+    # max(10, target/10) anchors with the highest-degree road junctions -- so
+    # Washington's z2 routed between Seattle, its own state centroid and 48
+    # junctions, and the "routed" roads ran between places that are not on the
+    # map. A zoom with fewer than two settlements now routes nothing, which is
+    # the honest answer: its roads come from class and name alone.
+    if len(anchors) < 2:
         log.info(
-            "Sparse anchor set (%d) for z%d, adding high-degree nodes", len(anchors), zoom_level
+            "z%d: %d settlement(s) at or above %d -- no routing at this zoom",
+            zoom_level, len(anchors), pop_threshold,
         )
-        degree_nodes = sorted(
-            graph.adj.keys(),
-            key=lambda n: len(graph.adj[n]),
-            reverse=True,
-        )
-        for nid in degree_nodes:
-            if len(graph.adj[nid]) >= 5 and nid not in anchors:
-                anchors.append(nid)
-            if len(anchors) >= target_count:
-                break
 
     log.info(
         "Built %d anchors for zoom %d (pop threshold %d)", len(anchors), zoom_level, pop_threshold

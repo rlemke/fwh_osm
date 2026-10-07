@@ -458,12 +458,44 @@ class TestAnchorsAndPairs:
         finally:
             os.unlink(temp_path)
 
-    def test_build_anchors_fallback_no_cities(self):
-        """build_anchors falls back to high-degree nodes with no cities file."""
+    def test_build_anchors_no_cities_routes_nothing(self):
+        """No settlements means no anchors -- never junctions standing in for them."""
         graph = _make_test_graph()
-        anchors = build_anchors(graph, "/nonexistent/cities.geojson", 7)
-        # Should still return some anchors via degree fallback
-        assert isinstance(anchors, list)
+        assert build_anchors(graph, "/nonexistent/cities.geojson", 7) == []
+
+    def test_build_anchors_never_tops_up_with_junctions(self):
+        """One qualifying city at z2 yields one anchor, not a junction-padded 50."""
+        graph = _make_test_graph()
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".geojson", delete=False) as f:
+            temp_path = f.name
+            _make_cities_geojson(temp_path)
+        try:
+            assert len(build_anchors(graph, temp_path, 2)) == 1
+        finally:
+            os.unlink(temp_path)
+
+    def test_admin_areas_are_not_settlements(self):
+        """A state/county/country node with a population is not a city to route to."""
+        graph = _make_test_graph()
+        feats = [
+            {
+                "type": "Feature",
+                "properties": {"name": n, "population": pop, "place": pl},
+                "geometry": {"type": "Point", "coordinates": [0.005, -0.002]},
+            }
+            for n, pop, pl in [
+                ("Washington", 7_958_180, "state"),
+                ("United States", 331_893_745, "country"),
+                ("King", 2_269_675, "county"),
+            ]
+        ]
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".geojson", delete=False) as f:
+            json.dump({"type": "FeatureCollection", "features": feats}, f)
+            temp_path = f.name
+        try:
+            assert build_anchors(graph, temp_path, 2) == []
+        finally:
+            os.unlink(temp_path)
 
     def test_sample_od_pairs_deterministic(self):
         """sample_od_pairs is deterministic (seeded RNG)."""

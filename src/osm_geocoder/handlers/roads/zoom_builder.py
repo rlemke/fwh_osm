@@ -78,6 +78,7 @@ def recipe_fingerprint() -> str:
         ANCHOR_POP_THRESHOLDS,
         ANCHOR_TARGETS,
         DEFAULT_K_PAIRS,
+        SETTLEMENT_PLACES,
         MIN_PAIR_DISTANCE_KM,
     )
     from .zoom_selection import (
@@ -118,6 +119,11 @@ def recipe_fingerprint() -> str:
             # which the viewer splits each band on. A cached layer from before
             # would come back without it and the split would show nothing.
             "layer_props": "routed",
+            # Anchor RULES that are code, not constants: settlements only, and no
+            # high-degree-junction top-up. Without these the cache would serve a
+            # layer routed between state centroids and junctions.
+            "anchor_places": sorted(SETTLEMENT_PLACES),
+            "anchor_topup": "none",
             "anchor_pop": ANCHOR_POP_THRESHOLDS, "anchor_targets": ANCHOR_TARGETS,
             "k_pairs": DEFAULT_K_PAIRS, "min_pair_km": MIN_PAIR_DISTANCE_KM,
             "bypass": [BYPASS_TIME_RATIO, BYPASS_CORE_FRACTION_MAX, BYPASS_FC_ADVANTAGE],
