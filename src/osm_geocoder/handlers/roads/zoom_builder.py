@@ -636,12 +636,17 @@ def _export_zoom_geojson(
 ) -> None:
     """Export cumulative GeoJSON for a zoom level (includes all z <= zoom).
 
-    With ``sbs_by_zoom``, each edge also carries ``routed``: whether sampled
-    routes rode it at the zoom it was REVEALED at -- the zoom whose selection
-    admitted it. False means it got in on name/kind alone (the motorway/trunk
-    skeleton, class score, backbone repair, the sparse-cell top-up, or a
-    corridor whose other edges were routed). The viewer splits each band on it,
-    so the router's contribution can be seen apart from the rules'.
+    With ``sbs_by_zoom``, each edge also carries ``routed``: whether THIS
+    band's routes -- the sampled pairs between this zoom's cities -- rode it.
+    False means the band holds it on name/kind alone (class, the motorway/trunk
+    skeleton, backbone repair, the sparse-cell top-up, or the rest of a routed
+    corridor). The viewer splits each band on it, so "z5 routed" draws the
+    roads the z5 city-to-city routes actually drove.
+
+    ⚠️ Per BAND, not per reveal zoom. Keyed on the zoom an edge was revealed
+    at, an Interstate admitted at z2 as skeleton (where nothing routes) read
+    "name/kind" in every band -- so Montana's z5 routed view showed fragments
+    instead of the I-90 that every z5 route between its cities drives.
     """
     features = []
     for edge in graph.edges:
@@ -659,7 +664,7 @@ def _export_zoom_geojson(
             "length_m": round(edge.length_m, 1),
         }
         if sbs_by_zoom is not None:
-            props["routed"] = sbs_by_zoom.get(min_z, {}).get(eid, 0.0) > 0.0
+            props["routed"] = sbs_by_zoom.get(zoom, {}).get(eid, 0.0) > 0.0
         features.append(
             {
                 "type": "Feature",

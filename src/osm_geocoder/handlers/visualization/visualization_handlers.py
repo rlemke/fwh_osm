@@ -25,29 +25,46 @@ log = logging.getLogger(__name__)
 NAMESPACE = "osm.viz"
 
 
+def _identity(path: str) -> str | None:
+    """``path@size:mtime`` for a local OR object-store file; None if it cannot be
+    stat-ed.
+
+    ⚠️ This used ``os.path.getsize``, which fails on an ``s3://`` path and was
+    swallowed as size 0 -- so for object-store inputs the cache key was the
+    path string and the params, nothing about the content. Measured 2026-10-07:
+    a Montana low-zoom rebuild re-tiled every band into the SAME s3 paths, and
+    RenderTiledMap answered "output cache hit" with the previous build's
+    viewer and tiles. Size alone is not enough either (a rebuild can land on
+    the same byte count), so mtime goes in too.
+    """
+    from facetwork.runtime.storage import get_storage_backend
+
+    try:
+        be = get_storage_backend(path)
+        return f"{path}@{be.getsize(path)}:{be.getmtime(path)}"
+    except Exception:  # noqa: BLE001 - unknown identity means "do not trust a cache"
+        return None
+
+
 def _cache_dict_from_path(path: str) -> dict:
     """Build a cache identity dict from a file path."""
-    if not path:
-        return {"path": "", "size": 0}
-    try:
-        size = os.path.getsize(path)
-    except OSError:
-        size = 0
-    return {"path": path, "size": size}
+    return _cache_dict_from_paths([path] if path else [])
 
 
 def _cache_dict_from_paths(paths: list[str]) -> dict:
-    """Build a cache identity dict from multiple file paths."""
+    """Build a cache identity dict from multiple file paths.
+
+    An input whose identity cannot be read yields an empty ``path``, which
+    ``cached_result`` treats as a miss: never serve a cache whose key cannot
+    see what changed.
+    """
+    paths = [p for p in paths if p]
     if not paths:
         return {"path": "", "size": 0}
-    combined = ";".join(sorted(paths))
-    total_size = 0
-    for p in paths:
-        try:
-            total_size += os.path.getsize(p)
-        except OSError:
-            pass
-    return {"path": combined, "size": total_size}
+    ids = [_identity(p) for p in sorted(paths)]
+    if any(i is None for i in ids):
+        return {"path": "", "size": 0}
+    return {"path": ";".join(ids), "size": 0}
 
 
 def _make_render_map_handler(facet_name: str):

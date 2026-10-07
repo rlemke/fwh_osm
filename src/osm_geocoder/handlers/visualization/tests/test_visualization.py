@@ -602,3 +602,37 @@ class TestBasemapFingerprint:
         from pathlib import Path
         src = (Path(__file__).resolve().parents[1] / "visualization_handlers.py").read_text()
         assert '"basemap_def": basemap_fingerprint()' in src
+
+
+class TestCacheIdentity:
+    """The render cache must see a rebuilt input, local or in the object store."""
+
+    def test_rewriting_an_input_changes_the_key(self, tmp_path):
+        from osm_geocoder.handlers.visualization import visualization_handlers as vh
+
+        f = tmp_path / "band.pmtiles"
+        f.write_bytes(b"x" * 10)
+        before = vh._cache_dict_from_paths([str(f)])
+        f.write_bytes(b"y" * 10)  # same size, new content
+        os.utime(f, ns=(1, 1))
+        assert vh._cache_dict_from_paths([str(f)]) != before
+
+    def test_an_object_store_input_is_stat_ed_through_its_backend(self):
+        from osm_geocoder.handlers.visualization import visualization_handlers as vh
+
+        be = MagicMock()
+        be.getsize.return_value = 6_934_176
+        be.getmtime.return_value = 1_791_400_000.0
+        with patch("facetwork.runtime.storage.get_storage_backend", return_value=be):
+            got = vh._cache_dict_from_paths(["s3://b/t.pmtiles"])
+        assert got["path"] == "s3://b/t.pmtiles@6934176:1791400000.0"
+
+    def test_an_input_that_cannot_be_stat_ed_is_never_a_cache_hit(self):
+        from osm_geocoder.handlers.visualization import visualization_handlers as vh
+
+        be = MagicMock()
+        be.getsize.side_effect = OSError("no such key")
+        with patch("facetwork.runtime.storage.get_storage_backend", return_value=be):
+            got = vh._cache_dict_from_paths(["s3://b/missing.pmtiles"])
+        # an empty path is a miss in cached_result, not a key that ignores content
+        assert got == {"path": "", "size": 0}

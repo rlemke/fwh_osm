@@ -752,13 +752,13 @@ class TestExport:
         finally:
             os.unlink(temp_path)
 
-    def test_export_zoom_geojson_marks_edges_routes_rode_at_their_reveal_zoom(self):
-        """`routed` reads the SBS of the zoom an edge was revealed at, not any zoom."""
+    def test_export_zoom_geojson_marks_the_edges_this_bands_routes_rode(self):
+        """`routed` reads the BAND's SBS: an edge revealed earlier still counts."""
         graph = _make_test_graph()
         assignments = {0: 2, 1: 3, 2: 4}
-        # edge 0: routed at z2. edge 1: routed only at z4, AFTER its z3 reveal,
-        # so it got in on name/kind. edge 2: routed at its own z4.
-        sbs = {2: {0: 0.4}, 3: {}, 4: {1: 0.9, 2: 0.1}}
+        # edge 0: skeleton at z2 (nothing routes there) but z4 routes ride it.
+        # edge 1: revealed z3, ridden by no z4 route. edge 2: ridden at z4.
+        sbs = {2: {}, 3: {1: 0.5}, 4: {0: 0.7, 2: 0.1}}
         with tempfile.NamedTemporaryFile(suffix=".geojson", delete=False) as f:
             temp_path = f.name
         try:
