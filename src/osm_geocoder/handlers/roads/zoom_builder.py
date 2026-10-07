@@ -124,6 +124,8 @@ def recipe_fingerprint() -> str:
             # layer routed between state centroids and junctions.
             "anchor_places": sorted(SETTLEMENT_PLACES),
             "anchor_topup": "none",
+            # Code, not a constant: z7 routes its own pairs instead of reusing z6.
+            "sbs_zooms": "2-7",
             "anchor_pop": ANCHOR_POP_THRESHOLDS, "anchor_targets": ANCHOR_TARGETS,
             "k_pairs": DEFAULT_K_PAIRS, "min_pair_km": MIN_PAIR_DISTANCE_KM,
             "bypass": [BYPASS_TIME_RATIO, BYPASS_CORE_FRACTION_MAX, BYPASS_FC_ADVANTAGE],
@@ -219,14 +221,17 @@ def build_zoom_layers(
         # Rhode Island legitimately cannot supply — probing only z2 would skip
         # the check on exactly the small states, silently.
         probe_pairs: list = []
-        for pz in range(2, 7):
+        for pz in range(2, 8):
             probe_pairs = sample_od_pairs(anchors_by_zoom[pz], pz, road_graph)
             if probe_pairs:
                 log.info("Probing the router with zoom-%d pairs", pz)
                 break
         probe_router(road_graph.node_coords, probe_pairs, profile)
 
-    for z in range(2, 7):  # z2..z6 (z7 reuses z6)
+    # Every zoom routes its own cities, z7 included. z7 used to REUSE z6's SBS,
+    # so its 5k+ cities (the z7 tier) were never routed between: on the map they
+    # sat unconnected while every other tier's routes ran city to city.
+    for z in range(2, 8):
         log.info("  SBS for zoom %d", z)
         if check_cancel is not None:
             check_cancel()
@@ -255,8 +260,6 @@ def build_zoom_layers(
         sbs_by_zoom[z] = normalize_sbs(bc)
         save_sbs(sbs_by_zoom[z], str(out / f"sbs_z{z}.json"))
 
-    # z7 reuses z6 SBS
-    sbs_by_zoom[7] = sbs_by_zoom.get(6, {})
 
     # 4. Detect bypasses and rings
     log.info("Step 4: Detecting bypasses and rings")
