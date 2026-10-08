@@ -36,8 +36,10 @@ from .zoom_sbs import (
     HAS_REQUESTS,
     SegmentIndex,
     build_anchors,
+    min_pair_km,
     normalize_sbs,
     probe_router,
+    region_scale,
     route_and_accumulate,
     sample_od_pairs,
     save_anchors,
@@ -75,19 +77,22 @@ def recipe_fingerprint() -> str:
         SETTLEMENT_RADII,
     )
     from .zoom_sbs import (
+        ANCHOR_MIN_COUNT,
         ANCHOR_POP_THRESHOLDS,
         ANCHOR_TARGETS,
         DEFAULT_K_PAIRS,
-        SETTLEMENT_PLACES,
         MIN_PAIR_DISTANCE_KM,
+        MIN_PAIR_FLOOR_KM,
+        REGION_REF_KM,
+        SETTLEMENT_PLACES,
     )
     from .zoom_selection import (
         BASE_KM,
+        CORRIDOR_OVERDRAFT,
+        CORRIDOR_SELECTION,
         MIN_COMPONENT_KM,
         MIN_FC_BY_ZOOM,
         MIN_KM,
-        CORRIDOR_OVERDRAFT,
-        CORRIDOR_SELECTION,
         SKELETON_FCS,
         W_FC,
         W_SB,
@@ -126,6 +131,10 @@ def recipe_fingerprint() -> str:
             "anchor_topup": "none",
             # Code, not a constant: z7 routes its own pairs instead of reusing z6.
             "sbs_zooms": "2-7",
+            # Region scaling of the pair minimum + the spaced z2/z3 floor.
+            "region_ref_km": REGION_REF_KM,
+            "pair_floor_km": MIN_PAIR_FLOOR_KM,
+            "anchor_min_count": ANCHOR_MIN_COUNT,
             "anchor_pop": ANCHOR_POP_THRESHOLDS, "anchor_targets": ANCHOR_TARGETS,
             "k_pairs": DEFAULT_K_PAIRS, "min_pair_km": MIN_PAIR_DISTANCE_KM,
             "bypass": [BYPASS_TIME_RATIO, BYPASS_CORE_FRACTION_MAX, BYPASS_FC_ADVANTAGE],
@@ -198,10 +207,29 @@ def build_zoom_layers(
     if heartbeat is not None:
         heartbeat("step 2")
     anchors_by_zoom: dict[int, list[int]] = {}
+    # The region's extent scales the pair minimum and the z2/z3 floor spacing
+    # (see zoom_sbs.region_scale): continental distances route nothing in a state.
+    scale = region_scale(road_graph)
+    log.info(
+        "Region scale %.3f: pair minimum z2..z7 = %s km",
+        scale, ", ".join(f"{min_pair_km(z, scale):.0f}" for z in range(2, 8)),
+    )
+    # The cities actually anchored, each with the first zoom it anchored at, so
+    # the map draws exactly what was routed instead of re-deriving the rule.
+    tier_of: dict[str, dict] = {}
     for z in range(2, 8):
-        anchors_by_zoom[z] = build_anchors(road_graph, cities_path, z)
+        chosen: list[dict] = []
+        anchors_by_zoom[z] = build_anchors(road_graph, cities_path, z, scale, chosen)
         anchors_path = str(out / f"anchors_z{z}.json")
         save_anchors(anchors_by_zoom[z], anchors_path)
+        for f in chosen:
+            key = f"{f['geometry']['coordinates']}|{f['properties']['name']}"
+            if key not in tier_of:
+                f["properties"]["tier"] = z
+                tier_of[key] = f
+    ensure_dir(str(out / "anchor_cities.geojson"))
+    with open_output(str(out / "anchor_cities.geojson"), "w") as fh:
+        json.dump({"type": "FeatureCollection", "features": list(tier_of.values())}, fh)
 
     # 3. Compute SBS per zoom (the expensive step)
     log.info("Step 3: Computing SBS per zoom level")
@@ -222,7 +250,7 @@ def build_zoom_layers(
         # the check on exactly the small states, silently.
         probe_pairs: list = []
         for pz in range(2, 8):
-            probe_pairs = sample_od_pairs(anchors_by_zoom[pz], pz, road_graph)
+            probe_pairs = sample_od_pairs(anchors_by_zoom[pz], pz, road_graph, scale=scale)
             if probe_pairs:
                 log.info("Probing the router with zoom-%d pairs", pz)
                 break
@@ -237,7 +265,7 @@ def build_zoom_layers(
             check_cancel()
         if heartbeat is not None:
             heartbeat(f"step 3: SBS zoom {z}")
-        pairs = sample_od_pairs(anchors_by_zoom[z], z, road_graph)
+        pairs = sample_od_pairs(anchors_by_zoom[z], z, road_graph, scale=scale)
 
         if HAS_REQUESTS and graph_dir:
             # Stream: snap each route as it completes, retain none (see

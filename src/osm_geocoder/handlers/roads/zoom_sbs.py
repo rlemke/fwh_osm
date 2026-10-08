@@ -91,6 +91,48 @@ MIN_PAIR_DISTANCE_KM: dict[int, float] = {
     7: 5.0,
 }
 
+# --- region scaling ------------------------------------------------------------
+#
+# MIN_PAIR_DISTANCE_KM and ANCHOR_POP_THRESHOLDS are CONTINENTAL: a z2 route
+# crosses countries. Measured 2026-10-08 on 14 US states: z2 routed NOTHING in
+# any of them and z3 in only 5 -- Arizona's three z2 cities are 23/155/171 km
+# apart (all under 300), Colorado's z3 Denver–Colorado Springs is 101 km (under
+# 150), and 9 of 10 states had exactly one 500k city, so no z2 pair existed.
+#
+# Two rules make a REGION's low zooms route between its own biggest cities:
+#   1. the pair minimum scales with the region's extent (never below 5 km, and
+#      never above the spec, so a continent behaves exactly as before);
+#   2. z2/z3 take at least ANCHOR_MIN_COUNT cities, the largest that are
+#      also far enough apart to route -- a floor of the N largest alone would
+#      pick one metro (Boise/Meridian/Nampa are within 20 km) and route nothing.
+
+# Region diagonal at which the spec distances apply unscaled.
+REGION_REF_KM: float = 2_000.0
+MIN_PAIR_FLOOR_KM: float = 5.0
+ANCHOR_MIN_COUNT: dict[int, int] = {2: 3, 3: 6}
+
+
+def region_scale(graph: RoadGraph) -> float:
+    """Diagonal of the region's road network over REGION_REF_KM, capped at 1.
+
+    Uses the 2nd–98th percentile of node coordinates: an extract can carry a
+    ferry line to another state (Washington's reaches Alaska), and a raw bbox
+    would read that as a 3,000 km region and scale nothing."""
+    coords = list(graph.node_coords.values())
+    if len(coords) < 2:
+        return 1.0
+    lons = sorted(c[0] for c in coords)
+    lats = sorted(c[1] for c in coords)
+    lo, hi = int(len(lons) * 0.02), max(0, int(len(lons) * 0.98) - 1)
+    diag_km = _haversine_m(lons[lo], lats[lo], lons[hi], lats[hi]) / 1000.0
+    return max(0.0, min(1.0, diag_km / REGION_REF_KM))
+
+
+def min_pair_km(zoom_level: int, scale: float = 1.0) -> float:
+    """The OD pair minimum for this zoom in a region of this scale."""
+    spec = MIN_PAIR_DISTANCE_KM.get(zoom_level, 5.0)
+    return max(min(spec, MIN_PAIR_FLOOR_KM), spec * min(1.0, scale))
+
 
 class SegmentIndex:
     """Grid-based spatial index for snapping route coordinates to logical edges.
@@ -204,13 +246,22 @@ class SegmentIndex:
         return matched_edges
 
 
-def build_anchors(graph: RoadGraph, cities_path: str, zoom_level: int) -> list[int]:
+def build_anchors(
+    graph: RoadGraph,
+    cities_path: str,
+    zoom_level: int,
+    scale: float = 1.0,
+    chosen_out: list[dict] | None = None,
+) -> list[int]:
     """Build anchor node set for a zoom level from city data.
 
     Args:
         graph: The logical edge graph.
         cities_path: Path to cities GeoJSON file.
         zoom_level: Zoom level (2–7).
+        scale: region_scale() -- sets the spacing the z2/z3 floor enforces.
+        chosen_out: when given, filled with the city features actually anchored
+            (the map draws exactly these, rather than re-deriving the rule).
 
     Returns:
         List of anchor node IDs.
@@ -218,8 +269,8 @@ def build_anchors(graph: RoadGraph, cities_path: str, zoom_level: int) -> list[i
     pop_threshold = ANCHOR_POP_THRESHOLDS.get(zoom_level, 10_000)
     target_count = ANCHOR_TARGETS.get(zoom_level, 1_000)
 
-    # Load cities
-    cities: list[tuple[float, float, int]] = []  # (lon, lat, population)
+    # Load every settlement; the threshold and the floor choose from them.
+    pool: list[tuple[float, float, int, dict]] = []  # (lon, lat, population, props)
     try:
         geojson = read_storage_json(cities_path)
         for feat in geojson.get("features", []):
@@ -232,25 +283,55 @@ def build_anchors(graph: RoadGraph, cities_path: str, zoom_level: int) -> list[i
                     pop = int(pop)
                 except (ValueError, TypeError):
                     pop = 0
-            if pop < pop_threshold:
-                continue
             geom = feat.get("geometry", {})
             coords = geom.get("coordinates", [])
-            if len(coords) >= 2:
-                cities.append((coords[0], coords[1], int(pop)))
+            if len(coords) >= 2 and pop > 0:
+                pool.append((coords[0], coords[1], int(pop), props))
     except (OSError, json.JSONDecodeError) as e:
         log.warning("Could not load cities from %s: %s", cities_path, e)
 
-    # Sort by population descending, limit to target
-    cities.sort(key=lambda c: c[2], reverse=True)
-    cities = cities[:target_count]
+    pool.sort(key=lambda c: c[2], reverse=True)
+    cities = [c for c in pool if c[2] >= pop_threshold][:target_count]
+
+    # Floor (z2/z3): too few cities at the threshold -> add the next-largest
+    # that are at least this zoom's pair minimum from every city already in,
+    # so each one added can actually be routed to.
+    floor = ANCHOR_MIN_COUNT.get(zoom_level, 0)
+    added = 0
+    if len(cities) < floor:
+        min_m = min_pair_km(zoom_level, scale) * 1000.0
+        for c in pool:
+            if len(cities) >= floor:
+                break
+            if c in cities:
+                continue
+            if all(_haversine_m(c[0], c[1], o[0], o[1]) >= min_m for o in cities):
+                cities.append(c)
+                added += 1
+        if added:
+            log.info(
+                "z%d: %d city(ies) below %d added to reach the floor of %d (>= %.0f km apart)",
+                zoom_level, added, pop_threshold, floor, min_m / 1000.0,
+            )
 
     # Snap each city to nearest routable node
     anchors: list[int] = []
-    for lon, lat, _pop in cities:
+    for lon, lat, _pop, props in cities:
         best_node = _snap_to_nearest_node(graph, lon, lat)
         if best_node is not None and best_node not in anchors:
             anchors.append(best_node)
+            if chosen_out is not None:
+                chosen_out.append(
+                    {
+                        "type": "Feature",
+                        "properties": {
+                            "name": props.get("name") or "(unnamed)",
+                            "place": props.get("place") or "",
+                            "population": _pop,
+                        },
+                        "geometry": {"type": "Point", "coordinates": [lon, lat]},
+                    }
+                )
 
     # No topology top-up. This used to pad any zoom with fewer than
     # max(10, target/10) anchors with the highest-degree road junctions -- so
@@ -285,7 +366,11 @@ def _snap_to_nearest_node(
 
 
 def sample_od_pairs(
-    anchors: list[int], zoom_level: int, graph: RoadGraph, k_pairs: int | None = None
+    anchors: list[int],
+    zoom_level: int,
+    graph: RoadGraph,
+    k_pairs: int | None = None,
+    scale: float = 1.0,
 ) -> list[tuple[int, int]]:
     """Sample origin-destination pairs from anchors for SBS.
 
@@ -301,7 +386,7 @@ def sample_od_pairs(
     if k_pairs is None:
         k_pairs = DEFAULT_K_PAIRS.get(zoom_level, 5_000)
 
-    min_dist_km = MIN_PAIR_DISTANCE_KM.get(zoom_level, 5.0)
+    min_dist_km = min_pair_km(zoom_level, scale)
     min_dist_m = min_dist_km * 1_000
 
     rng = random.Random(42)

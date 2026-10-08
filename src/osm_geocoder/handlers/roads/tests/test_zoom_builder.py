@@ -913,3 +913,54 @@ class TestHandlerRegistration:
     def test_namespace_value(self):
         """Namespace matches FFL namespace."""
         assert NAMESPACE == "osm.Roads.ZoomBuilder"
+
+
+class TestRegionScaling:
+    """A region's low zooms route between its own biggest cities."""
+
+    def test_pair_minimum_scales_down_but_never_below_the_floor_or_above_spec(self):
+        from osm_geocoder.handlers.roads.zoom_sbs import min_pair_km
+
+        assert min_pair_km(2, 1.0) == 300.0  # a continent: unchanged
+        assert min_pair_km(2, 2.5) == 300.0  # never above the spec
+        assert min_pair_km(2, 0.3) == pytest.approx(90.0)
+        assert min_pair_km(6, 0.1) == 5.0  # never below the 5 km floor
+
+    def test_floor_adds_the_largest_cities_that_are_far_enough_apart(self, tmp_path):
+        from osm_geocoder.handlers.roads.zoom_sbs import build_anchors
+
+        lon0, lat0 = -110.0, 45.0
+        feats = [
+            # one 500k city, a big suburb right next to it, and two distant towns
+            ("Metro", 600_000, 0.0),
+            ("Suburb", 300_000, 0.05),  # ~4 km: same metro, must be skipped
+            ("Far", 90_000, 2.0),  # ~157 km
+            ("Farther", 40_000, -2.0),
+        ]
+
+        class _Graph:  # a road node under every city, so snapping is not the test
+            node_coords = {i: (lon0 + d, lat0) for i, (_n, _p, d) in enumerate(feats)}
+
+        graph = _Graph()
+        fc = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {"name": n, "population": p, "place": "city"},
+                    "geometry": {"type": "Point", "coordinates": [lon0 + d, lat0]},
+                }
+                for n, p, d in feats
+            ],
+        }
+        path = tmp_path / "cities.geojson"
+        path.write_text(json.dumps(fc))
+        chosen: list = []
+        # scale 0.3 -> z2 minimum 90 km
+        build_anchors(graph, str(path), 2, 0.3, chosen)
+        assert [c["properties"]["name"] for c in chosen] == ["Metro", "Far", "Farther"]
+
+    def test_no_floor_above_z3(self, tmp_path):
+        from osm_geocoder.handlers.roads.zoom_sbs import ANCHOR_MIN_COUNT
+
+        assert set(ANCHOR_MIN_COUNT) == {2, 3}
