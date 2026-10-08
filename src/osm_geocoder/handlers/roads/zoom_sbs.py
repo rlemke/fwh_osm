@@ -252,6 +252,7 @@ def build_anchors(
     zoom_level: int,
     scale: float = 1.0,
     chosen_out: list[dict] | None = None,
+    carry: list[tuple] | None = None,
 ) -> list[int]:
     """Build anchor node set for a zoom level from city data.
 
@@ -262,6 +263,9 @@ def build_anchors(
         scale: region_scale() -- sets the spacing the z2/z3 floor enforces.
         chosen_out: when given, filled with the city features actually anchored
             (the map draws exactly these, rather than re-deriving the rule).
+        carry: cities anchored at the LOWER zooms, as returned through
+            ``carry`` by the previous call -- they stay anchors here, and the
+            list is extended with this zoom's picks for the next call.
 
     Returns:
         List of anchor node IDs.
@@ -291,7 +295,16 @@ def build_anchors(
         log.warning("Could not load cities from %s: %s", cities_path, e)
 
     pool.sort(key=lambda c: c[2], reverse=True)
-    cities = [c for c in pool if c[2] >= pop_threshold][:target_count]
+    # Cumulative: a city anchored at a lower zoom stays an anchor here. Without
+    # this the z2/z3 floors made a HOLE -- Montana's z3 had 6 cities (floor)
+    # while z4's own threshold (80k) admitted only Billings, so z4 routed
+    # nothing between two zooms that did.
+    cities = list(carry or [])
+    for c in pool:
+        if len(cities) >= max(target_count, len(carry or [])):
+            break
+        if c[2] >= pop_threshold and c not in cities:
+            cities.append(c)
 
     # Floor (z2/z3): too few cities at the threshold -> add the next-largest
     # that are at least this zoom's pair minimum from every city already in,
@@ -313,6 +326,9 @@ def build_anchors(
                 "z%d: %d city(ies) below %d added to reach the floor of %d (>= %.0f km apart)",
                 zoom_level, added, pop_threshold, floor, min_m / 1000.0,
             )
+
+    if carry is not None:
+        carry[:] = cities
 
     # Snap each city to nearest routable node
     anchors: list[int] = []

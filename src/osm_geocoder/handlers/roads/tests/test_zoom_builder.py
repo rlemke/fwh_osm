@@ -964,3 +964,38 @@ class TestRegionScaling:
         from osm_geocoder.handlers.roads.zoom_sbs import ANCHOR_MIN_COUNT
 
         assert set(ANCHOR_MIN_COUNT) == {2, 3}
+
+
+class TestCumulativeAnchors:
+    """A city anchored at a lower zoom stays an anchor at every higher one."""
+
+    def test_a_floor_city_is_carried_up_instead_of_leaving_a_hole(self, tmp_path):
+        from osm_geocoder.handlers.roads.zoom_sbs import build_anchors
+
+        lon0, lat0 = -110.0, 45.0
+        feats = [("A", 110_000, 0.0), ("B", 70_000, 2.0), ("C", 60_000, -2.0)]
+
+        class _Graph:
+            node_coords = {i: (lon0 + d, lat0) for i, (_n, _p, d) in enumerate(feats)}
+
+        path = tmp_path / "cities.geojson"
+        path.write_text(
+            json.dumps(
+                {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "properties": {"name": n, "population": p, "place": "city"},
+                            "geometry": {"type": "Point", "coordinates": [lon0 + d, lat0]},
+                        }
+                        for n, p, d in feats
+                    ],
+                }
+            )
+        )
+        carried: list = []
+        z3 = build_anchors(_Graph(), str(path), 3, 0.3, [], carried)  # floor -> A, B, C
+        z4 = build_anchors(_Graph(), str(path), 4, 0.3, [], carried)  # 80k alone -> only A
+        assert len(z3) == 3
+        assert set(z4) >= set(z3), "z4 dropped cities z3 routed between"

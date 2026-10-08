@@ -135,6 +135,7 @@ def recipe_fingerprint() -> str:
             "region_ref_km": REGION_REF_KM,
             "pair_floor_km": MIN_PAIR_FLOOR_KM,
             "anchor_min_count": ANCHOR_MIN_COUNT,
+            "anchors_cumulative": True,
             "anchor_pop": ANCHOR_POP_THRESHOLDS, "anchor_targets": ANCHOR_TARGETS,
             "k_pairs": DEFAULT_K_PAIRS, "min_pair_km": MIN_PAIR_DISTANCE_KM,
             "bypass": [BYPASS_TIME_RATIO, BYPASS_CORE_FRACTION_MAX, BYPASS_FC_ADVANTAGE],
@@ -217,9 +218,10 @@ def build_zoom_layers(
     # The cities actually anchored, each with the first zoom it anchored at, so
     # the map draws exactly what was routed instead of re-deriving the rule.
     tier_of: dict[str, dict] = {}
+    carried: list[tuple] = []  # cumulative: each zoom keeps the lower zooms' cities
     for z in range(2, 8):
         chosen: list[dict] = []
-        anchors_by_zoom[z] = build_anchors(road_graph, cities_path, z, scale, chosen)
+        anchors_by_zoom[z] = build_anchors(road_graph, cities_path, z, scale, chosen, carried)
         anchors_path = str(out / f"anchors_z{z}.json")
         save_anchors(anchors_by_zoom[z], anchors_path)
         for f in chosen:
