@@ -999,3 +999,66 @@ class TestCumulativeAnchors:
         z4 = build_anchors(_Graph(), str(path), 4, 0.3, [], carried)  # 80k alone -> only A
         assert len(z3) == 3
         assert set(z4) >= set(z3), "z4 dropped cities z3 routed between"
+
+
+class TestRouteDensify:
+    """A simplified route still marks every edge it drives along."""
+
+    def test_short_edge_between_distant_route_vertices_is_matched(self):
+        from types import SimpleNamespace
+
+        from osm_geocoder.handlers.roads.zoom_sbs import SegmentIndex
+
+        # A straight east-west highway in three edges; the middle one is a 200 m
+        # bridge. The route GraphHopper returns has only the two far endpoints.
+        lat = 40.0
+        edges = [
+            SimpleNamespace(edge_id=1, coords=[(-120.0, lat), (-119.99, lat)]),
+            SimpleNamespace(edge_id=2, coords=[(-119.99, lat), (-119.98765, lat)]),  # ~200 m
+            SimpleNamespace(edge_id=3, coords=[(-119.98765, lat), (-119.97, lat)]),
+        ]
+        idx = SegmentIndex(SimpleNamespace(edges=edges))
+        got = idx.snap_route([[-120.0, lat], [-119.97, lat]])
+        assert got == {1, 2, 3}
+
+    def test_densify_keeps_vertices_and_bounds_the_spacing(self):
+        from osm_geocoder.handlers.roads.zoom_graph import _haversine_m
+        from osm_geocoder.handlers.roads.zoom_sbs import SegmentIndex
+
+        pts = list(SegmentIndex.densify([[-120.0, 40.0], [-119.9, 40.0]]))
+        assert pts[0] == (-120.0, 40.0) and pts[-1] == (-119.9, 40.0)
+        gaps = [_haversine_m(*a, *b) for a, b in zip(pts, pts[1:])]
+        assert max(gaps) <= SegmentIndex.DENSIFY_STEP_M + 0.01
+
+
+class TestRouteGapBridging:
+    """A numbered route shown at a zoom is drawn whole, one class below the floor."""
+
+    def _graph(self, spec):
+        from types import SimpleNamespace
+
+        edges = {
+            eid: SimpleNamespace(edge_id=eid, from_node=a, to_node=b, fc=fc, ref=ref)
+            for eid, (a, b, fc, ref) in spec.items()
+        }
+        return SimpleNamespace(edge_by_id=edges, edges=list(edges.values()))
+
+    def test_a_trunk_gap_between_two_motorway_pieces_is_bridged_at_z2(self):
+        from osm_geocoder.handlers.roads.zoom_selection import bridge_route_gaps
+
+        g = self._graph({
+            1: (1, 2, "motorway", "US 101"),
+            2: (2, 3, "trunk", "US 101"),  # the expressway gap
+            3: (3, 4, "trunk", "US 101;CA 1"),
+            4: (4, 5, "motorway", "US 101"),
+            5: (5, 6, "trunk", "US 101"),  # spur beyond the last piece: not a gap
+            6: (2, 9, "primary", "US 101"),  # two classes down: never bridged at z2
+        })
+        by_ref = {"US 101": [1, 2, 3, 4, 5, 6], "CA 1": [3]}
+        assert bridge_route_gaps(g, {1, 4}, "motorway", by_ref) == {2, 3}
+
+    def test_a_different_route_number_is_not_pulled_in(self):
+        from osm_geocoder.handlers.roads.zoom_selection import bridge_route_gaps
+
+        g = self._graph({1: (1, 2, "motorway", "I 5"), 2: (2, 3, "trunk", "CA 99"), 3: (3, 4, "motorway", "I 5")})
+        assert bridge_route_gaps(g, {1, 3}, "motorway", {"I 5": [1, 3], "CA 99": [2]}) == set()

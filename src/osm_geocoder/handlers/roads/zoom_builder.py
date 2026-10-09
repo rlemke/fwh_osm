@@ -136,6 +136,10 @@ def recipe_fingerprint() -> str:
             "pair_floor_km": MIN_PAIR_FLOOR_KM,
             "anchor_min_count": ANCHOR_MIN_COUNT,
             "anchors_cumulative": True,
+            # Code: routes are densified before snapping (zoom_sbs.SegmentIndex).
+            "snap_densify_m": SegmentIndex.DENSIFY_STEP_M,
+            # Code: numbered routes are bridged one class below the floor.
+            "route_gap_bridging": "one-class",
             "anchor_pop": ANCHOR_POP_THRESHOLDS, "anchor_targets": ANCHOR_TARGETS,
             "k_pairs": DEFAULT_K_PAIRS, "min_pair_km": MIN_PAIR_DISTANCE_KM,
             "bypass": [BYPASS_TIME_RATIO, BYPASS_CORE_FRACTION_MAX, BYPASS_FC_ADVANTAGE],

@@ -493,6 +493,74 @@ def _corridor_cell_cost(
     return dict(cost)
 
 
+FC_ORDER: tuple[str, ...] = (
+    "motorway", "trunk", "primary", "secondary", "tertiary", "unclassified",
+)
+
+
+def ref_tokens(ref: str) -> list[str]:
+    """``"US 101;CA 1"`` -> ``["US 101", "CA 1"]``."""
+    return [t.strip() for t in (ref or "").split(";") if t.strip()]
+
+
+def _uf_find(parent: dict[int, int], x: int) -> int:
+    while parent.setdefault(x, x) != x:
+        parent[x] = parent[parent[x]]
+        x = parent[x]
+    return x
+
+
+def bridge_route_gaps(
+    graph: RoadGraph, selected: set[int], floor_fc: str, by_ref: dict[str, list[int]]
+) -> set[int]:
+    """Edges that make a numbered route continuous at this zoom.
+
+    For every route number with selected edges, its unselected edges no more
+    than ONE class below the zoom's floor are grouped into connected runs; a
+    run is admitted only if it touches that route's selected edges at two or
+    more nodes, i.e. it fills a gap. A spur touching at one node is not a gap.
+
+    Measured 2026-10-09: US 101 in northern California was 21 pieces at z2,
+    because z2 admits motorway only and 101 alternates freeway (motorway) and
+    expressway (trunk). From z3 it was whole. A road with one number is read as
+    one road; drawing it in pieces reads as a broken map.
+    """
+    i = FC_ORDER.index(floor_fc) if floor_fc in FC_ORDER else len(FC_ORDER) - 1
+    allowed = set(FC_ORDER[: min(i + 2, len(FC_ORDER))])
+    added: set[int] = set()
+    for _token, eids in by_ref.items():
+        chosen = [e for e in eids if e in selected]
+        if not chosen:
+            continue
+        cand = [
+            e for e in eids
+            if e not in selected and graph.edge_by_id[e].fc in allowed
+        ]
+        if not cand:
+            continue
+        sel_nodes: set[int] = set()
+        for e in chosen:
+            ed = graph.edge_by_id[e]
+            sel_nodes.update((ed.from_node, ed.to_node))
+        parent: dict[int, int] = {}
+        for e in cand:
+            ed = graph.edge_by_id[e]
+            parent[_uf_find(parent, ed.from_node)] = _uf_find(parent, ed.to_node)
+        runs: dict[int, list[int]] = {}
+        for e in cand:
+            runs.setdefault(_uf_find(parent, graph.edge_by_id[e].from_node), []).append(e)
+        for run in runs.values():
+            touch = {
+                n
+                for e in run
+                for n in (graph.edge_by_id[e].from_node, graph.edge_by_id[e].to_node)
+                if n in sel_nodes
+            }
+            if len(touch) >= 2:
+                added.update(run)
+    return added
+
+
 def select_edges(
     graph: RoadGraph,
     scores: dict[int, dict[int, float]],
@@ -526,6 +594,11 @@ def select_edges(
         edge_cells = {e.edge_id: {"flat"} for e in graph.edges}
 
     selected_by_zoom: dict[int, set[int]] = {}
+
+    by_ref: dict[str, list[int]] = {}
+    for edge in graph.edges:
+        for t in ref_tokens(edge.ref):
+            by_ref.setdefault(t, []).append(edge.edge_id)
 
     for z in range(2, 8):
         z_scores = scores.get(z, {})
@@ -675,6 +748,12 @@ def select_edges(
                         _charge(cost)
                         if cell_used_km[cell] >= min_km:
                             break
+
+        # A numbered route shown at this zoom is shown whole (see bridge_route_gaps).
+        bridged = bridge_route_gaps(graph, selected, MIN_FC_BY_ZOOM.get(z, "unclassified"), by_ref)
+        if bridged:
+            log.info("Zoom %d: %d edge(s) bridge gaps in numbered routes", z, len(bridged))
+            selected |= bridged
 
         selected_by_zoom[z] = selected
         if backbone_out is not None:

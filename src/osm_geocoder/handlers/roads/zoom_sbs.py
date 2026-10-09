@@ -10,7 +10,7 @@ import math
 import os
 import random
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 log = logging.getLogger(__name__)
@@ -201,14 +201,39 @@ class SegmentIndex:
         proj_lat = y1 + t * (y2 - y1)
         return _haversine_m(px, py, proj_lon, proj_lat)
 
+    # Interpolation step along a route before snapping, in metres.
+    DENSIFY_STEP_M: float = 20.0
+
+    @classmethod
+    def densify(cls, route_coords: list[list[float]]) -> Iterator[tuple[float, float]]:
+        """The route's vertices plus points every DENSIFY_STEP_M between them.
+
+        ⚠️ GraphHopper simplifies the geometry it returns (Douglas-Peucker), so on
+        a straight run consecutive points can be kilometres apart, and snapping
+        only the vertices never touches a short edge lying between them -- a
+        bridge, an interchange segment. Measured 2026-10-09 on California-north:
+        208 US-101 edges unrouted with routed edges on BOTH ends, median 193 m.
+        The route drove them; the matcher never looked."""
+        prev = None
+        for c in route_coords:
+            lon, lat = c[0], c[1]
+            if prev is not None:
+                d = _haversine_m(prev[0], prev[1], lon, lat)
+                n = int(d // cls.DENSIFY_STEP_M)
+                for i in range(1, n + 1):
+                    t = i / (n + 1)
+                    yield prev[0] + (lon - prev[0]) * t, prev[1] + (lat - prev[1]) * t
+            yield lon, lat
+            prev = (lon, lat)
+
     def snap_route(self, route_coords: list[list[float]], tolerance_m: float = 50.0) -> set[int]:
-        """Snap route coordinates to logical edge IDs within tolerance."""
+        """Snap a route to the logical edge IDs it rides (within tolerance)."""
         matched_edges: set[int] = set()
         memo = self._snap_memo
         scale = self.SNAP_MEMO_SCALE
         last_key: tuple[int, int] | None = None
 
-        for coord in route_coords:
+        for coord in self.densify(route_coords):
             lon, lat = coord[0], coord[1]
             key = (int(lon * scale), int(lat * scale))
             if key == last_key:
