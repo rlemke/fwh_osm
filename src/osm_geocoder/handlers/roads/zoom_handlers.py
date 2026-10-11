@@ -546,6 +546,9 @@ def _make_build_zoom_layers_handler(facet_name: str):
             os.path.join(get_output_base(), "osm", "zoom-builder"),
         )
         max_concurrent = payload.get("max_concurrent", 16)
+        route_max_zoom = int(payload.get("route_max_zoom", 7) or 7)
+        if not 2 <= route_max_zoom <= 7:
+            raise ValueError(f"route_max_zoom must be 2..7, got {route_max_zoom}")
         step_log = payload.get("_step_log")
 
         # Everything that changes the OUTPUT must be in the key, not just the
@@ -560,6 +563,10 @@ def _make_build_zoom_layers_handler(facet_name: str):
             "profile": (gh_config or {}).get("profile", "car"),
             "recipe": recipe_fingerprint(),
         }
+        # Only when it differs from the default, so every existing cached
+        # result (all routed to z7) keeps its key.
+        if route_max_zoom != 7:
+            cache_params["route_max_zoom"] = route_max_zoom
         hit = cached_result(qualified, cache, cache_params, step_log)
         if hit is not None:
             return hit
@@ -595,6 +602,7 @@ def _make_build_zoom_layers_handler(facet_name: str):
                 max_concurrent=max_concurrent,
                 heartbeat=lambda msg: ctx.heartbeat(progress_message=msg),
                 check_cancel=ctx.raise_if_cancelled,
+                route_max_zoom=route_max_zoom,
             )
             if work_dir != output_dir:
                 ctx.heartbeat(progress_message=f"uploading layers to {output_dir}")

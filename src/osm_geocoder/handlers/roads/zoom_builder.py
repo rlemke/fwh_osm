@@ -158,6 +158,7 @@ def build_zoom_layers(
     max_concurrent: int = 16,
     heartbeat: Callable[[str], None] | None = None,
     check_cancel: Callable[[], None] | None = None,
+    route_max_zoom: int = 7,
 ) -> tuple[dict, dict]:
     """Orchestrate the full Low-Zoom roads pipeline.
 
@@ -171,6 +172,12 @@ def build_zoom_layers(
         min_population: Minimum population for city anchors.
         output_dir: Directory for output files.
         max_concurrent: Max concurrent GraphHopper requests.
+        route_max_zoom: Highest zoom that routes its city pairs (2-7). Zooms
+            above it get no betweenness, so their layers are selected by class
+            and name alone and carry ``routed = false``. A country-scale run on
+            a major-roads graph routes z2-z4 only: z5-z7 pair hundreds of
+            thousands of towns over continental distances, and the graph has
+            none of the roads those tiers ride.
 
     Returns:
         Tuple of (result_dict, metrics_dict).
@@ -255,7 +262,7 @@ def build_zoom_layers(
         # Rhode Island legitimately cannot supply — probing only z2 would skip
         # the check on exactly the small states, silently.
         probe_pairs: list = []
-        for pz in range(2, 8):
+        for pz in range(2, route_max_zoom + 1):
             probe_pairs = sample_od_pairs(anchors_by_zoom[pz], pz, road_graph, scale=scale)
             if probe_pairs:
                 log.info("Probing the router with zoom-%d pairs", pz)
@@ -266,6 +273,10 @@ def build_zoom_layers(
     # so its 5k+ cities (the z7 tier) were never routed between: on the map they
     # sat unconnected while every other tier's routes ran city to city.
     for z in range(2, 8):
+        if z > route_max_zoom:
+            log.info("  SBS for zoom %d skipped (route_max_zoom=%d)", z, route_max_zoom)
+            sbs_by_zoom[z] = {}
+            continue
         log.info("  SBS for zoom %d", z)
         if check_cancel is not None:
             check_cancel()
