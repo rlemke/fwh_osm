@@ -9,6 +9,7 @@ import logging
 import math
 import os
 import random
+import time
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -654,6 +655,26 @@ def _route_pair_with_time(
 # the task was reclaimed, and a second runner started the same job from scratch
 # while the first kept burning a core. Step logs do NOT count as progress.
 HEARTBEAT_EVERY = 500
+# ...and at least this often by the CLOCK. A count alone assumes pairs are
+# cheap: on the US major-roads graph a z2 pair is a 300-4,700 km route,
+# densified to 20 m before snapping, and 500 of them did not finish inside the
+# 30 min the watchdog allows (2026-10-12).
+HEARTBEAT_SECONDS = 60.0
+
+
+class _Pulse:
+    """When a loop should report liveness: every HEARTBEAT_EVERY items or
+    HEARTBEAT_SECONDS, whichever comes first."""
+
+    def __init__(self) -> None:
+        self._last = time.monotonic()
+
+    def due(self, n: int) -> bool:
+        now = time.monotonic()
+        if n % HEARTBEAT_EVERY == 0 or now - self._last >= HEARTBEAT_SECONDS:
+            self._last = now
+            return True
+        return False
 
 
 def route_batch_parallel(
@@ -684,13 +705,14 @@ def route_batch_parallel(
             for a, b in pairs
         }
         done = 0
+        pulse = _Pulse()
         try:
             for future in as_completed(futures):
                 pair = futures[future]
                 done += 1
                 if done % 1000 == 0:
                     log.info("Routed %d / %d pairs", done, total)
-                if done % HEARTBEAT_EVERY == 0:
+                if pulse.due(done):
                     if check_cancel is not None:
                         check_cancel()
                     if heartbeat is not None:
@@ -850,6 +872,7 @@ def route_and_accumulate(
     done = 0
     pair_of: dict = {}
     witness: list[tuple[int, int]] = []  # one pair that routed: proof of the region
+    pulse = _Pulse()
 
     def _consume(fut) -> None:
         nonlocal routed, done
@@ -874,7 +897,7 @@ def route_and_accumulate(
         if done % 1000 == 0:
             log.info("Routed+snapped %d / %d pairs (memo hits %d, misses %d)", done, total,
                      segment_index.snap_hits, segment_index.snap_misses)
-        if done % HEARTBEAT_EVERY == 0:
+        if pulse.due(done):
             if check_cancel is not None:
                 check_cancel()
             if heartbeat is not None:
@@ -967,11 +990,12 @@ def accumulate_votes(
     bc: dict[int, int] = defaultdict(int)
     total = len(routes)
 
+    pulse = _Pulse()
     for n, ((_a, _b), coords) in enumerate(routes.items(), 1):
         matched = segment_index.snap_route(coords)
         for eid in matched:
             bc[eid] += 1
-        if n % HEARTBEAT_EVERY == 0:
+        if pulse.due(n):
             if check_cancel is not None:
                 check_cancel()
             if heartbeat is not None:

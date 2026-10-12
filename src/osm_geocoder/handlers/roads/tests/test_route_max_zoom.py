@@ -84,3 +84,16 @@ def test_route_max_zoom_stops_routing_above_it(routed_zooms):
     assert all(sbs[z] for z in (2, 3, 4))
     # Above the cap the band exists but nothing in it was routed.
     assert sbs[5] == sbs[6] == sbs[7] == {}
+
+
+def test_pulse_fires_on_the_clock_between_counts(monkeypatch):
+    from osm_geocoder.handlers.roads import zoom_sbs
+
+    now = [1000.0]
+    monkeypatch.setattr(zoom_sbs.time, "monotonic", lambda: now[0])
+    pulse = zoom_sbs._Pulse()
+    assert not pulse.due(1)
+    now[0] += zoom_sbs.HEARTBEAT_SECONDS
+    assert pulse.due(2)  # slow items: the clock, not the count
+    assert not pulse.due(3)
+    assert pulse.due(zoom_sbs.HEARTBEAT_EVERY)  # fast items: the count
