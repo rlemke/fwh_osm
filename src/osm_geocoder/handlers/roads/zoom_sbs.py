@@ -156,6 +156,7 @@ class SegmentIndex:
         self._snap_memo: dict[tuple[int, int], int] = {}
         self.snap_hits = 0
         self.snap_misses = 0
+        self.snap_sticky = 0
         self._build_index()
 
     def _cell(self, lon: float, lat: float) -> tuple[int, int]:
@@ -227,15 +228,47 @@ class SegmentIndex:
             yield lon, lat
             prev = (lon, lat)
 
+    # Follow-the-edge matching (see snap_route): a point within this distance of
+    # the edge the previous point matched stays on it without a grid search.
+    # Route geometry lies ON the OSM way (GraphHopper returns its nodes, and the
+    # densified points sit on straight chords between them), so riding an edge
+    # reads ~0 m from it, while a parallel carriageway or frontage road is
+    # 10+ m away -- inside this distance the current edge IS the nearest one.
+    STICKY_M = 5.0
+    # Segments either side of the last matched one to try before giving up.
+    STICKY_WINDOW = 3
+
     def snap_route(self, route_coords: list[list[float]], tolerance_m: float = 50.0) -> set[int]:
-        """Snap a route to the logical edge IDs it rides (within tolerance)."""
+        """Snap a route to the logical edge IDs it rides (within tolerance).
+
+        ⚠️ Follows the current edge before searching the grid. Measured
+        2026-10-12 on the US major-roads graph: with a grid search (memoised at
+        ~11 m) per 20 m point, a 4,700 km route is ~235k points, nearly all cache
+        misses at continental scale -- 24 s per route, 2.5 routes/min, and a memo
+        that grew to 26 GiB. Points that ride the edge just matched cost a few
+        segment distances instead; the grid search runs at junctions."""
         matched_edges: set[int] = set()
         memo = self._snap_memo
         scale = self.SNAP_MEMO_SCALE
         last_key: tuple[int, int] | None = None
+        cur_eid, cur_seg = -1, -1
+        sticky_m, window = self.STICKY_M, self.STICKY_WINDOW
+        dist = self._point_to_segment_dist_m
 
         for coord in self.densify(route_coords):
             lon, lat = coord[0], coord[1]
+            if cur_eid >= 0:
+                segs = self._edge_segments[cur_eid]
+                best_i, best_d = -1, sticky_m
+                for i in range(max(0, cur_seg - window), min(len(segs), cur_seg + window + 1)):
+                    x1, y1, x2, y2 = segs[i]
+                    d = dist(lon, lat, x1, y1, x2, y2)
+                    if d <= best_d:
+                        best_i, best_d = i, d
+                if best_i >= 0:
+                    cur_seg = best_i
+                    self.snap_sticky += 1
+                    continue
             key = (int(lon * scale), int(lat * scale))
             if key == last_key:
                 continue
@@ -243,14 +276,15 @@ class SegmentIndex:
             hit = memo.get(key)
             if hit is not None:
                 self.snap_hits += 1
-                if hit >= 0:
-                    matched_edges.add(hit)
+                cur_eid, cur_seg = hit
+                if cur_eid >= 0:
+                    matched_edges.add(cur_eid)
                 continue
             self.snap_misses += 1
             cx, cy = self._cell(lon, lat)
 
             best_dist = tolerance_m
-            best_eid = -1
+            best_eid, best_seg = -1, -1
 
             # Check surrounding cells
             for dcx in range(-1, 2):
@@ -260,12 +294,13 @@ class SegmentIndex:
                         if segs is None or seg_idx >= len(segs):
                             continue
                         x1, y1, x2, y2 = segs[seg_idx]
-                        d = self._point_to_segment_dist_m(lon, lat, x1, y1, x2, y2)
+                        d = dist(lon, lat, x1, y1, x2, y2)
                         if d < best_dist:
                             best_dist = d
-                            best_eid = eid
+                            best_eid, best_seg = eid, seg_idx
 
-            memo[key] = best_eid
+            memo[key] = (best_eid, best_seg)
+            cur_eid, cur_seg = best_eid, best_seg
             if best_eid >= 0:
                 matched_edges.add(best_eid)
 

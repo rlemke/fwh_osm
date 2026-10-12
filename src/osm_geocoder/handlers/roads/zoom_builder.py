@@ -33,6 +33,7 @@ from .zoom_detection import (
 )
 from .zoom_graph import HAS_OSMIUM, RoadGraph, build_logical_graph
 from .zoom_sbs import (
+    DEFAULT_K_PAIRS,
     HAS_REQUESTS,
     SegmentIndex,
     build_anchors,
@@ -140,6 +141,8 @@ def recipe_fingerprint() -> str:
             "snap_densify_m": SegmentIndex.DENSIFY_STEP_M,
             # Code: numbered routes are bridged one class below the floor.
             "route_gap_bridging": "one-class",
+            # Code: snapping follows the current edge before a grid search.
+            "snap_follow_edge_m": SegmentIndex.STICKY_M,
             "anchor_pop": ANCHOR_POP_THRESHOLDS, "anchor_targets": ANCHOR_TARGETS,
             "k_pairs": DEFAULT_K_PAIRS, "min_pair_km": MIN_PAIR_DISTANCE_KM,
             "bypass": [BYPASS_TIME_RATIO, BYPASS_CORE_FRACTION_MAX, BYPASS_FC_ADVANTAGE],
@@ -159,6 +162,7 @@ def build_zoom_layers(
     heartbeat: Callable[[str], None] | None = None,
     check_cancel: Callable[[], None] | None = None,
     route_max_zoom: int = 7,
+    max_pairs: int = 0,
 ) -> tuple[dict, dict]:
     """Orchestrate the full Low-Zoom roads pipeline.
 
@@ -178,6 +182,10 @@ def build_zoom_layers(
             a major-roads graph routes z2-z4 only: z5-z7 pair hundreds of
             thousands of towns over continental distances, and the graph has
             none of the roads those tiers ride.
+        max_pairs: Cap on the city pairs routed per zoom (0 = the per-zoom
+            default). Matching a route onto the graph costs ~1 ms per km, so a
+            country's z4 default of 50k pairs averaging >1,000 km is ~18 h; a
+            random sample keeps the distance mix, only the votes get noisier.
 
     Returns:
         Tuple of (result_dict, metrics_dict).
@@ -289,7 +297,10 @@ def build_zoom_layers(
             check_cancel()
         if heartbeat is not None:
             heartbeat(f"step 3: SBS zoom {z}")
-        pairs = sample_od_pairs(anchors_by_zoom[z], z, road_graph, scale=scale)
+        k = DEFAULT_K_PAIRS.get(z, 5_000)
+        if max_pairs > 0:
+            k = min(k, max_pairs)
+        pairs = sample_od_pairs(anchors_by_zoom[z], z, road_graph, k_pairs=k, scale=scale)
 
         if HAS_REQUESTS and graph_dir:
             # Stream: snap each route as it completes, retain none (see

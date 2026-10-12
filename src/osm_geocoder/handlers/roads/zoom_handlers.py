@@ -549,6 +549,7 @@ def _make_build_zoom_layers_handler(facet_name: str):
         route_max_zoom = int(payload.get("route_max_zoom", 7) or 7)
         if not 2 <= route_max_zoom <= 7:
             raise ValueError(f"route_max_zoom must be 2..7, got {route_max_zoom}")
+        max_pairs = int(payload.get("max_pairs", 0) or 0)
         step_log = payload.get("_step_log")
 
         # Everything that changes the OUTPUT must be in the key, not just the
@@ -567,6 +568,8 @@ def _make_build_zoom_layers_handler(facet_name: str):
         # result (all routed to z7) keeps its key.
         if route_max_zoom != 7:
             cache_params["route_max_zoom"] = route_max_zoom
+        if max_pairs:
+            cache_params["max_pairs"] = max_pairs
         hit = cached_result(qualified, cache, cache_params, step_log)
         if hit is not None:
             return hit
@@ -603,6 +606,7 @@ def _make_build_zoom_layers_handler(facet_name: str):
                 heartbeat=lambda msg: ctx.heartbeat(progress_message=msg),
                 check_cancel=ctx.raise_if_cancelled,
                 route_max_zoom=route_max_zoom,
+                max_pairs=max_pairs,
             )
             if work_dir != output_dir:
                 ctx.heartbeat(progress_message=f"uploading layers to {output_dir}")

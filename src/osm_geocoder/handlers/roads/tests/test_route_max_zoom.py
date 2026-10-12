@@ -21,9 +21,11 @@ def routed_zooms(monkeypatch, tmp_path):
     probed: list[int] = []
     graph = SimpleNamespace(edges={1: object()}, node_coords={1: (0.0, 0.0)})
     current = {"z": 0}
+    ks: dict[int, int] = {}
 
     def sample(anchors, z, g, k_pairs=None, scale=1.0):
         current["z"] = z
+        ks[z] = k_pairs
         return [(1, 1)]
 
     def route(pairs, *a, **k):
@@ -68,6 +70,7 @@ def routed_zooms(monkeypatch, tmp_path):
         )
         return list(calls), list(probed), result["sbs"]
 
+    run.ks = ks
     return run
 
 
@@ -97,3 +100,8 @@ def test_pulse_fires_on_the_clock_between_counts(monkeypatch):
     assert pulse.due(2)  # slow items: the clock, not the count
     assert not pulse.due(3)
     assert pulse.due(zoom_sbs.HEARTBEAT_EVERY)  # fast items: the count
+
+
+def test_max_pairs_caps_every_zoom_below_its_default(routed_zooms):
+    routed_zooms(max_pairs=8000)
+    assert routed_zooms.ks == {2: 5_000, 3: 8_000, 4: 8_000, 5: 8_000, 6: 8_000, 7: 8_000}

@@ -191,7 +191,9 @@ namespace osm.Roads.ZoomBuilder {
         memory_gb: Long = 0,
         // Highest zoom that routes its city pairs (2-7). Above it a band is
         // selected by class/name only. 4 for a country on a major-roads graph.
-        route_max_zoom: Long = 7
+        route_max_zoom: Long = 7,
+        // Cap on city pairs routed per zoom; 0 = the per-zoom default.
+        max_pairs: Long = 0
     ) => (
         result: ZoomBuilderResult,
         metrics: ZoomBuilderMetrics

@@ -48,7 +48,9 @@ def test_snap_memo_gives_identical_matches_and_hits_on_repeat():
     second = idx.snap_route(_route_along_10())
     assert first == second == {10}
     assert idx.snap_misses == misses_after_first, "second pass must not recompute"
-    assert idx.snap_hits >= 20, "every coordinate of the repeated route is a memo hit"
+    # Each coordinate of the repeat is a memo hit or rides the edge just matched
+    # (follow-the-edge matching skips the memo entirely).
+    assert idx.snap_hits + idx.snap_sticky >= 20
 
 
 def test_snap_memo_keeps_misses_as_misses():
