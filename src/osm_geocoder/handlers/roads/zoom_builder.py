@@ -231,6 +231,13 @@ def build_zoom_layers(
     tier_of: dict[str, dict] = {}
     carried: list[tuple] = []  # cumulative: each zoom keeps the lower zooms' cities
     for z in range(2, 8):
+        # Per zoom: at country scale one zoom's anchors took 10-20 min before
+        # snapping was indexed, and a single heartbeat for the whole step let
+        # the stuck-task watchdog reclaim it.
+        if check_cancel is not None:
+            check_cancel()
+        if heartbeat is not None:
+            heartbeat(f"step 2: anchors z{z}")
         chosen: list[dict] = []
         anchors_by_zoom[z] = build_anchors(road_graph, cities_path, z, scale, chosen, carried)
         anchors_path = str(out / f"anchors_z{z}.json")

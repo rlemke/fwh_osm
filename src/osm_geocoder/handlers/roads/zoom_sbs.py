@@ -392,18 +392,68 @@ def build_anchors(
     return anchors
 
 
+# Grid cell for the nearest-node index, degrees. ~11 km of latitude: a city
+# snaps within a few cells, and a cell holds a few thousand nodes at most.
+NODE_GRID_DEG = 0.1
+# Metres per degree on the haversine sphere, shaded down 1% so the ring bound
+# below never overstates a distance.
+_M_PER_DEG = 0.99 * math.radians(1.0) * 6_371_000.0
+
+
+class NodeGrid:
+    """Nearest-node lookup over a graph's nodes, bucketed by NODE_GRID_DEG cells.
+
+    Replaces a scan of EVERY node per city. Measured 2026-10-11 on the US
+    major-roads graph: 10-20 min per zoom with that scan and no heartbeat, so the
+    stuck-task watchdog reclaimed the builder five times and dead-lettered it.
+    Returns exactly what the scan returned: the nearest node by haversine within
+    max_dist_m, ties going to the node that comes first in node_coords."""
+
+    def __init__(self, node_coords: dict[int, tuple[float, float]]) -> None:
+        self.cells: dict[tuple[int, int], list[tuple[int, int, float, float]]] = defaultdict(list)
+        for order, (nid, (lon, lat)) in enumerate(node_coords.items()):
+            self.cells[self._cell(lon, lat)].append((order, nid, lon, lat))
+
+    @staticmethod
+    def _cell(lon: float, lat: float) -> tuple[int, int]:
+        return (math.floor(lon / NODE_GRID_DEG), math.floor(lat / NODE_GRID_DEG))
+
+    def nearest(self, lon: float, lat: float, max_dist_m: float) -> int | None:
+        cx, cy = self._cell(lon, lat)
+        best: tuple[float, int, int] | None = None  # (distance, order, node)
+        r = 0
+        while True:
+            for dx in range(-r, r + 1):
+                for dy in range(-r, r + 1):
+                    if max(abs(dx), abs(dy)) != r:
+                        continue  # ring r only
+                    for order, nid, nlon, nlat in self.cells.get((cx + dx, cy + dy), ()):
+                        d = _haversine_m(lon, lat, nlon, nlat)
+                        if d < max_dist_m and (best is None or (d, order) < best[:2]):
+                            best = (d, order, nid)
+            # Every node outside ring r is at least r cells away on one axis.
+            # Bound the east-west metres at the most poleward latitude it could
+            # have, so the bound never overstates the distance.
+            far_lat = min(89.9, abs(lat) + (r + 1) * NODE_GRID_DEG)
+            lower = r * NODE_GRID_DEG * _M_PER_DEG * math.cos(math.radians(far_lat))
+            if lower >= max_dist_m or (best is not None and lower > best[0]):
+                return None if best is None else best[2]
+            r += 1
+
+
 def _snap_to_nearest_node(
     graph: RoadGraph, lon: float, lat: float, max_dist_m: float = 50_000.0
 ) -> int | None:
-    """Find the nearest graph node to a (lon, lat) point."""
-    best_dist = max_dist_m
-    best_node = None
-    for nid, (nlon, nlat) in graph.node_coords.items():
-        d = _haversine_m(lon, lat, nlon, nlat)
-        if d < best_dist:
-            best_dist = d
-            best_node = nid
-    return best_node
+    """Find the nearest graph node to a (lon, lat) point (indexed; built once per graph)."""
+    grid = getattr(graph, "_node_grid", None)
+    if grid is None or getattr(graph, "_node_grid_n", -1) != len(graph.node_coords):
+        grid = NodeGrid(graph.node_coords)
+        try:
+            graph._node_grid = grid
+            graph._node_grid_n = len(graph.node_coords)
+        except AttributeError:
+            pass
+    return grid.nearest(lon, lat, max_dist_m)
 
 
 def sample_od_pairs(
