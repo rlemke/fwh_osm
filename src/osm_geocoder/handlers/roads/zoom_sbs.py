@@ -148,6 +148,12 @@ class SegmentIndex:
     # 1e-4 deg ≈ 11 m at these latitudes, well inside the 50 m tolerance.
     SNAP_MEMO_SCALE = 10_000
 
+    # Entries kept in the snap memo before it is dropped and refilled. An entry
+    # is ~250 bytes, so this bounds the memo near 2.5 GB. Measured 2026-10-12:
+    # unbounded, on the US major-roads graph the builder reached ~40 GiB and the
+    # kernel killed it three times (each a 3-hour reroute after the reclaim).
+    SNAP_MEMO_MAX = 10_000_000
+
     def __init__(self, graph: RoadGraph) -> None:
         self._graph = graph
         self._grid: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
@@ -157,7 +163,12 @@ class SegmentIndex:
         self.snap_hits = 0
         self.snap_misses = 0
         self.snap_sticky = 0
+        self.memo_resets = 0
         self._build_index()
+
+    def clear_memo(self) -> None:
+        """Drop the snap memo (the grid index itself is kept)."""
+        self._snap_memo = {}
 
     def _cell(self, lon: float, lat: float) -> tuple[int, int]:
         return int(lon / self.CELL_SIZE), int(lat / self.CELL_SIZE)
@@ -299,6 +310,9 @@ class SegmentIndex:
                             best_dist = d
                             best_eid, best_seg = eid, seg_idx
 
+            if len(memo) >= self.SNAP_MEMO_MAX:
+                memo = self._snap_memo = {}
+                self.memo_resets += 1
             memo[key] = (best_eid, best_seg)
             cur_eid, cur_seg = best_eid, best_seg
             if best_eid >= 0:

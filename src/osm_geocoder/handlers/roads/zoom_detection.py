@@ -57,6 +57,7 @@ def detect_bypasses(
     profile: str,
     heartbeat: Callable[[str], None] | None = None,
     check_cancel: Callable[[], None] | None = None,
+    segment_index: SegmentIndex | None = None,
 ) -> dict[int, str]:
     """Detect bypass roads around settlements.
 
@@ -76,7 +77,11 @@ def detect_bypasses(
         log.warning("No settlements loaded for bypass detection")
         return {}
 
-    segment_index = SegmentIndex(graph)
+    # Reuse the caller's index when given: at country scale each SegmentIndex
+    # is several GiB, and building fresh ones here while step 3's is still
+    # alive is what pushed the US build past the VM's memory.
+    if segment_index is None:
+        segment_index = SegmentIndex(graph)
     boundary_index = _BoundaryEdgeIndex(graph)
     node_index = _NodeIndex(graph.node_coords)
     flags: dict[int, str] = {}
@@ -160,6 +165,7 @@ def detect_rings(
     profile: str,
     heartbeat: Callable[[str], None] | None = None,
     check_cancel: Callable[[], None] | None = None,
+    segment_index: SegmentIndex | None = None,
 ) -> dict[int, bool]:
     """Detect ring roads around large settlements.
 
@@ -180,7 +186,11 @@ def detect_rings(
         log.info("No large cities for ring detection")
         return {}
 
-    segment_index = SegmentIndex(graph)
+    # Reuse the caller's index when given: at country scale each SegmentIndex
+    # is several GiB, and building fresh ones here while step 3's is still
+    # alive is what pushed the US build past the VM's memory.
+    if segment_index is None:
+        segment_index = SegmentIndex(graph)
     ring_edges: dict[int, bool] = {}
 
     for n, (name, lon, lat, pop, _pt) in enumerate(large_cities, 1):

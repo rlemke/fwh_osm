@@ -22,6 +22,9 @@ def routed_zooms(monkeypatch, tmp_path):
     graph = SimpleNamespace(edges={1: object()}, node_coords={1: (0.0, 0.0)})
     current = {"z": 0}
     ks: dict[int, int] = {}
+    index = SimpleNamespace(cleared=0)
+    index.clear_memo = lambda: setattr(index, "cleared", index.cleared + 1)
+    detector_index: list = []
 
     def sample(anchors, z, g, k_pairs=None, scale=1.0):
         current["z"] = z
@@ -40,13 +43,14 @@ def routed_zooms(monkeypatch, tmp_path):
         "region_scale": lambda g: 1.0,
         "build_anchors": lambda *a, **k: [1],
         "save_anchors": lambda *a, **k: None,
-        "SegmentIndex": lambda g: None,
+        "SegmentIndex": lambda g: index,
+        "recipe_fingerprint": lambda: "recipe",
         "sample_od_pairs": sample,
         "probe_router": lambda coords, pairs, profile: probed.append(current["z"]),
         "route_and_accumulate": route,
         "save_sbs": lambda *a, **k: None,
-        "detect_bypasses": lambda *a, **k: {},
-        "detect_rings": lambda *a, **k: {},
+        "detect_bypasses": lambda *a, **k: detector_index.append(k.get("segment_index")) or {},
+        "detect_rings": lambda *a, **k: detector_index.append(k.get("segment_index")) or {},
         "save_bypass_flags": lambda *a, **k: None,
         "save_ring_flags": lambda *a, **k: None,
         "compute_scores": lambda *a, **k: {},
@@ -71,6 +75,9 @@ def routed_zooms(monkeypatch, tmp_path):
         return list(calls), list(probed), result["sbs"]
 
     run.ks = ks
+    run.index = index
+    run.detector_index = detector_index
+    run.monkeypatch = monkeypatch
     return run
 
 
@@ -105,3 +112,41 @@ def test_pulse_fires_on_the_clock_between_counts(monkeypatch):
 def test_max_pairs_caps_every_zoom_below_its_default(routed_zooms):
     routed_zooms(max_pairs=8000)
     assert routed_zooms.ks == {2: 5_000, 3: 8_000, 4: 8_000, 5: 8_000, 6: 8_000, 7: 8_000}
+
+
+def test_step4_reuses_step3_index_with_its_memo_cleared(routed_zooms):
+    """Building fresh indexes in step 4 while step 3's was alive OOM'd the US run."""
+    routed_zooms(route_max_zoom=2)
+    assert routed_zooms.detector_index == [routed_zooms.index, routed_zooms.index]
+    assert routed_zooms.index.cleared >= 2
+
+
+def test_a_retry_loads_routed_zooms_instead_of_rerouting(routed_zooms, tmp_path):
+    from osm_geocoder.handlers.roads import zoom_sbs
+
+    routed_zooms.monkeypatch.setattr(zb, "save_sbs", zoom_sbs.save_sbs)
+    first, _, sbs1 = routed_zooms(route_max_zoom=3)
+    assert first == [2, 3]
+    assert (tmp_path / "sbs_z2.key").exists()
+
+    again, _, sbs2 = routed_zooms(route_max_zoom=3)
+    assert again == []  # nothing rerouted
+    assert sbs2[2] == sbs1[2] and sbs2[3] == sbs1[3]
+
+    # A different pair set is a different routing: the checkpoint is ignored.
+    (tmp_path / "sbs_z3.key").write_text("stale")
+    third, _, _ = routed_zooms(route_max_zoom=3)
+    assert third == [3]
+
+
+def test_snap_memo_is_bounded(monkeypatch):
+    from osm_geocoder.handlers.roads import zoom_sbs
+
+    edge = SimpleNamespace(edge_id=7, coords=[(0.0, 0.0), (0.01, 0.0)])
+    idx = zoom_sbs.SegmentIndex(SimpleNamespace(edges=[edge]))
+    monkeypatch.setattr(zoom_sbs.SegmentIndex, "SNAP_MEMO_MAX", 3)
+    monkeypatch.setattr(zoom_sbs.SegmentIndex, "STICKY_M", -1.0)  # force grid lookups
+    for i in range(10):
+        assert idx.snap_route([[0.0005 * i, 0.0], [0.0005 * i, 0.0]]) == {7}
+    assert len(idx._snap_memo) <= 3
+    assert idx.memo_resets >= 2

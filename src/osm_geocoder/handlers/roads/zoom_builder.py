@@ -44,6 +44,7 @@ from .zoom_sbs import (
     route_and_accumulate,
     sample_od_pairs,
     save_anchors,
+    load_sbs,
     save_sbs,
 )
 from .zoom_selection import (
@@ -151,6 +152,14 @@ def recipe_fingerprint() -> str:
         sort_keys=True, default=str,
     )
     return hashlib.sha256(recipe.encode()).hexdigest()[:12]
+
+
+def _sbs_checkpoint_key(z: int, pairs: list, graph, pbf_path: str) -> str:
+    """Identity of one zoom's routing: recipe, input, graph size and the pairs."""
+    h = hashlib.sha256()
+    h.update(f"{recipe_fingerprint()}|{pbf_path}|{len(graph.edges)}|{z}|".encode())
+    h.update(json.dumps(pairs, sort_keys=True, default=str).encode())
+    return h.hexdigest()
 
 
 def build_zoom_layers(
@@ -302,6 +311,17 @@ def build_zoom_layers(
             k = min(k, max_pairs)
         pairs = sample_od_pairs(anchors_by_zoom[z], z, road_graph, k_pairs=k, scale=scale)
 
+        # Resume: a reclaimed attempt on the same host finds the zoom it already
+        # routed. Measured 2026-10-12: the US z2-z4 build was killed three times
+        # AFTER routing, and each retry spent ~3 h rerouting identical pairs.
+        sbs_path = out / f"sbs_z{z}.json"
+        key_path = out / f"sbs_z{z}.key"
+        sbs_key = _sbs_checkpoint_key(z, pairs, road_graph, pbf_path)
+        if sbs_path.exists() and key_path.exists() and key_path.read_text() == sbs_key:
+            sbs_by_zoom[z] = load_sbs(str(sbs_path))
+            log.info("  SBS for zoom %d loaded from checkpoint (%d edges)", z, len(sbs_by_zoom[z]))
+            continue
+
         if HAS_REQUESTS and graph_dir:
             # Stream: snap each route as it completes, retain none (see
             # route_and_accumulate for the 25 GB measurement behind this).
@@ -321,7 +341,8 @@ def build_zoom_layers(
             log.info("  Skipping routing (no requests lib or graphDir)")
 
         sbs_by_zoom[z] = normalize_sbs(bc)
-        save_sbs(sbs_by_zoom[z], str(out / f"sbs_z{z}.json"))
+        save_sbs(sbs_by_zoom[z], str(sbs_path))
+        key_path.write_text(sbs_key)
 
 
     # 4. Detect bypasses and rings
@@ -329,14 +350,21 @@ def build_zoom_layers(
     if heartbeat is not None:
         heartbeat("step 4")
     if HAS_REQUESTS and graph_dir:
+        # One index for steps 3 and 4; step 3's memo is useless here (other
+        # routes) and is the bulk of its size.
+        segment_index.clear_memo()
         bypass_flags = detect_bypasses(
             road_graph, cities_path, graph_dir, profile,
             heartbeat=heartbeat, check_cancel=check_cancel,
+            segment_index=segment_index,
         )
+        segment_index.clear_memo()
         ring_flags = detect_rings(
             road_graph, cities_path, graph_dir, profile,
             heartbeat=heartbeat, check_cancel=check_cancel,
+            segment_index=segment_index,
         )
+        segment_index.clear_memo()
     else:
         bypass_flags = {}
         ring_flags = {}
