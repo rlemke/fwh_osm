@@ -44,6 +44,7 @@ def routed_zooms(monkeypatch, tmp_path):
         "build_anchors": lambda *a, **k: [1],
         "save_anchors": lambda *a, **k: None,
         "SegmentIndex": lambda g: index,
+        "snap_workers_default": lambda: 0,  # snap in-process: the index is a stub
         "recipe_fingerprint": lambda: "recipe",
         "sample_od_pairs": sample,
         "probe_router": lambda coords, pairs, profile: probed.append(current["z"]),

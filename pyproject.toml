@@ -24,6 +24,7 @@ dependencies = [
     "PyYAML>=6.0",
     "psutil>=5.9",   # peak-RSS measurement for the adaptive osmium batcher
     "h3>=4.0",
+    "numpy>=1.24",  # the compact snap index (zoom_sbs.SegmentIndex)
 ]
 
 [project.optional-dependencies]

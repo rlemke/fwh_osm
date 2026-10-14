@@ -138,63 +138,160 @@ def min_pair_km(zoom_level: int, scale: float = 1.0) -> float:
 class SegmentIndex:
     """Grid-based spatial index for snapping route coordinates to logical edges.
 
-    Uses ~500m grid cells for efficient nearest-edge lookup.
+    Held as flat numpy arrays, not Python objects, for two reasons:
+
+    * size -- the object form (a list of 4-tuples per edge plus a dict of
+      (edge, segment) tuples per ~500 m cell) is most of a country builder's
+      resident memory;
+    * sharing -- ``save`` writes the arrays to a directory and ``load`` maps
+      them read-only, so the snap worker processes (``SnapPool``) share ONE copy
+      through the page cache. Forking the object form instead would copy it page
+      by page as each worker's reference counting touched it.
+
+    Arrays (S segments, E edges, C occupied cells):
+      seg_xy     (S, 4) float64  x1, y1, x2, y2 of each segment, edge by edge
+      seg_edge   (S,)   int32    row of the edge owning each segment
+      edge_start (E+1,) int64    first segment of each edge row
+      edge_ids   (E,)   int64    edge_id of each row
+      cell_keys  (C,)   int64    sorted cell keys
+      cell_start (C+1,) int64    first entry of each cell in cell_segs
+      cell_segs  (N,)   int32    segment ids, grouped by cell
     """
 
     CELL_SIZE = 0.005  # ~500m in degrees
+    _CELL_OFF = 1 << 19  # keeps cell coordinates positive (|lat|/0.005 <= 36,000)
+    _CELL_MUL = 1 << 20
+
+    ARRAYS = ("seg_xy", "seg_edge", "edge_start", "edge_ids", "cell_keys", "cell_start", "cell_segs")
 
     # Memo grid for snap_route: routes overlap heavily (every long route rides
     # the same backbone), so the same coordinate is snapped thousands of times.
     # 1e-4 deg ≈ 11 m at these latitudes, well inside the 50 m tolerance.
     SNAP_MEMO_SCALE = 10_000
+    _MEMO_MUL = 4_000_000  # > the span of int(lat * SNAP_MEMO_SCALE)
 
-    # Entries kept in the snap memo before it is dropped and refilled. An entry
-    # is ~250 bytes, so this bounds the memo near 2.5 GB. Measured 2026-10-12:
-    # unbounded, on the US major-roads graph the builder reached ~40 GiB and the
-    # kernel killed it three times (each a 3-hour reroute after the reclaim).
+    # Entries kept in the snap memo before it is dropped and refilled. Measured
+    # 2026-10-12: unbounded, on the US major-roads graph the builder reached
+    # ~40 GiB and the kernel killed it three times (each a 3-hour reroute after
+    # the reclaim). SnapPool divides this between its workers.
     SNAP_MEMO_MAX = 10_000_000
 
-    def __init__(self, graph: RoadGraph) -> None:
-        self._graph = graph
-        self._grid: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
-        # grid cell → list of (edge_id, segment_index)
-        self._edge_segments: dict[int, list[tuple[float, float, float, float]]] = {}
-        self._snap_memo: dict[tuple[int, int], int] = {}
+    # Edges whose segment coordinates are kept as Python lists for the
+    # follow-the-edge loop (reading numpy scalars there is several times slower).
+    EDGE_CACHE_MAX = 100_000
+
+    def __init__(self, graph: RoadGraph | None = None, *, arrays: dict | None = None) -> None:
+        if arrays is None:
+            arrays = self._build_arrays(graph)
+        for name in self.ARRAYS:
+            setattr(self, "_" + name, arrays[name])
+        self._snap_memo: dict[int, int] = {}
+        self._edge_cache: dict[int, tuple[int, int, int, list]] = {}
         self.snap_hits = 0
         self.snap_misses = 0
         self.snap_sticky = 0
         self.memo_resets = 0
-        self._build_index()
+
+    # -- construction ---------------------------------------------------------
+
+    @classmethod
+    def _build_arrays(cls, graph) -> dict:
+        import itertools
+        from array import array
+
+        import numpy as np
+
+        flat = array("d")
+        npts = array("q")
+        ids = array("q")
+        for edge in graph.edges:
+            coords = edge.coords
+            ids.append(edge.edge_id)
+            npts.append(len(coords))
+            flat.extend(itertools.chain.from_iterable((c[0], c[1]) for c in coords))
+        pts = np.frombuffer(flat, dtype=np.float64).reshape(-1, 2) if len(flat) else np.zeros((0, 2))
+        npts_a = np.frombuffer(npts, dtype=np.int64) if len(npts) else np.zeros(0, np.int64)
+        edge_ids = np.frombuffer(ids, dtype=np.int64).copy() if len(ids) else np.zeros(0, np.int64)
+        nseg = np.maximum(npts_a - 1, 0)
+        edge_start = np.zeros(len(nseg) + 1, dtype=np.int64)
+        np.cumsum(nseg, out=edge_start[1:])
+        # A segment starts at every point except the last of its edge.
+        is_start = np.ones(len(pts), dtype=bool)
+        pend = np.cumsum(npts_a)
+        is_start[pend[npts_a > 0] - 1] = False
+        starts = np.flatnonzero(is_start)
+        seg_xy = np.ascontiguousarray(np.concatenate([pts[starts], pts[starts + 1]], axis=1))
+        seg_edge = np.repeat(np.arange(len(nseg), dtype=np.int32), nseg)
+
+        # Each segment goes into every cell its bounding box touches; a query
+        # searches the point's cell and its 8 neighbours. A cell is ~500 m (at
+        # least ~170 m of longitude at 70° N), so any segment within the 50 m
+        # tolerance of a point lies in one of those nine cells.
+        c = cls.CELL_SIZE
+        x1, y1, x2, y2 = seg_xy[:, 0], seg_xy[:, 1], seg_xy[:, 2], seg_xy[:, 3]
+        cx0 = np.floor(np.minimum(x1, x2) / c).astype(np.int64)
+        cx1 = np.floor(np.maximum(x1, x2) / c).astype(np.int64)
+        cy0 = np.floor(np.minimum(y1, y2) / c).astype(np.int64)
+        cy1 = np.floor(np.maximum(y1, y2) / c).astype(np.int64)
+        w = cx1 - cx0 + 1
+        n = w * (cy1 - cy0 + 1)
+        total = int(n.sum())
+        seg_rep = np.repeat(np.arange(len(seg_xy), dtype=np.int64), n)
+        k = np.arange(total, dtype=np.int64) - np.repeat(np.cumsum(n) - n, n)
+        wr = w[seg_rep]
+        keys = cls._cell_key_np(cx0[seg_rep] + k % wr, cy0[seg_rep] + k // wr)
+        del k, wr
+        order = np.argsort(keys, kind="stable")
+        keys = keys[order]
+        cell_segs = seg_rep[order].astype(np.int32)
+        del order, seg_rep
+        cell_keys, first = np.unique(keys, return_index=True)
+        cell_start = np.append(first, total).astype(np.int64)
+        return {
+            "seg_xy": seg_xy, "seg_edge": seg_edge, "edge_start": edge_start,
+            "edge_ids": edge_ids, "cell_keys": cell_keys, "cell_start": cell_start,
+            "cell_segs": cell_segs,
+        }
+
+    @classmethod
+    def _cell_key_np(cls, cx, cy):
+        return (cx + cls._CELL_OFF) * cls._CELL_MUL + (cy + cls._CELL_OFF)
+
+    def save(self, directory: str) -> None:
+        """Write the arrays to ``directory`` (one .npy each) for ``load``."""
+        import numpy as np
+
+        os.makedirs(directory, exist_ok=True)
+        for name in self.ARRAYS:
+            np.save(os.path.join(directory, name + ".npy"), getattr(self, "_" + name))
+
+    @classmethod
+    def load(cls, directory: str, mmap: bool = True) -> "SegmentIndex":
+        """An index over arrays ``save`` wrote; memory-mapped read-only by default."""
+        import numpy as np
+
+        mode = "r" if mmap else None
+        return cls(arrays={n: np.load(os.path.join(directory, n + ".npy"), mmap_mode=mode)
+                           for n in cls.ARRAYS})
+
+    @property
+    def nbytes(self) -> int:
+        return sum(int(getattr(self, "_" + n).nbytes) for n in self.ARRAYS)
+
+    @property
+    def segment_count(self) -> int:
+        return len(self._seg_xy)
 
     def clear_memo(self) -> None:
-        """Drop the snap memo (the grid index itself is kept)."""
+        """Drop the snap memo and edge cache (the grid index itself is kept)."""
         self._snap_memo = {}
+        self._edge_cache = {}
 
-    def _cell(self, lon: float, lat: float) -> tuple[int, int]:
-        return int(lon / self.CELL_SIZE), int(lat / self.CELL_SIZE)
+    # -- lookup ---------------------------------------------------------------
 
-    def _build_index(self) -> None:
-        for edge in self._graph.edges:
-            segs = []
-            for i in range(len(edge.coords) - 1):
-                lon1, lat1 = edge.coords[i]
-                lon2, lat2 = edge.coords[i + 1]
-                segs.append((lon1, lat1, lon2, lat2))
-
-                # Insert segment into all grid cells it touches
-                min_cx = int(min(lon1, lon2) / self.CELL_SIZE) - 1
-                max_cx = int(max(lon1, lon2) / self.CELL_SIZE) + 1
-                min_cy = int(min(lat1, lat2) / self.CELL_SIZE) - 1
-                max_cy = int(max(lat1, lat2) / self.CELL_SIZE) + 1
-
-                for cx in range(min_cx, max_cx + 1):
-                    for cy in range(min_cy, max_cy + 1):
-                        self._grid[(cx, cy)].append((edge.edge_id, i))
-
-            self._edge_segments[edge.edge_id] = segs
-
+    @staticmethod
     def _point_to_segment_dist_m(
-        self, px: float, py: float, x1: float, y1: float, x2: float, y2: float
+        px: float, py: float, x1: float, y1: float, x2: float, y2: float
     ) -> float:
         """Perpendicular distance from point to line segment in meters.
 
@@ -213,6 +310,58 @@ class SegmentIndex:
         proj_lon = x1 + t * (x2 - x1)
         proj_lat = y1 + t * (y2 - y1)
         return _haversine_m(px, py, proj_lon, proj_lat)
+
+    def _nearest_segment(self, lon: float, lat: float, tolerance_m: float) -> int:
+        """Global id of the nearest segment within ``tolerance_m``, or -1.
+
+        Vectorised form of ``_point_to_segment_dist_m`` over the nine cells."""
+        import numpy as np
+
+        keys_arr = self._cell_keys
+        if not len(keys_arr):
+            return -1
+        c = self.CELL_SIZE
+        cx, cy = math.floor(lon / c), math.floor(lat / c)
+        want = np.array([self._cell_key_np(cx + dx, cy + dy)
+                         for dx in (-1, 0, 1) for dy in (-1, 0, 1)], dtype=np.int64)
+        pos = np.searchsorted(keys_arr, want)
+        cs = self._cell_start
+        parts = []
+        for k, p in zip(want.tolist(), pos.tolist(), strict=True):
+            if p < len(keys_arr) and int(keys_arr[p]) == k:
+                parts.append(self._cell_segs[int(cs[p]):int(cs[p + 1])])
+        if not parts:
+            return -1
+        cand = np.concatenate(parts)
+        seg = self._seg_xy[cand]
+        x1, y1, x2, y2 = seg[:, 0], seg[:, 1], seg[:, 2], seg[:, 3]
+        cos_lat = math.cos(math.radians(lat))
+        dx = (x2 - x1) * cos_lat
+        dy = y2 - y1
+        den = dx * dx + dy * dy
+        num = (lon - x1) * cos_lat * dx + (lat - y1) * dy
+        t = np.clip(np.divide(num, den, out=np.zeros_like(num), where=den != 0), 0.0, 1.0)
+        plon = x1 + t * (x2 - x1)
+        plat = y1 + t * (y2 - y1)
+        # _haversine_m, vectorised
+        p1, p2 = math.radians(lat), np.radians(plat)
+        a = (np.sin((p2 - p1) / 2) ** 2
+             + math.cos(p1) * np.cos(p2) * np.sin(np.radians(plon - lon) / 2) ** 2)
+        d = 6_371_000 * 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+        j = int(np.argmin(d))
+        return int(cand[j]) if d[j] < tolerance_m else -1
+
+    def _edge_of(self, seg: int) -> tuple[int, int, int, list]:
+        """(first segment, end segment, edge_id, segment coords) of ``seg``'s edge."""
+        row = int(self._seg_edge[seg])
+        hit = self._edge_cache.get(row)
+        if hit is None:
+            lo, hi = int(self._edge_start[row]), int(self._edge_start[row + 1])
+            hit = (lo, hi, int(self._edge_ids[row]), self._seg_xy[lo:hi].tolist())
+            if len(self._edge_cache) >= self.EDGE_CACHE_MAX:
+                self._edge_cache = {}
+            self._edge_cache[row] = hit
+        return hit
 
     # Interpolation step along a route before snapping, in metres.
     DENSIFY_STEP_M: float = 20.0
@@ -260,19 +409,19 @@ class SegmentIndex:
         segment distances instead; the grid search runs at junctions."""
         matched_edges: set[int] = set()
         memo = self._snap_memo
-        scale = self.SNAP_MEMO_SCALE
-        last_key: tuple[int, int] | None = None
-        cur_eid, cur_seg = -1, -1
+        scale, mul = self.SNAP_MEMO_SCALE, self._MEMO_MUL
+        last_key: int | None = None
+        cur: tuple[int, int, int, list] | None = None
+        cur_seg = -1
         sticky_m, window = self.STICKY_M, self.STICKY_WINDOW
         dist = self._point_to_segment_dist_m
 
-        for coord in self.densify(route_coords):
-            lon, lat = coord[0], coord[1]
-            if cur_eid >= 0:
-                segs = self._edge_segments[cur_eid]
+        for lon, lat in self.densify(route_coords):
+            if cur is not None:
+                lo, hi, _eid, xy = cur
                 best_i, best_d = -1, sticky_m
-                for i in range(max(0, cur_seg - window), min(len(segs), cur_seg + window + 1)):
-                    x1, y1, x2, y2 = segs[i]
+                for i in range(max(lo, cur_seg - window), min(hi, cur_seg + window + 1)):
+                    x1, y1, x2, y2 = xy[i - lo]
                     d = dist(lon, lat, x1, y1, x2, y2)
                     if d <= best_d:
                         best_i, best_d = i, d
@@ -280,45 +429,117 @@ class SegmentIndex:
                     cur_seg = best_i
                     self.snap_sticky += 1
                     continue
-            key = (int(lon * scale), int(lat * scale))
+            key = int(lon * scale) * mul + int(lat * scale)
             if key == last_key:
                 continue
             last_key = key
-            hit = memo.get(key)
-            if hit is not None:
+            seg = memo.get(key)
+            if seg is not None:
                 self.snap_hits += 1
-                cur_eid, cur_seg = hit
-                if cur_eid >= 0:
-                    matched_edges.add(cur_eid)
-                continue
-            self.snap_misses += 1
-            cx, cy = self._cell(lon, lat)
-
-            best_dist = tolerance_m
-            best_eid, best_seg = -1, -1
-
-            # Check surrounding cells
-            for dcx in range(-1, 2):
-                for dcy in range(-1, 2):
-                    for eid, seg_idx in self._grid.get((cx + dcx, cy + dcy), []):
-                        segs = self._edge_segments.get(eid)
-                        if segs is None or seg_idx >= len(segs):
-                            continue
-                        x1, y1, x2, y2 = segs[seg_idx]
-                        d = dist(lon, lat, x1, y1, x2, y2)
-                        if d < best_dist:
-                            best_dist = d
-                            best_eid, best_seg = eid, seg_idx
-
-            if len(memo) >= self.SNAP_MEMO_MAX:
-                memo = self._snap_memo = {}
-                self.memo_resets += 1
-            memo[key] = (best_eid, best_seg)
-            cur_eid, cur_seg = best_eid, best_seg
-            if best_eid >= 0:
-                matched_edges.add(best_eid)
+            else:
+                self.snap_misses += 1
+                seg = self._nearest_segment(lon, lat, tolerance_m)
+                if len(memo) >= self.SNAP_MEMO_MAX:
+                    memo = self._snap_memo = {}
+                    self.memo_resets += 1
+                memo[key] = seg
+            if seg >= 0:
+                cur = self._edge_of(seg)
+                cur_seg = seg
+                matched_edges.add(cur[2])
+            else:
+                cur, cur_seg = None, -1
 
         return matched_edges
+
+
+# -- parallel snapping ---------------------------------------------------------
+
+_WORKER_INDEX: "SegmentIndex | None" = None
+
+
+def _snap_worker_init(index_dir: str, memo_max: int) -> None:
+    global _WORKER_INDEX
+    _WORKER_INDEX = SegmentIndex.load(index_dir)
+    _WORKER_INDEX.SNAP_MEMO_MAX = memo_max
+
+
+def _snap_worker(coords: list[list[float]]) -> tuple[list[int], int, int, int]:
+    """(edge ids, memo hits, misses, sticky) for one route, in a pool worker."""
+    idx = _WORKER_INDEX
+    assert idx is not None, "snap worker used before its initializer ran"
+    h, m, s = idx.snap_hits, idx.snap_misses, idx.snap_sticky
+    eids = idx.snap_route(coords)
+    return list(eids), idx.snap_hits - h, idx.snap_misses - m, idx.snap_sticky - s
+
+
+def snap_workers_default() -> int:
+    """Worker processes for SnapPool: ``FW_ZOOM_SNAP_WORKERS``, else cores - 2,
+    at most 8. 0 or 1 snaps in-process (no pool)."""
+    raw = os.environ.get("FW_ZOOM_SNAP_WORKERS", "").strip()
+    if raw:
+        return max(0, int(raw))
+    return max(1, min(8, (os.cpu_count() or 2) - 2))
+
+
+class SnapPool:
+    """Snap routes in worker processes sharing one memory-mapped SegmentIndex.
+
+    Measured 2026-10-14 on the US major-roads graph: routing 15,317 z3+z4 pairs
+    took 2 h 30 m with GraphHopper at ~0% CPU and the builder at 100% of ONE
+    core -- the snap, not the router, was the whole cost.
+
+    Workers are SPAWNED, not forked: the runner process has threads (heartbeat,
+    the routing pool, the Mongo client), and a fork can copy a lock held by one
+    of them. The index goes to ``work_dir`` once and every worker maps it, so the
+    pool adds each worker's memo (SNAP_MEMO_MAX split between them) and an
+    interpreter, not a copy of the index.
+
+    Measured 2026-10-14 on Texas (457k edges, 3.66M segments, 400 z4 routes):
+    the object index snapped 277 routes/min and built in 9 s; this array index
+    snaps 636/min in-process (identical edges on all 400 routes) and builds in
+    1.1 s; 8 workers snap 3,300/min.
+
+    ⚠️ Results are not bit-identical to an in-process run, and never were. The
+    memo answers for an ~11 m cell with whatever the FIRST point in it matched,
+    so at a junction it depends on which routes came before -- one process
+    snapping the same 400 routes in reverse order differs on 461 of 224,218
+    route-edges. Eight workers each see a different order: 341 differ. Same
+    noise, not a new error.
+    """
+
+    def __init__(self, index: SegmentIndex, workers: int, work_dir: str) -> None:
+        import multiprocessing
+        import shutil
+        import tempfile
+        from concurrent.futures import ProcessPoolExecutor
+
+        self.workers = workers
+        self._rmtree = shutil.rmtree
+        self.dir = tempfile.mkdtemp(prefix="snap-index-", dir=work_dir or None)
+        index.save(self.dir)
+        memo_max = max(10_000, SegmentIndex.SNAP_MEMO_MAX // max(1, workers))
+        self._pool = ProcessPoolExecutor(
+            max_workers=workers,
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=_snap_worker_init,
+            initargs=(self.dir, memo_max),
+        )
+        log.info("SnapPool: %d workers over a %.0f MB index (%d segments) in %s",
+                 workers, index.nbytes / 1e6, index.segment_count, self.dir)
+
+    def submit(self, coords: list[list[float]]):
+        return self._pool.submit(_snap_worker, coords)
+
+    def close(self, cancel: bool = False) -> None:
+        self._pool.shutdown(wait=not cancel, cancel_futures=cancel)
+        self._rmtree(self.dir, ignore_errors=True)
+
+    def __enter__(self) -> "SnapPool":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close(cancel=exc_type is not None)
 
 
 def build_anchors(
@@ -896,6 +1117,7 @@ def route_and_accumulate(
     heartbeat: Callable[[str], None] | None = None,
     check_cancel: Callable[[], None] | None = None,
     submit_window: int = 4096,
+    snapper: "SnapPool | None" = None,
 ) -> tuple[dict[int, int], int]:
     """Route OD pairs and snap each route to logical edges AS IT COMPLETES.
 
@@ -907,6 +1129,10 @@ def route_and_accumulate(
     the kernel OOM-killed the process at 25.5 GB resident after 59,000 routes.
     Here nothing is kept past the snap, and at most ``submit_window`` futures
     are outstanding, so peak memory is the graph plus what is in flight.
+
+    With ``snapper`` the snap runs in its worker processes: a completed route
+    is handed to the pool and its votes are added when the worker returns, with
+    at most ``4 * snapper.workers`` routes waiting so memory stays bounded.
 
     Returns ``(votes, routed_count)``.
     """
@@ -922,6 +1148,32 @@ def route_and_accumulate(
     pair_of: dict = {}
     witness: list[tuple[int, int]] = []  # one pair that routed: proof of the region
     pulse = _Pulse()
+    snapping: set = set()
+    snapped = 0
+    stats = [0, 0, 0]  # memo hits, misses, sticky -- from the workers
+
+    def _add_snap(sfut) -> None:
+        nonlocal snapped
+        eids, h, m, st = sfut.result()  # a worker's exception is a code error: raise
+        for eid in eids:
+            bc[eid] += 1
+        stats[0] += h
+        stats[1] += m
+        stats[2] += st
+        snapped += 1
+
+    def _drain(limit: int) -> None:
+        """Collect finished snaps; block until at most ``limit`` are outstanding."""
+        from concurrent.futures import FIRST_COMPLETED, wait
+
+        for sfut in [f for f in snapping if f.done()]:
+            snapping.discard(sfut)
+            _add_snap(sfut)
+        while len(snapping) > limit:
+            finished, _ = wait(snapping, return_when=FIRST_COMPLETED)
+            for sfut in finished:
+                snapping.discard(sfut)
+                _add_snap(sfut)
 
     def _consume(fut) -> None:
         nonlocal routed, done
@@ -941,11 +1193,21 @@ def route_and_accumulate(
             routed += 1
             if not witness and pair is not None:
                 witness.append(pair)
-            for eid in segment_index.snap_route(coords):
-                bc[eid] += 1
+            if snapper is not None:
+                snapping.add(snapper.submit(coords))
+            else:
+                for eid in segment_index.snap_route(coords):
+                    bc[eid] += 1
+        if snapper is not None:
+            _drain(4 * snapper.workers)
         if done % 1000 == 0:
-            log.info("Routed+snapped %d / %d pairs (memo hits %d, misses %d)", done, total,
-                     segment_index.snap_hits, segment_index.snap_misses)
+            if snapper is not None:
+                log.info("Routed %d / %d pairs, snapped %d (memo hits %d, misses %d, "
+                         "on-edge %d; %d workers)", done, total, snapped, stats[0], stats[1],
+                         stats[2], snapper.workers)
+            else:
+                log.info("Routed+snapped %d / %d pairs (memo hits %d, misses %d)", done, total,
+                         segment_index.snap_hits, segment_index.snap_misses)
         if pulse.due(done):
             if check_cancel is not None:
                 check_cancel()
@@ -966,8 +1228,12 @@ def route_and_accumulate(
                     _consume(finished)
             for finished in as_completed(pending):
                 _consume(finished)
+            if snapper is not None:
+                _drain(0)
         except BaseException:
             pool.shutdown(wait=False, cancel_futures=True)
+            for sfut in snapping:
+                sfut.cancel()
             raise
 
     log.info("Completed routing: %d / %d pairs succeeded", routed, total)

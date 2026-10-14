@@ -19,10 +19,10 @@ log = logging.getLogger(__name__)
 
 from facetwork.config import get_output_base
 
+from ...tools._osm_tools.cancellation import HandlerCancelled
 from ..combined.combined_handler import combined_scan
 from ..combined.plugin_base import plugin_output
 from ..shared._output import ensure_dir, open_output, read_storage_json
-from ...tools._osm_tools.cancellation import HandlerCancelled
 
 _LOCAL_OUTPUT = get_output_base()
 
@@ -37,7 +37,9 @@ from .zoom_sbs import (
     DEFAULT_K_PAIRS,
     HAS_REQUESTS,
     SegmentIndex,
+    SnapPool,
     build_anchors,
+    load_sbs,
     min_pair_km,
     normalize_sbs,
     probe_router,
@@ -45,8 +47,8 @@ from .zoom_sbs import (
     route_and_accumulate,
     sample_od_pairs,
     save_anchors,
-    load_sbs,
     save_sbs,
+    snap_workers_default,
 )
 from .zoom_selection import (
     build_cell_budgets,
@@ -298,57 +300,70 @@ def build_zoom_layers(
                 break
         probe_router(road_graph.node_coords, probe_pairs, profile)
 
-    # Every zoom routes its own cities, z7 included. z7 used to REUSE z6's SBS,
-    # so its 5k+ cities (the z7 tier) were never routed between: on the map they
-    # sat unconnected while every other tier's routes ran city to city.
-    for z in range(2, 8):
-        if z > route_max_zoom:
-            log.info("  SBS for zoom %d skipped (route_max_zoom=%d)", z, route_max_zoom)
-            sbs_by_zoom[z] = {}
-            continue
-        log.info("  SBS for zoom %d", z)
-        if check_cancel is not None:
-            check_cancel()
-        if heartbeat is not None:
-            heartbeat(f"step 3: SBS zoom {z}")
-        k = DEFAULT_K_PAIRS.get(z, 5_000)
-        if max_pairs > 0:
-            k = min(k, max_pairs)
-        pairs = sample_od_pairs(anchors_by_zoom[z], z, road_graph, k_pairs=k, scale=scale)
+    # One snap pool for every zoom: its workers map the index once and keep it
+    # (see SnapPool for the measurement behind it).
+    snap_workers = snap_workers_default() if (HAS_REQUESTS and graph_dir) else 0
+    snapper = SnapPool(segment_index, snap_workers, str(out)) if snap_workers >= 2 else None
+    try:
+        # Every zoom routes its own cities, z7 included. z7 used to REUSE z6's SBS,
+        # so its 5k+ cities (the z7 tier) were never routed between: on the map they
+        # sat unconnected while every other tier's routes ran city to city.
+        for z in range(2, 8):
+            if z > route_max_zoom:
+                log.info("  SBS for zoom %d skipped (route_max_zoom=%d)", z, route_max_zoom)
+                sbs_by_zoom[z] = {}
+                continue
+            log.info("  SBS for zoom %d", z)
+            if check_cancel is not None:
+                check_cancel()
+            if heartbeat is not None:
+                heartbeat(f"step 3: SBS zoom {z}")
+            k = DEFAULT_K_PAIRS.get(z, 5_000)
+            if max_pairs > 0:
+                k = min(k, max_pairs)
+            pairs = sample_od_pairs(anchors_by_zoom[z], z, road_graph, k_pairs=k, scale=scale)
 
-        # Resume: a reclaimed attempt on the same host finds the zoom it already
-        # routed. Measured 2026-10-12: the US z2-z4 build was killed three times
-        # AFTER routing, and each retry spent ~3 h rerouting identical pairs.
-        sbs_path = out / f"sbs_z{z}.json"
-        key_path = out / f"sbs_z{z}.key"
-        sbs_key = _sbs_checkpoint_key(z, pairs, road_graph, pbf_path)
-        if sbs_path.exists() and key_path.exists() and key_path.read_text() == sbs_key:
-            sbs_by_zoom[z] = load_sbs(str(sbs_path))
-            log.info("  SBS for zoom %d loaded from checkpoint (%d edges)", z, len(sbs_by_zoom[z]))
-            continue
+            # Resume: a reclaimed attempt on the same host finds the zoom it already
+            # routed. Measured 2026-10-12: the US z2-z4 build was killed three times
+            # AFTER routing, and each retry spent ~3 h rerouting identical pairs.
+            sbs_path = out / f"sbs_z{z}.json"
+            key_path = out / f"sbs_z{z}.key"
+            sbs_key = _sbs_checkpoint_key(z, pairs, road_graph, pbf_path)
+            if sbs_path.exists() and key_path.exists() and key_path.read_text() == sbs_key:
+                sbs_by_zoom[z] = load_sbs(str(sbs_path))
+                log.info("  SBS for zoom %d loaded from checkpoint (%d edges)", z, len(sbs_by_zoom[z]))
+                continue
 
-        if HAS_REQUESTS and graph_dir:
-            # Stream: snap each route as it completes, retain none (see
-            # route_and_accumulate for the 25 GB measurement behind this).
-            bc, routed = route_and_accumulate(
-                pairs,
-                road_graph.node_coords,
-                graph_dir,
-                profile,
-                segment_index,
-                max_concurrent,
-                heartbeat=heartbeat,
-                check_cancel=check_cancel,
-            )
-            total_route_count += routed
-        else:
-            bc = {}
-            log.info("  Skipping routing (no requests lib or graphDir)")
+            if HAS_REQUESTS and graph_dir:
+                # Stream: snap each route as it completes, retain none (see
+                # route_and_accumulate for the 25 GB measurement behind this).
+                bc, routed = route_and_accumulate(
+                    pairs,
+                    road_graph.node_coords,
+                    graph_dir,
+                    profile,
+                    segment_index,
+                    max_concurrent,
+                    heartbeat=heartbeat,
+                    check_cancel=check_cancel,
+                    snapper=snapper,
+                )
+                total_route_count += routed
+            else:
+                bc = {}
+                log.info("  Skipping routing (no requests lib or graphDir)")
 
-        sbs_by_zoom[z] = normalize_sbs(bc)
-        save_sbs(sbs_by_zoom[z], str(sbs_path))
-        key_path.write_text(sbs_key)
-
+            sbs_by_zoom[z] = normalize_sbs(bc)
+            save_sbs(sbs_by_zoom[z], str(sbs_path))
+            key_path.write_text(sbs_key)
+    except BaseException:
+        if snapper is not None:
+            snapper.close(cancel=True)
+            snapper = None
+        raise
+    finally:
+        if snapper is not None:
+            snapper.close()
 
     # 4. Detect bypasses and rings
     log.info("Step 4: Detecting bypasses and rings")

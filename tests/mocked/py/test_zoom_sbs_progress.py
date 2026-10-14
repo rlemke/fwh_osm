@@ -144,3 +144,59 @@ def test_a_raising_route_call_fails_the_run_instead_of_scoring_zero(monkeypatch)
     idx = zoom_sbs.SegmentIndex(_graph())
     with pytest.raises(TypeError, match="wrong signature"):
         zoom_sbs.route_and_accumulate([(1, 2), (2, 3)], {}, "g", "car", idx, max_concurrent=2)
+
+
+def test_saved_index_maps_back_and_snaps_the_same(tmp_path):
+    """The workers' memory-mapped copy matches the index it was saved from."""
+    idx = zoom_sbs.SegmentIndex(_graph())
+    idx.save(str(tmp_path))
+    mapped = zoom_sbs.SegmentIndex.load(str(tmp_path))
+    route = _route_along_10() + [[-122.20, 47.60 + i * 0.005] for i in range(21)]
+    assert mapped.snap_route(route) == idx.snap_route(route) == {10, 11}
+    assert mapped.segment_count == idx.segment_count == 4
+
+
+def test_index_handles_edges_without_segments():
+    g = _graph()
+    g.add_edge(_edge(12, 3, 3, [(-122.20, 47.70)]))  # one point: no segment
+    idx = zoom_sbs.SegmentIndex(g)
+    assert idx.segment_count == 4
+    assert idx.snap_route(_route_along_10()) == {10}
+    assert zoom_sbs.SegmentIndex(RoadGraph()).snap_route(_route_along_10()) == set()
+
+
+def test_snap_pool_matches_in_process(tmp_path):
+    """Spawned workers return the edges an in-process snap does, and their votes
+    land in route_and_accumulate."""
+    idx = zoom_sbs.SegmentIndex(_graph())
+    # off the shared node: AT a junction either edge is right, and which one the
+    # memo returns depends on what it saw first (see SnapPool)
+    routes = [_route_along_10()[:-2], [[-122.20, 47.61 + i * 0.004] for i in range(21)]]
+    with zoom_sbs.SnapPool(idx, 2, str(tmp_path)) as pool:
+        got = [set(pool.submit(r).result()[0]) for r in routes]
+        assert got == [idx.snap_route(r) for r in routes] == [{10}, {11}]
+        index_dir = pool.dir
+    assert not Path(index_dir).exists(), "the pool removes its index copy"
+
+
+def test_snap_workers_default_reads_env(monkeypatch):
+    monkeypatch.setenv("FW_ZOOM_SNAP_WORKERS", "3")
+    assert zoom_sbs.snap_workers_default() == 3
+    monkeypatch.setenv("FW_ZOOM_SNAP_WORKERS", "0")
+    assert zoom_sbs.snap_workers_default() == 0
+    monkeypatch.delenv("FW_ZOOM_SNAP_WORKERS")
+    assert 1 <= zoom_sbs.snap_workers_default() <= 8
+
+
+def test_route_and_accumulate_with_a_snap_pool_counts_every_route(monkeypatch, tmp_path):
+    monkeypatch.setattr(zoom_sbs, "HAS_REQUESTS", True)
+    monkeypatch.setattr(
+        zoom_sbs, "_route_pair", lambda a, b, nc, gd, pr, tally=None, detail=None: _route_along_10()
+    )
+    idx = zoom_sbs.SegmentIndex(_graph())
+    with zoom_sbs.SnapPool(idx, 2, str(tmp_path)) as pool:
+        bc, routed = zoom_sbs.route_and_accumulate(
+            [(i, i + 1) for i in range(9)], {}, "g", "car", idx, max_concurrent=2,
+            submit_window=3, snapper=pool,
+        )
+    assert routed == 9 and bc == {10: 9}
