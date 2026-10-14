@@ -18,7 +18,7 @@ try:
 except ImportError:
     HAS_H3 = False
 
-from .zoom_graph import FC_SCORES, RoadGraph, _haversine_m
+from .zoom_graph import FC_SCORES, FERRY_FC, RoadGraph, _haversine_m
 
 # Weight schedule (spec §7)
 W_SB: dict[int, float] = {2: 0.75, 3: 0.70, 4: 0.65, 5: 0.60, 6: 0.55, 7: 0.50}
@@ -901,12 +901,17 @@ def prune_layers(
                 f"Got {type(edges).__name__} for key {z}. For the {{edge_id: min_zoom}} "
                 "map that enforce_monotonic_reveal returns, call prune_assignments."
             )
+    # A ferry is only ever selected because routes rode it, and its port roads
+    # are service/unclassified -- below the graph's classes -- so in the graph
+    # it touches no road and is always its own "orphan" component. Protected
+    # like backbone repair: dropping it would cut the crossing it exists for.
+    ferries = {e.edge_id for e in graph.edges if e.fc == FERRY_FC}
     doomed: set[int] = set()
     pruned: dict[int, set[int]] = {}
     for z in sorted(layers, reverse=True):
         selected = layers[z]
         kept, _n, _km = prune_fragments(
-            graph, selected, z, protected=backbone_by_zoom.get(z, set())
+            graph, selected, z, protected=backbone_by_zoom.get(z, set()) | (ferries & selected)
         )
         doomed |= selected - kept
         pruned[z] = selected - doomed

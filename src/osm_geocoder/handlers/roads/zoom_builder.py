@@ -31,7 +31,7 @@ from .zoom_detection import (
     save_bypass_flags,
     save_ring_flags,
 )
-from .zoom_graph import HAS_OSMIUM, RoadGraph, build_logical_graph
+from .zoom_graph import FERRY_FC, HAS_OSMIUM, RoadGraph, build_logical_graph
 from .zoom_sbs import (
     DEFAULT_K_PAIRS,
     HAS_REQUESTS,
@@ -112,6 +112,10 @@ def recipe_fingerprint() -> str:
             # CONSTANTS, so a code-only change is invisible to it and every cached
             # layer would come back with the old behaviour.
             "prune_stage": "post-union-monotonic",
+            # Behaviour: car ferries enter the edge graph and are admitted
+            # where routed (step 7b). Cached layers built without them would
+            # come back with every crossing missing.
+            "ferries": "car-ferries-routed-only",
             # ⚠️ Behaviour again, and the same reason: the UNIT OF SELECTION
             # changed from the edge to the corridor, so a road is admitted whole
             # or deferred whole. Constants alone cannot see that, and every
@@ -398,6 +402,17 @@ def build_zoom_layers(
         ring_flags,
         backbone_out=backbone_by_zoom,
     )
+
+    # 7b. Ferries a zoom's routes rode. Class selection never admits one (no
+    # class, score 0 -- see zoom_graph.FERRY_FC), so a crossing appears exactly
+    # where routes between this zoom's cities take it, and nowhere else.
+    ferry_ids = {e.edge_id for e in road_graph.edges if getattr(e, "fc", None) == FERRY_FC}
+    if ferry_ids:
+        for z, sel in selected_by_zoom.items():
+            rode = {eid for eid in ferry_ids if sbs_by_zoom.get(z, {}).get(eid, 0.0) > 0.0}
+            if rode:
+                sel |= rode
+                log.info("Zoom %d: %d routed ferry edge(s) admitted", z, len(rode))
 
     # 8. Enforce monotonic reveal → assign minZoom
     log.info("Step 8: Enforcing monotonic reveal")

@@ -200,6 +200,7 @@ class TestFCScoring:
             "service",
             "track",
             "path",
+            "ferry",
         }
         assert set(FC_SCORES.keys()) == expected
 

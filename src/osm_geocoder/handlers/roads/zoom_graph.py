@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from facetwork.runtime.storage import localize
 
 from ..shared._output import ensure_dir, open_output, read_storage_json
+from ..shared.pbf_convert import ferry_access
 from ..shared.scan_progress import ScanProgressTracker, get_file_size
 
 log = logging.getLogger(__name__)
@@ -37,7 +38,17 @@ FC_SCORES: dict[str, float] = {
     "service": 0.08,
     "track": 0.04,
     "path": 0.02,
+    # A ferry is never admitted on class: it has none, and a score would let a
+    # crossing nobody routes over fill a cell budget. It appears only where a
+    # zoom's routes rode it (zoom_builder step 7b).
+    "ferry": 0.0,
 }
+
+# Car ferries, read with GraphHopper's own access rule (see
+# _osm_tools.ferry_access.is_car_ferry) so the edge graph holds exactly the
+# crossings the router can take. Without them a route over a ferry left a gap
+# across the water, and Britain/Ireland read as unconnected islands.
+FERRY_FC = "ferry"
 
 # Road class mapping from OSM highway tag
 HIGHWAY_TO_FC: dict[str, str] = {
@@ -70,6 +81,7 @@ ROUTABLE_FCS = {
     "secondary",
     "tertiary",
     "unclassified",
+    FERRY_FC,
 }
 
 PAVED_SURFACES = {
@@ -403,7 +415,7 @@ class TopologyHandler(osmium.SimpleHandler if HAS_OSMIUM else object):
             self._progress.tick("way")
         tags = self._tags_to_dict(w.tags)
         highway = tags.get("highway", "")
-        fc = _classify_fc(highway)
+        fc = FERRY_FC if not highway and ferry_access.is_car_ferry(tags) else _classify_fc(highway)
         if not fc or fc not in ROUTABLE_FCS:
             return
 
