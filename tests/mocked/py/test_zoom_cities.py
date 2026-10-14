@@ -105,3 +105,35 @@ def test_city_count_is_cities_not_anchors():
     src = Path(zoom_builder.__file__).read_text()
     assert '"city_count": city_count' in src
     assert '"city_count": len(anchors_by_zoom' not in src
+
+
+def test_a_cancelled_scan_propagates_and_writes_nothing(tmp_path, monkeypatch):
+    """Measured 2026-10-14 (US z2-z4): a rollout recreated the container mid-scan,
+    the graceful stop cancelled the handler, and the broad ``except`` turned the
+    cancel into "no cities" -- writing an EMPTY file into the deterministic work
+    dir. The reclaimed task landed on the same host, reused it, and routed
+    nothing: 0 cities, 0 routes, reported as a success."""
+    from osm_geocoder.tools._osm_tools.cancellation import HandlerCancelled
+
+    def cancelled(*a, **kw):
+        raise HandlerCancelled("task reclaimed")
+
+    monkeypatch.setattr(zoom_builder, "combined_scan", cancelled)
+    dest = tmp_path / "cities.geojson"
+    with pytest.raises(HandlerCancelled):
+        zoom_builder._ensure_cities_file("wa.osm.pbf", str(dest))
+    assert not dest.exists()
+
+
+def test_an_existing_empty_file_is_rescanned(tmp_path, monkeypatch):
+    """An empty cities file is a degraded run's leftover, never a result worth
+    reusing: a later execution in the same work dir scans again."""
+    dest = tmp_path / "cities.geojson"
+    dest.write_text(json.dumps({"type": "FeatureCollection", "features": []}))
+    src = tmp_path / "pop.geojson"
+    src.write_text(json.dumps(_places(4)))
+    monkeypatch.setattr(
+        zoom_builder, "combined_scan",
+        lambda pbf, cats, **kw: _Scan({"population": {"output_path": str(src)}}),
+    )
+    assert zoom_builder._ensure_cities_file("wa.osm.pbf", str(dest)) == 4

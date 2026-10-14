@@ -22,6 +22,7 @@ from facetwork.config import get_output_base
 from ..combined.combined_handler import combined_scan
 from ..combined.plugin_base import plugin_output
 from ..shared._output import ensure_dir, open_output, read_storage_json
+from ...tools._osm_tools.cancellation import HandlerCancelled
 
 _LOCAL_OUTPUT = get_output_base()
 
@@ -479,12 +480,16 @@ def _ensure_cities_file(
     usable (topology-only) run. It returns 0 and says so loudly rather than
     leaving the caller to infer it from an anchor log line.
     """
+    # An EMPTY file is a degraded run's leftover, never a result: the work dir
+    # is deterministic so a reclaim can resume, and reusing an empty file there
+    # routed nothing (US z2-z4, 2026-10-14). Only a non-empty file short-circuits.
     if Path(cities_path).exists():
         try:
-            existing = read_storage_json(cities_path)
-            return len(existing.get("features", []))
+            n = len(read_storage_json(cities_path).get("features", []))
         except (OSError, json.JSONDecodeError):
-            return 0
+            n = 0
+        if n:
+            return n
 
     features: list[dict] = []
     try:
@@ -500,6 +505,10 @@ def _ensure_cities_file(
         src, _ = plugin_output(scan.results.get("population"))
         if src:
             features = read_storage_json(src).get("features", []) or []
+    except HandlerCancelled:
+        # A cancel is a STOP, not a failed extraction: writing the empty file
+        # here is what a reclaimed task on the same host later reused.
+        raise
     except Exception as exc:  # noqa: BLE001 — degradation, reported below
         log.warning("Could not extract cities from %s: %s", pbf_path, exc)
 
