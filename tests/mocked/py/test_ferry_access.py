@@ -171,3 +171,45 @@ def test_recipe_fingerprint_names_the_ferry_behaviour():
     from osm_geocoder.handlers.roads import zoom_builder
 
     assert '"ferries"' in inspect.getsource(zoom_builder.recipe_fingerprint)
+
+
+# A short crossing: both terminals lie inside each other's search square. The
+# cut polygon used to be one MultiPolygon of overlapping squares, and osmium's
+# point-in-polygon counts ring crossings, so the overlap was OUTSIDE the cut and
+# neither terminal's port road was found (measured: Lymington-Yarmouth,
+# Portsmouth-Fishbourne, 3,402 of 5,803 European ends).
+SHORT_NODES = {
+    1: (0.000, 0.000), 2: (0.010, 0.000),        # mainland primary
+    3: (0.010, 0.002),                           # terminal a (service 2-3)
+    4: (0.010, 0.012),                           # terminal b, ~1.1 km across
+    5: (0.010, 0.014), 6: (0.020, 0.014),        # island primary
+}
+SHORT_WAYS = {
+    201: ([1, 2], {"highway": "primary"}),
+    202: ([2, 3], {"highway": "service"}),
+    203: ([3, 4], {"route": "ferry", "motor_vehicle": "yes"}),
+    204: ([4, 5], {"highway": "service"}),
+    205: ([5, 6], {"highway": "primary"}),
+}
+
+
+@needs_osmium_cli
+def test_short_crossing_with_overlapping_search_areas(tmp_path):
+    src = tmp_path / "src.osm.pbf"
+    w = osmium.SimpleWriter(str(src))
+    try:
+        for nid, (lon, lat) in SHORT_NODES.items():
+            w.add_node(osmium.osm.mutable.Node(id=nid, location=(lon, lat), tags={}, version=1))
+        for wid, (refs, tags) in SHORT_WAYS.items():
+            w.add_way(osmium.osm.mutable.Way(id=wid, nodes=refs, tags=tags, version=1))
+    finally:
+        w.close()
+    filtered = tmp_path / "filtered.osm.pbf"
+    subprocess.run(
+        ["osmium", "tags-filter", "-o", str(filtered), str(src), "w/highway=primary", "w/route=ferry"],
+        check=True,
+    )
+    out = tmp_path / "out.osm.pbf"
+    s = fa.add_ferry_access(str(src), str(filtered), str(out), radius_km=3, work_dir=str(tmp_path / "w"))
+    assert s.ends_connected == 2 and s.ends_unreachable == 0
+    assert {202, 204} <= _way_ids(out)

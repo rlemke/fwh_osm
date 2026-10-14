@@ -122,15 +122,41 @@ def _ferry_ends(filtered_pbf: str):
     return h.ferries, h.ends, h.road_nodes
 
 
+CELL_DEG = 0.02  # ~2 km of latitude
+
+
 def _boxes_geojson(ends: dict[int, tuple[float, float]], radius_km: float, path: str) -> None:
-    """One MultiPolygon of a square around every end (overlaps are harmless)."""
+    """One MultiPolygon of DISJOINT rectangles covering a square around every end.
+
+    The squares must not overlap: osmium's point-in-polygon counts ring
+    crossings, so an area covered by two squares is OUTSIDE the cut. With one
+    square per end, both terminals of every short crossing lost their port
+    roads (measured: 3,402 of 5,803 European ends, Lymington among them). So
+    the squares are rasterised onto a grid and each row's runs of cells become
+    one rectangle."""
     dlat = radius_km / 111.32
-    polys = []
+    cells: set[tuple[int, int]] = set()
     for lon, lat in ends.values():
         dlon = dlat / max(0.05, math.cos(math.radians(lat)))
-        w, e = max(-180.0, lon - dlon), min(180.0, lon + dlon)
-        s, n = max(-90.0, lat - dlat), min(90.0, lat + dlat)
-        polys.append([[[w, s], [e, s], [e, n], [w, n], [w, s]]])
+        for row in range(math.floor((lat - dlat) / CELL_DEG), math.floor((lat + dlat) / CELL_DEG) + 1):
+            for col in range(math.floor((lon - dlon) / CELL_DEG), math.floor((lon + dlon) / CELL_DEG) + 1):
+                cells.add((row, col))
+    by_row: dict[int, list[int]] = defaultdict(list)
+    for row, col in cells:
+        by_row[row].append(col)
+    polys = []
+    for row, cols in by_row.items():
+        cols.sort()
+        start = prev = cols[0]
+        for col in cols[1:] + [None]:
+            if col is not None and col == prev + 1:
+                prev = col
+                continue
+            w, e = max(-180.0, start * CELL_DEG), min(180.0, (prev + 1) * CELL_DEG)
+            s, n = max(-90.0, row * CELL_DEG), min(90.0, (row + 1) * CELL_DEG)
+            polys.append([[[w, s], [e, s], [e, n], [w, n], [w, s]]])
+            if col is not None:
+                start = prev = col
     doc = {
         "type": "FeatureCollection",
         "features": [
