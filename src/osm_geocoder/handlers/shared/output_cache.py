@@ -56,11 +56,36 @@ def _stat_source(pbf_path: str) -> tuple[int, int]:
     """
     if not pbf_path:
         return (0, 0)
+    if "://" in pbf_path:
+        return _stat_remote(pbf_path)
     try:
         st = os.stat(pbf_path)
         return (st.st_size, st.st_mtime_ns)
     except OSError:
         return (0, 0)
+
+
+class _RemoteStatFailed(Exception):
+    """The source is remote and its identity could not be read."""
+
+
+def _stat_remote(path: str) -> tuple[int, int]:
+    """``(size, mtime_ns)`` of an object-store source, from the store.
+
+    ``os.stat`` cannot see an ``s3://`` path, and the ``(0, 0)`` fallback made
+    the key the PATH ALONE: a rebuild writing new zoom layers to the same keys
+    would have been answered with the previous build's tiles. A source that is
+    absent keys as ``(0, 0)`` like a local one (the caller decides what absent
+    means); one whose identity cannot be read raises, so the caller skips the
+    cache instead of trusting a path-only key.
+    """
+    try:
+        be = get_storage_backend(path)
+        if not be.exists(path):
+            return (0, 0)
+        return (int(be.getsize(path)), int(be.getmtime(path) * 1_000_000_000))
+    except Exception as exc:  # noqa: BLE001 - any store error: no trustworthy key
+        raise _RemoteStatFailed(f"{path}: {exc}") from exc
 
 
 def _version_key(
@@ -129,7 +154,13 @@ def cached_result(
     # Fold the source artifact's mtime into the key (robust to same-size
     # rebuilds).  If the file is absent, st falls back to (0, 0) — a miss
     # is fine, and the cache.get("size") proxy still applies.
-    stat_size, pbf_mtime_ns = _stat_source(pbf_path)
+    try:
+        stat_size, pbf_mtime_ns = _stat_source(pbf_path)
+    except _RemoteStatFailed as exc:
+        log.warning(
+            "output-cache: cannot identify %s for %s; not using the cache", exc, handler_name
+        )
+        return None
     if stat_size:
         pbf_size = stat_size
 
@@ -206,7 +237,10 @@ def save_result_meta(
         return
 
     # Mirror cached_result: fold source mtime (and on-disk size) into the key.
-    stat_size, pbf_mtime_ns = _stat_source(pbf_path)
+    try:
+        stat_size, pbf_mtime_ns = _stat_source(pbf_path)
+    except _RemoteStatFailed:
+        return  # cached_result would not trust this key either
     if stat_size:
         pbf_size = stat_size
 

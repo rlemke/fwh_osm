@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import socket
 import threading
 
 from ..shared._output import derive_output_path, uri_stem
@@ -22,6 +23,10 @@ log = logging.getLogger(__name__)
 
 NAMESPACE = "osm.Tiles"
 _HEARTBEAT_INTERVAL = 30.0
+
+
+def _is_remote(path: str) -> bool:
+    return "://" in path
 
 
 def _file_size(path: str) -> int:
@@ -106,12 +111,25 @@ def _make_build_handler(facet_name: str):
         from facetwork.runtime.storage import get_storage_backend, localize
 
         # A zoom band with no roads may not be written at all (measured
-        # 2026-10-03, Tokelau: "404 HeadObject" on a band file). Absent is the
-        # same fact as empty -- no tiles for this band -- not a failed map.
+        # 2026-10-03, Tokelau: "404 HeadObject" on a band file). Absent from
+        # the SHARED store is the same fact as empty -- no tiles for this band
+        # -- not a failed map.
         try:
             absent = not get_storage_backend(geojson_path).exists(geojson_path)
         except Exception:  # noqa: BLE001 - cannot tell: let localize report it
             absent = False
+        if absent and not _is_remote(geojson_path):
+            # Absent from THIS HOST's disk says nothing about the band: the
+            # builder writes every band, so the file is on whichever host built
+            # it. Measured 2026-10-13: the US z2-z4 tile steps were claimed by
+            # two other hosts, all three "succeeded" empty, and the map failed
+            # two steps later as "this region has no roads to map".
+            raise FileNotFoundError(
+                f"{facet_name}: {geojson_path} is not on this host "
+                f"({socket.gethostname()}). A local path is readable only where it "
+                "was written; give the producing step a remote output_dir (s3://) "
+                "so any host can tile it."
+            )
         if absent:
             if step_log:
                 step_log(f"{facet_name}: {geojson_path} does not exist -- no tiles for "

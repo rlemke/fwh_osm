@@ -7,6 +7,7 @@ under osm.Roads.ZoomBuilder.
 import json
 import logging
 import os
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -30,10 +31,43 @@ def _publish_dir(local_dir: str, remote_dir: str) -> int:
         for name in files:
             src = os.path.join(root, name)
             rel = os.path.relpath(src, local_dir).replace(os.sep, "/")
+            # Streamed: a country build's graph file alone is 1.5 GB.
             with open(src, "rb") as fh, be.open(remote_dir.rstrip("/") + "/" + rel, "wb") as out:
-                out.write(fh.read())
+                shutil.copyfileobj(fh, out, 16 * 1024 * 1024)
             n += 1
     return n
+
+
+def _resolve_layers_dir(output_dir: str) -> str:
+    """A RELATIVE output_dir names a place in the durable output store.
+
+    ``lz-country/us-z2-z4`` -> ``s3://.../osm-output/lz-country/us-z2-z4`` on a
+    fleet (remote storage), or a local directory under the output base on a
+    laptop. Absolute paths and URIs are used as given, so a caller can still
+    pin a host-local directory -- at the cost that only that host can read it.
+    """
+    if not output_dir or output_dir.startswith("/") or "://" in output_dir:
+        return output_dir
+    from ..shared._output import resolve_output_dir
+
+    return resolve_output_dir(output_dir.strip("/"))
+
+
+def _local_work_dir(remote_dir: str) -> str:
+    """The local directory a remote output_dir is built in.
+
+    Deterministic, not a fresh temp dir: the builder resumes routed zooms from
+    checkpoints in its output directory (sbs_z*.json), and a reclaimed task
+    landing back on this host must find them. Measured 2026-10-13: a retry
+    reloaded z2-z4 from checkpoints and skipped ~9 h of routing.
+    """
+    import tempfile
+
+    base = os.environ.get("FW_LOCAL_SCRATCH") or tempfile.gettempdir()
+    rel = remote_dir.split("://", 1)[1].strip("/")
+    path = os.path.join(base, "zoom-layers", rel)
+    os.makedirs(path, exist_ok=True)
+    return path
 from ..shared.output_cache import cached_result, save_result_meta, with_output_cache
 from .zoom_builder import (
     _empty_result,
@@ -541,10 +575,10 @@ def _make_build_zoom_layers_handler(facet_name: str):
         cache = payload.get("cache", {})
         gh_config = payload.get("graph", {})
         min_population = payload.get("min_population", 50000)
-        output_dir = payload.get(
+        output_dir = _resolve_layers_dir(payload.get(
             "output_dir",
             os.path.join(get_output_base(), "osm", "zoom-builder"),
-        )
+        ))
         max_concurrent = payload.get("max_concurrent", 16)
         route_max_zoom = int(payload.get("route_max_zoom", 7) or 7)
         if not 2 <= route_max_zoom <= 7:
@@ -590,12 +624,7 @@ def _make_build_zoom_layers_handler(facet_name: str):
         # happened to land back on the host that had it. So: build in local
         # scratch (the pipeline writes with local file APIs), upload, and hand
         # back the remote paths, which BuildVectorTiles localizes anywhere.
-        work_dir = output_dir
-        if _is_remote(output_dir):
-            import tempfile
-
-            work_dir = tempfile.mkdtemp(prefix="zoom-layers-",
-                                        dir=os.environ.get("FW_LOCAL_SCRATCH") or None)
+        work_dir = _local_work_dir(output_dir) if _is_remote(output_dir) else output_dir
         try:
             result, metrics = build_zoom_layers(
                 cache=cache,
@@ -616,8 +645,6 @@ def _make_build_zoom_layers_handler(facet_name: str):
                           for k, v in result.items()}
                 if step_log:
                     step_log(f"{facet_name}: uploaded {n} file(s) to {output_dir}")
-                import shutil
-
                 shutil.rmtree(work_dir, ignore_errors=True)
             if step_log:
                 # A run with no cities is WEAKER, not failed: anchors fall back

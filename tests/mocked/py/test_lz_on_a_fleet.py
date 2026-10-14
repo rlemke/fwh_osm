@@ -4,6 +4,12 @@
   steps other hosts claimed; a remote output_dir is now staged and uploaded.
 - An empty zoom band (no motorway -> empty z2) dead-lettered the tile step and
   failed the map; it now yields no tiles, and the viewer leaves the band out.
+
+2026-10-13 (US z2-z4): the layers were still on one host's scratch, the tile
+steps on two other hosts read "not here" as "empty band" and succeeded, and the
+map failed two steps later. A relative output_dir now means the shared store; a
+local path missing on this host is an error; the stage dir is stable so routed
+zooms resume; and a remote source's cache key is its real size and mtime.
 """
 
 from __future__ import annotations
@@ -77,11 +83,43 @@ def test_remote_output_dir_is_built_locally_then_uploaded(monkeypatch, tmp_path)
     assert rv["output_dir"] == "s3://bucket/lz/haiti"
     assert rv["csv_path"] == "s3://bucket/lz/haiti/segment_scores.csv"
     assert "s3://bucket/lz/haiti/roads_z2.geojson" in written
-    assert not [p for p in tmp_path.iterdir() if p.name.startswith("zoom-layers-")], "scratch cleaned"
+    assert not (tmp_path / "zoom-layers" / "bucket" / "lz" / "haiti").exists(), "scratch cleaned"
 
 
-def test_a_band_file_that_was_never_written_yields_no_tiles(tmp_path):
+def test_the_stage_dir_is_stable_so_a_retry_finds_its_checkpoints(monkeypatch, tmp_path):
+    monkeypatch.setenv("FW_LOCAL_SCRATCH", str(tmp_path))
+    a = Z._local_work_dir("s3://bucket/osm-output/lz-country/us-z2-z4")
+    (tmp_path / "zoom-layers" / "bucket" / "osm-output" / "lz-country" / "us-z2-z4" / "sbs_z2.json").write_text("{}")
+    b = Z._local_work_dir("s3://bucket/osm-output/lz-country/us-z2-z4")
+    assert a == b and os.path.exists(os.path.join(b, "sbs_z2.json"))
+
+
+def test_a_relative_output_dir_means_the_shared_store(monkeypatch):
+    import osm_geocoder.handlers.shared._output as O
+
+    monkeypatch.setattr(O, "resolve_output_dir", lambda cat, default_local="": f"s3://b/osm-output/{cat}")
+    assert Z._resolve_layers_dir("lz-country/us-z2-z4") == "s3://b/osm-output/lz-country/us-z2-z4"
+    assert Z._resolve_layers_dir("/scratch/output/x") == "/scratch/output/x"
+    assert Z._resolve_layers_dir("s3://b/x") == "s3://b/x"
+
+
+def test_a_local_band_missing_on_this_host_is_an_error_not_an_empty_band(tmp_path):
+    """The builder writes every band; absent HERE means built on another host."""
+    with pytest.raises(FileNotFoundError, match="not on this host"):
+        T.handle({"_facet_name": "osm.Tiles.BuildVectorTiles",
+                  "geojson_path": str(tmp_path / "roads_z2.geojson"),
+                  "layer_name": "x_roads_z2", "min_zoom": 2})
+
+
+def test_a_band_never_written_to_the_shared_store_yields_no_tiles(monkeypatch):
+    import facetwork.runtime.storage as st
+
+    class Missing:
+        def exists(self, path):
+            return False
+
+    monkeypatch.setattr(st, "get_storage_backend", lambda p=None: Missing())
     rv = T.handle({"_facet_name": "osm.Tiles.BuildVectorTiles",
-                   "geojson_path": str(tmp_path / "roads_z2.geojson"),
+                   "geojson_path": "s3://b/lz/tokelau/roads_z2.geojson",
                    "layer_name": "x_roads_z2", "min_zoom": 2})["result"]
     assert rv["output_path"] == "" and rv["format"] == "empty"
