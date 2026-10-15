@@ -72,7 +72,9 @@ from ..shared.output_cache import cached_result, save_result_meta, with_output_c
 from .zoom_builder import (
     _empty_result,
     build_zoom_layers,
+    plan_zoom_routing,
     recipe_fingerprint,
+    route_zoom_chunk,
 )
 from .zoom_detection import (
     detect_bypasses,
@@ -584,6 +586,9 @@ def _make_build_zoom_layers_handler(facet_name: str):
         if not 2 <= route_max_zoom <= 7:
             raise ValueError(f"route_max_zoom must be 2..7, got {route_max_zoom}")
         max_pairs = int(payload.get("max_pairs", 0) or 0)
+        # Votes written by RouteZoomChunk tasks; zooms they fully cover are merged
+        # instead of routed. Not part of the cache key: same layers either way.
+        chunk_vote_paths = [p for p in (payload.get("chunk_votes") or []) if p]
         step_log = payload.get("_step_log")
 
         # Everything that changes the OUTPUT must be in the key, not just the
@@ -636,6 +641,7 @@ def _make_build_zoom_layers_handler(facet_name: str):
                 check_cancel=ctx.raise_if_cancelled,
                 route_max_zoom=route_max_zoom,
                 max_pairs=max_pairs,
+                chunk_votes=[read_storage_json(p) for p in chunk_vote_paths] or None,
             )
             if work_dir != output_dir:
                 ctx.heartbeat(progress_message=f"uploading layers to {output_dir}")
@@ -679,6 +685,134 @@ def _make_build_zoom_layers_handler(facet_name: str):
     return handler
 
 
+def _routing_paths(chunk_path: str) -> tuple[str, str, str]:
+    """(routing dir, index dir, votes path) for a chunk at <routing>/chunks/<name>."""
+    chunks_dir = chunk_path.rsplit("/", 1)[0]
+    routing = chunks_dir.rsplit("/", 1)[0]
+    name = chunk_path.rsplit("/", 1)[1]
+    return routing, routing + "/index", routing + "/votes/" + name
+
+
+def _local_index(index_dir: str, ctx: HandlerContext | None = None) -> str:
+    """A local directory holding the snap index arrays at ``index_dir``.
+
+    Remote: downloaded once per host per PLAN (the planner's ID file), so the
+    chunks of one plan claimed by the same host share one copy, and a re-plan
+    is never served the previous graph's arrays. Written to a temp name and
+    renamed, so two chunks fetching at once cannot see a half-written copy."""
+    if not _is_remote(index_dir):
+        return index_dir
+    import tempfile
+
+    from facetwork.runtime.storage import get_storage_backend
+
+    be = get_storage_backend(index_dir)
+    with be.open(index_dir + "/ID", "r") as fh:
+        plan_id = fh.read().strip()
+    base = os.path.join(os.environ.get("FW_LOCAL_SCRATCH") or tempfile.gettempdir(),
+                        "zoom-snap-index")
+    final = os.path.join(base, plan_id)
+    if os.path.exists(os.path.join(final, ".complete")):
+        return final
+    os.makedirs(base, exist_ok=True)
+    tmp = tempfile.mkdtemp(prefix=f".{plan_id}-", dir=base)
+    for name in be.listdir(index_dir):
+        name = name.rstrip("/").rsplit("/", 1)[-1]
+        if ctx is not None:
+            ctx.heartbeat(progress_message=f"fetching snap index {name}")
+        with be.open(index_dir + "/" + name, "rb") as src, open(os.path.join(tmp, name), "wb") as dst:
+            shutil.copyfileobj(src, dst, 16 * 1024 * 1024)
+    open(os.path.join(tmp, ".complete"), "w").close()
+    try:
+        os.rename(tmp, final)
+    except OSError:  # another chunk on this host finished first
+        shutil.rmtree(tmp, ignore_errors=True)
+    # Older plans' copies: only the current one is ever read again.
+    for old in os.listdir(base):
+        if old != plan_id and not old.startswith("."):
+            shutil.rmtree(os.path.join(base, old), ignore_errors=True)
+    return final
+
+
+def _make_plan_zoom_routing_handler(facet_name: str):
+    """PlanZoomRouting: steps 0-2 and the routing chunks, written to the store."""
+
+    def handler(payload: dict) -> dict:
+        cache = payload.get("cache", {})
+        gh_config = payload.get("graph", {})
+        output_dir = _resolve_layers_dir(payload.get("output_dir", ""))
+        if not output_dir:
+            raise ValueError("PlanZoomRouting needs output_dir")
+        route_max_zoom = int(payload.get("route_max_zoom", 7) or 7)
+        if not 2 <= route_max_zoom <= 7:
+            raise ValueError(f"route_max_zoom must be 2..7, got {route_max_zoom}")
+        step_log = payload.get("_step_log")
+        ctx = HandlerContext.from_payload(payload)
+        # Its own local dir: BuildZoomLayers publishes ITS work dir whole, and
+        # the index (GBs at country scale) must not ride along a second time.
+        work_dir = (_local_work_dir(output_dir) + "-plan") if _is_remote(output_dir) else output_dir
+        os.makedirs(work_dir, exist_ok=True)
+        plan = plan_zoom_routing(
+            cache, gh_config, int(payload.get("min_population", 50000)), work_dir,
+            route_max_zoom=route_max_zoom, max_pairs=int(payload.get("max_pairs", 0) or 0),
+            chunk_pairs=int(payload.get("chunk_pairs", 500) or 500),
+            heartbeat=lambda msg: ctx.heartbeat(progress_message=msg),
+            check_cancel=ctx.raise_if_cancelled,
+        )
+        routing_remote = output_dir.rstrip("/") + "/routing"
+        if work_dir != output_dir:
+            ctx.heartbeat(progress_message=f"uploading routing plan to {routing_remote}")
+            n = _publish_dir(plan["routing_dir"], routing_remote)
+            shutil.rmtree(work_dir, ignore_errors=True)
+            if step_log:
+                step_log(f"{facet_name}: uploaded {n} file(s) to {routing_remote}")
+        chunks = [output_dir.rstrip("/") + "/" + c for c in plan["chunks"]]
+        if step_log:
+            step_log(f"{facet_name}: {len(chunks)} routing chunks "
+                     + ", ".join(f"z{z}: {v['pairs']} pairs/{v['chunks']}"
+                                 for z, v in plan["zooms"].items()), level="success")
+        return {"chunks": chunks, "routing_dir": routing_remote,
+                "chunk_count": len(chunks), "zooms": json.dumps(plan["zooms"])}
+
+    return handler
+
+
+def _make_route_zoom_chunk_handler(facet_name: str):
+    """RouteZoomChunk: route + snap one chunk on whichever host claims it."""
+
+    def handler(payload: dict) -> dict:
+        chunk_path = payload["chunk"]
+        step_log = payload.get("_step_log")
+        ctx = HandlerContext.from_payload(payload)
+        _routing, index_dir, votes_path = _routing_paths(chunk_path)
+        chunk = read_storage_json(chunk_path)
+        # Idempotent: a re-delivered task (at-least-once) finds its own result.
+        try:
+            prior = read_storage_json(votes_path)
+            if prior.get("key") == chunk["key"]:
+                if step_log:
+                    step_log(f"{facet_name}: already routed ({prior.get('routed')} routes)")
+                return {"votes_path": votes_path, "routed": int(prior.get("routed", 0))}
+        except Exception:  # noqa: BLE001 - absent or unreadable: route it
+            pass
+        local = _local_index(index_dir, ctx)
+        doc = route_zoom_chunk(
+            chunk, local, int(payload.get("max_concurrent", 16) or 16),
+            heartbeat=lambda msg: ctx.heartbeat(progress_message=msg),
+            check_cancel=ctx.raise_if_cancelled,
+        )
+        ensure_dir(votes_path)
+        with open_output(votes_path, "w") as fh:
+            json.dump(doc, fh)
+        if step_log:
+            step_log(f"{facet_name}: z{doc['zoom']} chunk {doc['index'] + 1}/{doc['count']}: "
+                     f"{doc['routed']}/{len(chunk['pairs'])} routed, votes on "
+                     f"{len(doc['votes'])} edges", level="success")
+        return {"votes_path": votes_path, "routed": doc["routed"]}
+
+    return handler
+
+
 # Event facet definitions for handler registration
 ZOOM_FACETS = [
     ("BuildLogicalGraph", _make_build_logical_graph_handler),
@@ -690,6 +824,8 @@ ZOOM_FACETS = [
     ("SelectEdges", _make_select_edges_handler),
     ("ExportZoomLayers", _make_export_zoom_layers_handler),
     ("BuildZoomLayers", _make_build_zoom_layers_handler),
+    ("PlanZoomRouting", _make_plan_zoom_routing_handler),
+    ("RouteZoomChunk", _make_route_zoom_chunk_handler),
 ]
 
 

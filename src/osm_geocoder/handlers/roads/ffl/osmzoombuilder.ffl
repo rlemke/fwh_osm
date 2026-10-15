@@ -193,9 +193,54 @@ namespace osm.Roads.ZoomBuilder {
         // selected by class/name only. 4 for a country on a major-roads graph.
         route_max_zoom: Long = 7,
         // Cap on city pairs routed per zoom; 0 = the per-zoom default.
-        max_pairs: Long = 0
+        max_pairs: Long = 0,
+        // Vote files from RouteZoomChunk (via RouteZoomChunks). A zoom whose
+        // chunks are all here under its checkpoint key is merged instead of
+        // routed in this task; anything else is routed here as before.
+        chunk_votes: [String] = []
     ) => (
         result: ZoomBuilderResult,
         metrics: ZoomBuilderMetrics
     ) with Effect(kind = "pure") with Cost(tier = "moderate")
+
+    /** BuildZoomLayers' cities, graph and anchors, then each routed zoom's city
+        pairs cut into chunks of `chunk_pairs` for RouteZoomChunk, plus the snap
+        index as arrays, under `output_dir`/routing. Run BuildZoomLayers on the
+        same output_dir afterwards with the chunks' votes. */
+    event facet PlanZoomRouting(
+        cache: OSMCache,
+        graph: GraphHopperCache,
+        output_dir: String,
+        min_population: Long = 50000,
+        route_max_zoom: Long = 7,
+        max_pairs: Long = 0,
+        chunk_pairs: Long = 500,
+        // Resource floor for the call site's Requires, as in BuildZoomLayers.
+        memory_gb: Long = 0
+    ) => (
+        chunks: [String],
+        routing_dir: String,
+        chunk_count: Long,
+        zooms: String
+    ) with Effect(kind = "pure") with Cost(tier = "moderate")
+
+    /** Route and snap ONE chunk on whichever host claims it: through the
+        region's own router when one is ready and reachable, else the
+        fleet-wide one. Idempotent -- a re-delivered task returns the votes it
+        already wrote. */
+    event facet RouteZoomChunk(
+        chunk: String,
+        max_concurrent: Long = 16
+    ) => (
+        votes_path: String,
+        routed: Long
+    ) with Effect(kind = "pure") with Cost(tier = "moderate")
+
+    /** Every chunk of a plan, at most `width` at a time (0 = unbounded). */
+    facet RouteZoomChunks(chunks: [String], width: Int = 0) => (
+        votes: [String]
+    ) andThen foreach c in $.chunks limit $.width {
+        r = RouteZoomChunk(chunk = $.c)
+        yield RouteZoomChunks(votes += r.votes_path)
+    }
 }

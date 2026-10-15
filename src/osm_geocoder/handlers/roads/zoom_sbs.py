@@ -512,16 +512,25 @@ class SnapPool:
     noise, not a new error.
     """
 
-    def __init__(self, index: SegmentIndex, workers: int, work_dir: str) -> None:
+    def __init__(self, index: SegmentIndex | None, workers: int, work_dir: str = "",
+                 index_dir: str = "") -> None:
+        """Save ``index`` to a temp dir under ``work_dir`` (removed on close), or
+        map an index already saved at ``index_dir`` (left in place)."""
         import multiprocessing
         import shutil
         import tempfile
         from concurrent.futures import ProcessPoolExecutor
 
         self.workers = workers
+        self._owned = not index_dir
         self._rmtree = shutil.rmtree
-        self.dir = tempfile.mkdtemp(prefix="snap-index-", dir=work_dir or None)
-        index.save(self.dir)
+        if index_dir:
+            self.dir = index_dir
+            index = index or SegmentIndex.load(index_dir)
+        else:
+            assert index is not None, "SnapPool needs an index or an index_dir"
+            self.dir = tempfile.mkdtemp(prefix="snap-index-", dir=work_dir or None)
+            index.save(self.dir)
         memo_max = max(10_000, SegmentIndex.SNAP_MEMO_MAX // max(1, workers))
         self._pool = ProcessPoolExecutor(
             max_workers=workers,
@@ -537,7 +546,8 @@ class SnapPool:
 
     def close(self, cancel: bool = False) -> None:
         self._pool.shutdown(wait=not cancel, cancel_futures=cancel)
-        self._rmtree(self.dir, ignore_errors=True)
+        if self._owned:
+            self._rmtree(self.dir, ignore_errors=True)
 
     def __enter__(self) -> "SnapPool":
         return self
@@ -1125,6 +1135,7 @@ def route_and_accumulate(
     check_cancel: Callable[[], None] | None = None,
     submit_window: int = 4096,
     snapper: "SnapPool | None" = None,
+    tally: dict[str, int] | None = None,
 ) -> tuple[dict[int, int], int]:
     """Route OD pairs and snap each route to logical edges AS IT COMPLETES.
 
@@ -1147,7 +1158,8 @@ def route_and_accumulate(
     if not HAS_REQUESTS:
         log.warning("requests not available, skipping routing")
         return dict(bc), 0
-    tally: dict[str, int] = {}
+    # Routing outcomes by reason; a caller passing its own dict gets them back.
+    tally = {} if tally is None else tally
 
     total = len(pairs)
     routed = 0

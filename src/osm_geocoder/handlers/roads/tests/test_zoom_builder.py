@@ -884,7 +884,7 @@ class TestHandlerRegistration:
 
     def test_zoom_facets_count(self):
         """Expected number of zoom facets."""
-        assert len(ZOOM_FACETS) == 9
+        assert len(ZOOM_FACETS) == 11
 
     def test_zoom_facets_names(self):
         """All expected facet names are present."""
@@ -898,13 +898,15 @@ class TestHandlerRegistration:
         assert "SelectEdges" in names
         assert "ExportZoomLayers" in names
         assert "BuildZoomLayers" in names
+        assert "PlanZoomRouting" in names
+        assert "RouteZoomChunk" in names
 
     def test_register_zoom_handlers(self, monkeypatch):
-        """register_zoom_handlers registers 9 handlers with mock poller."""
+        """register_zoom_handlers registers 11 handlers with mock poller."""
         monkeypatch.setitem(register_zoom_handlers.__globals__, "HAS_OSMIUM", True)
         poller = MagicMock()
         register_zoom_handlers(poller)
-        assert poller.register.call_count == 9
+        assert poller.register.call_count == 11
 
         call_args = [call[0][0] for call in poller.register.call_args_list]
         assert f"{NAMESPACE}.BuildLogicalGraph" in call_args

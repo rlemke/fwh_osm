@@ -14,6 +14,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 log = logging.getLogger(__name__)
 
@@ -169,49 +170,17 @@ def _sbs_checkpoint_key(z: int, pairs: list, graph, pbf_path: str) -> str:
     return h.hexdigest()
 
 
-def build_zoom_layers(
+def _prepare(
     cache: dict,
     graph_config: dict,
-    min_population: int = 50_000,
-    output_dir: str = "",
-    max_concurrent: int = 16,
-    heartbeat: Callable[[str], None] | None = None,
-    check_cancel: Callable[[], None] | None = None,
-    route_max_zoom: int = 7,
-    max_pairs: int = 0,
-) -> tuple[dict, dict]:
-    """Orchestrate the full Low-Zoom roads pipeline.
-
-    ``heartbeat``/``check_cancel`` are threaded into the long loops (routing and
-    vote accumulation) and called at every step boundary; without them a
-    state-sized region outlives the stuck-task watchdog and gets reclaimed.
-
-    Args:
-        cache: OSMCache dict with 'path' key pointing to PBF file.
-        graph_config: GraphHopperCache dict with 'graphDir' and 'profile'.
-        min_population: Minimum population for city anchors.
-        output_dir: Directory for output files.
-        max_concurrent: Max concurrent GraphHopper requests.
-        route_max_zoom: Highest zoom that routes its city pairs (2-7). Zooms
-            above it get no betweenness, so their layers are selected by class
-            and name alone and carry ``routed = false``. A country-scale run on
-            a major-roads graph routes z2-z4 only: z5-z7 pair hundreds of
-            thousands of towns over continental distances, and the graph has
-            none of the roads those tiers ride.
-        max_pairs: Cap on the city pairs routed per zoom (0 = the per-zoom
-            default). Matching a route onto the graph costs ~1 ms per km, so a
-            country's z4 default of 50k pairs averaging >1,000 km is ~18 h; a
-            random sample keeps the distance mix, only the votes get noisier.
-
-    Returns:
-        Tuple of (result_dict, metrics_dict).
-    """
-    if not output_dir:
-        output_dir = os.path.join(_LOCAL_OUTPUT, "zoom-builder")
-    t0 = time.time()
-    out = Path(output_dir)
-    out.mkdir(parents=True, exist_ok=True)
-
+    min_population: int,
+    out: Path,
+    heartbeat: Callable[[str], None] | None,
+    check_cancel: Callable[[], None] | None,
+) -> SimpleNamespace | None:
+    """Steps 0-2, shared by the one-task build and the routing planner: the
+    cities, the logical graph, and each zoom's anchors. None when there is
+    nothing to build (no osmium, no PBF, or no edges)."""
     pbf_path = cache.get("path", "")
     graph_dir = graph_config.get("graphDir", "")
     profile = graph_config.get("profile", "car")
@@ -230,13 +199,13 @@ def build_zoom_layers(
 
     if not HAS_OSMIUM or not pbf_path:
         log.warning("pyosmium not available or no PBF path, returning empty result")
-        return _empty_result(output_dir), _empty_metrics()
+        return None
 
     road_graph = build_logical_graph(pbf_path, output_path=graph_path)
 
     if not road_graph.edges:
         log.warning("No logical edges built from PBF")
-        return _empty_result(output_dir), _empty_metrics()
+        return None
 
     # 2. Build anchor sets per zoom
     log.info("Step 2: Building anchor sets")
@@ -274,6 +243,208 @@ def build_zoom_layers(
     ensure_dir(str(out / "anchor_cities.geojson"))
     with open_output(str(out / "anchor_cities.geojson"), "w") as fh:
         json.dump({"type": "FeatureCollection", "features": list(tier_of.values())}, fh)
+    return SimpleNamespace(
+        pbf_path=pbf_path, graph_dir=graph_dir, profile=profile, cities_path=cities_path,
+        city_count=city_count, road_graph=road_graph, scale=scale,
+        anchors_by_zoom=anchors_by_zoom,
+    )
+
+
+def _zoom_pairs(ctx: SimpleNamespace, z: int, max_pairs: int) -> tuple[list, str]:
+    """(city pairs, checkpoint key) for zoom ``z`` -- deterministic, so a planner
+    and a finisher running apart agree on both."""
+    k = DEFAULT_K_PAIRS.get(z, 5_000)
+    if max_pairs > 0:
+        k = min(k, max_pairs)
+    pairs = sample_od_pairs(ctx.anchors_by_zoom[z], z, ctx.road_graph, k_pairs=k, scale=ctx.scale)
+    return pairs, _sbs_checkpoint_key(z, pairs, ctx.road_graph, ctx.pbf_path)
+
+
+# -- routing as separate tasks ------------------------------------------------
+#
+# Step 3 used to be one loop inside one task: hours of routing on one host, and
+# a restart threw away up to a whole zoom. Split, it is three steps:
+#
+#   plan_zoom_routing   steps 0-2, then each zoom's pairs cut into chunk files,
+#                       plus the snap index as arrays (SegmentIndex.save);
+#   route_zoom_chunk    one chunk on ANY host: route via the region's router,
+#                       snap with a local SnapPool, write the chunk's votes;
+#   build_zoom_layers   with chunk_votes: a zoom whose chunks are all present
+#                       under ITS checkpoint key is merged instead of routed.
+#
+# The key is _sbs_checkpoint_key over the recipe, input, graph and pairs, and
+# pair sampling is seeded, so planner and finisher agree on it even on
+# different hosts -- and a vote file from any other plan can never be merged.
+
+ROUTING_SUBDIR = "routing"
+
+
+def plan_zoom_routing(
+    cache: dict,
+    graph_config: dict,
+    min_population: int,
+    output_dir: str,
+    route_max_zoom: int = 7,
+    max_pairs: int = 0,
+    chunk_pairs: int = 500,
+    heartbeat: Callable[[str], None] | None = None,
+    check_cancel: Callable[[], None] | None = None,
+) -> dict:
+    """Write ``<output_dir>/routing/``: ``index/`` (snap arrays) and
+    ``chunks/z{z}_{i:03d}.json``. Returns {chunks: [relative paths], zooms}."""
+    import uuid
+
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    ctx = _prepare(cache, graph_config, min_population, out, heartbeat, check_cancel)
+    routing = out / ROUTING_SUBDIR
+    if ctx is None:
+        return {"chunks": [], "zooms": {}, "routing_dir": str(routing)}
+    (routing / "chunks").mkdir(parents=True, exist_ok=True)
+    if heartbeat is not None:
+        heartbeat("plan: snap index")
+    index = SegmentIndex(ctx.road_graph)
+    index.save(str(routing / "index"))
+    # Identity of THIS plan's index: a chunk task caches the arrays per host by
+    # it, so a re-plan (new graph) is never served a stale copy.
+    (routing / "index" / "ID").write_text(uuid.uuid4().hex)
+    chunk_pairs = max(1, int(chunk_pairs))
+    chunks: list[str] = []
+    zooms: dict[str, dict] = {}
+    for z in range(2, min(route_max_zoom, 7) + 1):
+        pairs, key = _zoom_pairs(ctx, z, max_pairs)
+        n = (len(pairs) + chunk_pairs - 1) // chunk_pairs
+        zooms[str(z)] = {"key": key, "pairs": len(pairs), "chunks": n}
+        for i in range(n):
+            part = pairs[i * chunk_pairs:(i + 1) * chunk_pairs]
+            nodes = {a for a, _b in part} | {b for _a, b in part}
+            doc = {
+                "zoom": z, "key": key, "index": i, "count": n,
+                "pairs": [list(p) for p in part],
+                "coords": {str(nid): list(ctx.road_graph.node_coords[nid])
+                           for nid in nodes if nid in ctx.road_graph.node_coords},
+                "graph_dir": ctx.graph_dir, "profile": ctx.profile,
+            }
+            name = f"chunks/z{z}_{i:03d}.json"
+            (routing / name).write_text(json.dumps(doc))
+            chunks.append(f"{ROUTING_SUBDIR}/{name}")
+    log.info("Planned %d routing chunks of <= %d pairs: %s", len(chunks), chunk_pairs,
+             ", ".join(f"z{z} {v['pairs']} pairs/{v['chunks']} chunks" for z, v in zooms.items()))
+    return {"chunks": chunks, "zooms": zooms, "routing_dir": str(routing)}
+
+
+def route_zoom_chunk(
+    chunk: dict,
+    index_dir: str,
+    max_concurrent: int = 16,
+    heartbeat: Callable[[str], None] | None = None,
+    check_cancel: Callable[[], None] | None = None,
+) -> dict:
+    """Route and snap one chunk (a ``plan_zoom_routing`` chunk document).
+
+    Returns the votes document: {zoom, key, index, count, routed, votes, tally}.
+    The router is the chunk region's own when one is ready and reachable
+    (zoom_router), else the fleet-wide one; the probe refuses a router that
+    cannot serve this region, as in the one-task build."""
+    pairs = [tuple(p) for p in chunk["pairs"]]
+    coords = {int(k): tuple(v) for k, v in chunk["coords"].items()}
+    graph_dir, profile = chunk.get("graph_dir", ""), chunk.get("profile", "car")
+    index = SegmentIndex.load(index_dir)
+    probe_router(coords, pairs, profile, graph_dir=graph_dir)
+    workers = snap_workers_default()
+    snapper = SnapPool(index, workers, index_dir=index_dir) if workers >= 2 else None
+    try:
+        tally: dict[str, int] = {}
+        bc, routed = route_and_accumulate(
+            pairs, coords, graph_dir, profile, index, max_concurrent,
+            heartbeat=heartbeat, check_cancel=check_cancel, snapper=snapper, tally=tally,
+        )
+    except BaseException:
+        if snapper is not None:
+            snapper.close(cancel=True)
+            snapper = None
+        raise
+    finally:
+        if snapper is not None:
+            snapper.close()
+    return {"zoom": chunk["zoom"], "key": chunk["key"], "index": chunk["index"],
+            "count": chunk["count"], "routed": routed, "tally": tally,
+            "votes": {str(e): n for e, n in bc.items()}}
+
+
+def _merge_chunk_votes(docs: list[dict], z: int, key: str) -> tuple[dict[int, int], int] | None:
+    """Summed votes for zoom ``z`` if EVERY chunk of it is present under ``key``,
+    else None (the caller routes the zoom itself)."""
+    mine = {d["index"]: d for d in docs if d.get("zoom") == z and d.get("key") == key}
+    if not mine:
+        return None
+    count = next(iter(mine.values()))["count"]
+    if sorted(mine) != list(range(count)):
+        missing = sorted(set(range(count)) - set(mine))
+        log.warning("zoom %d: %d of %d routing chunks missing (%s) -- routing the zoom here",
+                    z, len(missing), count, missing[:10])
+        return None
+    bc: dict[int, int] = defaultdict(int)
+    routed = 0
+    for d in mine.values():
+        routed += int(d.get("routed", 0))
+        for e, n in d["votes"].items():
+            bc[int(e)] += int(n)
+    log.info("zoom %d: merged %d routing chunks (%d routes, votes on %d edges)",
+             z, count, routed, len(bc))
+    return dict(bc), routed
+
+
+def build_zoom_layers(
+    cache: dict,
+    graph_config: dict,
+    min_population: int = 50_000,
+    output_dir: str = "",
+    max_concurrent: int = 16,
+    heartbeat: Callable[[str], None] | None = None,
+    check_cancel: Callable[[], None] | None = None,
+    route_max_zoom: int = 7,
+    max_pairs: int = 0,
+    chunk_votes: list[dict] | None = None,
+) -> tuple[dict, dict]:
+    """Orchestrate the full Low-Zoom roads pipeline.
+
+    ``heartbeat``/``check_cancel`` are threaded into the long loops (routing and
+    vote accumulation) and called at every step boundary; without them a
+    state-sized region outlives the stuck-task watchdog and gets reclaimed.
+
+    Args:
+        cache: OSMCache dict with 'path' key pointing to PBF file.
+        graph_config: GraphHopperCache dict with 'graphDir' and 'profile'.
+        min_population: Minimum population for city anchors.
+        output_dir: Directory for output files.
+        max_concurrent: Max concurrent GraphHopper requests.
+        route_max_zoom: Highest zoom that routes its city pairs (2-7). Zooms
+            above it get no betweenness, so their layers are selected by class
+            and name alone and carry ``routed = false``. A country-scale run on
+            a major-roads graph routes z2-z4 only: z5-z7 pair hundreds of
+            thousands of towns over continental distances, and the graph has
+            none of the roads those tiers ride.
+        max_pairs: Cap on the city pairs routed per zoom (0 = the per-zoom
+            default). Matching a route onto the graph costs ~1 ms per km, so a
+            country's z4 default of 50k pairs averaging >1,000 km is ~18 h; a
+            random sample keeps the distance mix, only the votes get noisier.
+
+    Returns:
+        Tuple of (result_dict, metrics_dict).
+    """
+    if not output_dir:
+        output_dir = os.path.join(_LOCAL_OUTPUT, "zoom-builder")
+    t0 = time.time()
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    ctx = _prepare(cache, graph_config, min_population, out, heartbeat, check_cancel)
+    if ctx is None:
+        return _empty_result(output_dir), _empty_metrics()
+    graph_dir, profile = ctx.graph_dir, ctx.profile
+    cities_path, city_count, road_graph = ctx.cities_path, ctx.city_count, ctx.road_graph
+    scale, anchors_by_zoom = ctx.scale, ctx.anchors_by_zoom
 
     # 3. Compute SBS per zoom (the expensive step)
     log.info("Step 3: Computing SBS per zoom level")
@@ -318,23 +489,24 @@ def build_zoom_layers(
                 check_cancel()
             if heartbeat is not None:
                 heartbeat(f"step 3: SBS zoom {z}")
-            k = DEFAULT_K_PAIRS.get(z, 5_000)
-            if max_pairs > 0:
-                k = min(k, max_pairs)
-            pairs = sample_od_pairs(anchors_by_zoom[z], z, road_graph, k_pairs=k, scale=scale)
+            pairs, sbs_key = _zoom_pairs(ctx, z, max_pairs)
 
             # Resume: a reclaimed attempt on the same host finds the zoom it already
             # routed. Measured 2026-10-12: the US z2-z4 build was killed three times
             # AFTER routing, and each retry spent ~3 h rerouting identical pairs.
             sbs_path = out / f"sbs_z{z}.json"
             key_path = out / f"sbs_z{z}.key"
-            sbs_key = _sbs_checkpoint_key(z, pairs, road_graph, pbf_path)
             if sbs_path.exists() and key_path.exists() and key_path.read_text() == sbs_key:
                 sbs_by_zoom[z] = load_sbs(str(sbs_path))
                 log.info("  SBS for zoom %d loaded from checkpoint (%d edges)", z, len(sbs_by_zoom[z]))
                 continue
 
-            if HAS_REQUESTS and graph_dir:
+            merged = _merge_chunk_votes(chunk_votes, z, sbs_key) if chunk_votes else None
+            if merged is not None:
+                # Routed by RouteZoomChunk tasks (plan_zoom_routing), on any host.
+                bc, routed = merged
+                total_route_count += routed
+            elif HAS_REQUESTS and graph_dir:
                 # Stream: snap each route as it completes, retain none (see
                 # route_and_accumulate for the 25 GB measurement behind this).
                 bc, routed = route_and_accumulate(
