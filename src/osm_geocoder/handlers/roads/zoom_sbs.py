@@ -33,7 +33,11 @@ except ImportError:  # keep the handler importable outside a runtime checkout
 
 from ..shared._output import ensure_dir, open_output, read_storage_json
 from .zoom_graph import RoadGraph, _haversine_m
+from .zoom_router import describe as router_describe
+from .zoom_router import router_url
 
+# The fleet-wide router. A region with its own router is found by graph path
+# instead (zoom_router.router_url); this is the fallback.
 GRAPHHOPPER_API_URL = os.environ.get("GRAPHHOPPER_API_URL", "http://localhost:8989")
 
 # Population thresholds per zoom level for anchor selection (spec §5.1)
@@ -837,7 +841,7 @@ def _route_pair(
 
     try:
         resp = requests.get(
-            f"{GRAPHHOPPER_API_URL}/route",
+            f"{router_url(graph_dir, profile)}/route",
             params={
                 "point": [f"{from_lat},{from_lon}", f"{to_lat},{to_lon}"],
                 "profile": profile,
@@ -896,7 +900,7 @@ def _route_pair_with_time(
 
     try:
         resp = requests.get(
-            f"{GRAPHHOPPER_API_URL}/route",
+            f"{router_url(graph_dir, profile)}/route",
             params={
                 "point": [f"{from_lat},{from_lon}", f"{to_lat},{to_lon}"],
                 "profile": profile,
@@ -1003,12 +1007,14 @@ def route_batch_parallel(
     return results
 
 
-def _server_covers(node_coords: dict[int, tuple[float, float]]) -> float | None:
+def _server_covers(
+    node_coords: dict[int, tuple[float, float]], graph_dir: str = "", profile: str = ""
+) -> float | None:
     """Fraction of ``node_coords`` inside the routing server's bbox (/info), or
     None if the server cannot be asked. A server holding another region covers
     ~0% of these nodes; one holding this region covers ~100%."""
     try:
-        r = requests.get(f"{GRAPHHOPPER_API_URL}/info", timeout=10)
+        r = requests.get(f"{router_url(graph_dir, profile)}/info", timeout=10)
         bbox = r.json().get("bbox") if r.status_code == 200 else None
     except Exception:  # noqa: BLE001 - unanswerable is "unknown", not "covered"
         return None
@@ -1027,6 +1033,7 @@ def probe_router(
     pairs: list[tuple[int, int]],
     profile: str,
     attempts: int = 8,
+    graph_dir: str = "",
 ) -> None:
     """Refuse to start the SBS loop unless the router can serve THIS region.
 
@@ -1065,13 +1072,13 @@ def probe_router(
         if from_node not in node_coords or to_node not in node_coords:
             continue
         probed += 1
-        _route_pair(from_node, to_node, node_coords, graph_dir="", profile=profile,
+        _route_pair(from_node, to_node, node_coords, graph_dir=graph_dir, profile=profile,
                     tally=tally, detail=detail)
         if tally.get(ROUTE_OK) or tally.get(ROUTE_NO_PATH):
             log.info(
                 "Router probe OK: %s serves this region for profile %r (%d routed, "
                 "%d with no path)",
-                GRAPHHOPPER_API_URL, profile,
+                router_describe(graph_dir, profile), profile,
                 tally.get(ROUTE_OK, 0), tally.get(ROUTE_NO_PATH, 0),
             )
             return
@@ -1084,7 +1091,7 @@ def probe_router(
     # Measured 2026-10-03: Tonga, Vanuatu and Kiribati failed here on 1-2 pairs.
     # Ask the server what it holds: if its bounds cover most of THIS region's
     # nodes, it is serving this region, whatever those pairs said.
-    covered = _server_covers(node_coords)
+    covered = _server_covers(node_coords, graph_dir, profile)
     if covered is not None and covered >= 0.8:
         log.warning(
             "Router probe: %d probe pair(s) refused (%s), but the server's bounds cover "
@@ -1095,7 +1102,7 @@ def probe_router(
 
     faults = ", ".join(f"{k}={v}" for k, v in sorted(tally.items()))
     raise PermanentError(
-        f"the routing server at {GRAPHHOPPER_API_URL} cannot serve this region "
+        f"the routing server at {router_describe(graph_dir, profile)} cannot serve this region "
         f"(profile {profile!r}): {probed} probe pairs, outcomes {faults or 'none'}; "
         f"last response -> {detail[-1] if detail else 'nothing'}. "
         "Every one was refused for a reason that indicts the SERVER, not the pair "
@@ -1271,7 +1278,7 @@ def route_and_accumulate(
                 heartbeat(f"routed {routed:,}/{total:,} pairs")
             return dict(bc), routed
     if answered and faults * 5 > answered and not witness:
-        covered = _server_covers(node_coords)
+        covered = _server_covers(node_coords, graph_dir, profile)
         if covered is not None and covered >= 0.8:
             log.warning(
                 "%d of %d routing requests were refused and none routed, but the server's "
@@ -1280,7 +1287,7 @@ def route_and_accumulate(
             return dict(bc), routed
     if answered and faults * 5 > answered:
         raise PermanentError(
-            f"the routing server at {GRAPHHOPPER_API_URL} stopped serving this region "
+            f"the routing server at {router_describe(graph_dir, profile)} stopped serving this region "
             f"mid-run: {faults:,} of {answered:,} requests failed in a way that indicts "
             f"the server ({', '.join(f'{k}={v}' for k, v in sorted(tally.items()))}). "
             "Betweenness computed from this would be meaningless, so the run stops "

@@ -298,7 +298,7 @@ def build_zoom_layers(
             if probe_pairs:
                 log.info("Probing the router with zoom-%d pairs", pz)
                 break
-        probe_router(road_graph.node_coords, probe_pairs, profile)
+        probe_router(road_graph.node_coords, probe_pairs, profile, graph_dir=graph_dir)
 
     # One snap pool for every zoom: its workers map the index once and keep it
     # (see SnapPool for the measurement behind it).

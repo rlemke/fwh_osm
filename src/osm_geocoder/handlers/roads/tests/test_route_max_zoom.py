@@ -47,7 +47,7 @@ def routed_zooms(monkeypatch, tmp_path):
         "snap_workers_default": lambda: 0,  # snap in-process: the index is a stub
         "recipe_fingerprint": lambda: "recipe",
         "sample_od_pairs": sample,
-        "probe_router": lambda coords, pairs, profile: probed.append(current["z"]),
+        "probe_router": lambda coords, pairs, profile, **k: probed.append(current["z"]),
         "route_and_accumulate": route,
         "save_sbs": lambda *a, **k: None,
         "detect_bypasses": lambda *a, **k: detector_index.append(k.get("segment_index")) or {},
