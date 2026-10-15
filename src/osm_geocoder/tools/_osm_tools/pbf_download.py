@@ -808,10 +808,26 @@ def download_region(
     # `force=True` still bypasses it.
     # Offline / local-only mode overrides everything: always use the cache if
     # present and never contact a mirror (even under force / revalidate).
+    #
+    # ⚠️ Both pins exist to stop a THIRD PARTY's daily rebuild from costing a
+    # multi-GB re-download. Against our own store (the self-hosted base) there
+    # is nothing to protect -- an unchanged file answers If-Modified-Since with
+    # 304 -- and pinning there means a REPLACED source is never seen: measured
+    # 2026-10-14, the US major-roads extract was rebuilt with car-ferry access,
+    # CacheRegion kept returning the old cached PBF, and the build silently
+    # used yesterday's input until the cache entry was deleted by hand. So with
+    # a self-hosted base the default and offline mode both revalidate (cheap,
+    # never leaves our infrastructure); an explicit per-call True still pins.
     offline = _offline_mode()
+    self_hosted = not _base_is_third_party()
     if offline:
-        use_cache_if_present, force = True, False
-    prefer_cache = _use_cache_if_present() if use_cache_if_present is None else use_cache_if_present
+        force = False
+        if not self_hosted:
+            use_cache_if_present = True
+    if use_cache_if_present is None:
+        prefer_cache = _use_cache_if_present() and not self_hosted
+    else:
+        prefer_cache = use_cache_if_present
     if not force and prefer_cache and is_region_cached(region, storage=storage):
         side = sidecar_entry_for(region, storage=storage) or {}
         source = side.get("source", {})

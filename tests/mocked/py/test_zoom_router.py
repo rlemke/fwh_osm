@@ -175,3 +175,14 @@ def test_the_fleet_wide_router_on_another_graph_is_not_used(monkeypatch):
     monkeypatch.setattr(zr, "_info_bbox", lambda url: [5.8, 47.2, 15.0, 55.1])
     _times(monkeypatch, {"http://far:18990": 27, "http://fleet-wide:8989": 1})
     assert zr.router_url(GRAPH, "car") == "http://far:18990"
+
+
+def test_describe_says_why_the_fleet_wide_router_was_chosen(monkeypatch):
+    box = [-124.7, 24.5, -66.9, 49.4]
+    _slots(monkeypatch, [{**_slot(url="http://far:18990"), "bbox": box}])
+    monkeypatch.setattr(zr, "_info_bbox", lambda url: box)
+    _times(monkeypatch, {"http://far:18990": 27, "http://fleet-wide:8989": 1})
+    assert "is nearest" in zr.describe(GRAPH, "car")
+    zr.forget()
+    _slots(monkeypatch, [])
+    assert "no ready region router" in zr.describe(GRAPH, "car")

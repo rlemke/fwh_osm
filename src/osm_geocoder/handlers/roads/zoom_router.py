@@ -199,6 +199,10 @@ def describe(graph_dir: str = "", profile: str = "") -> str:
     url = router_url(graph_dir, profile)
     if rp and url != default_url():
         return f"{url} (region router for {rp[0]})"
+    if rp and ready_urls(rp[0], profile or rp[1]):
+        # Chosen among the region's replicas because it serves the same graph
+        # and answered fastest -- usually the router on this host.
+        return f"{url} (fleet-wide router; serves {rp[0]} and is nearest)"
     if rp:
         return f"{url} (fleet-wide router; no ready region router for {rp[0]})"
     return url
