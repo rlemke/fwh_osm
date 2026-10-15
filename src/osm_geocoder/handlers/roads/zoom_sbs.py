@@ -286,6 +286,34 @@ class SegmentIndex:
     def segment_count(self) -> int:
         return len(self._seg_xy)
 
+    def row_of(self, edge_id: int) -> int:
+        """Row of ``edge_id`` in the arrays, or -1 (sorted lookup, built once)."""
+        import numpy as np
+
+        order = getattr(self, "_id_order", None)
+        if order is None:
+            order = np.argsort(self._edge_ids, kind="stable")
+            self._id_order = order
+            self._ids_sorted = self._edge_ids[order]
+        i = int(np.searchsorted(self._ids_sorted, edge_id))
+        if i < len(order) and int(self._ids_sorted[i]) == edge_id:
+            return int(order[i])
+        return -1
+
+    def edge_coords(self, edge_id: int) -> list | None:
+        """The edge's points rebuilt from its segments (None for an unknown edge
+        or one with fewer than two points, which can never be snapped to)."""
+        r = self.row_of(edge_id)
+        if r < 0:
+            return None
+        a, b = int(self._edge_start[r]), int(self._edge_start[r + 1])
+        if b <= a:
+            return None
+        segs = self._seg_xy[a:b]
+        pts = [(float(x), float(y)) for x, y in segs[:, :2]]
+        pts.append((float(segs[-1, 2]), float(segs[-1, 3])))
+        return pts
+
     def clear_memo(self) -> None:
         """Drop the snap memo and edge cache (the grid index itself is kept)."""
         self._snap_memo = {}

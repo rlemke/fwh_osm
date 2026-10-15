@@ -74,6 +74,7 @@ from .zoom_builder import (
     build_zoom_layers,
     plan_zoom_routing,
     recipe_fingerprint,
+    detect_zoom_chunk,
     route_zoom_chunk,
 )
 from .zoom_detection import (
@@ -589,6 +590,8 @@ def _make_build_zoom_layers_handler(facet_name: str):
         # Votes written by RouteZoomChunk tasks; zooms they fully cover are merged
         # instead of routed. Not part of the cache key: same layers either way.
         chunk_vote_paths = [p for p in (payload.get("chunk_votes") or []) if p]
+        # Likewise bypass / ring flags written by DetectZoomChunk tasks.
+        detect_paths = [p for p in (payload.get("detect_results") or []) if p]
         step_log = payload.get("_step_log")
 
         # Everything that changes the OUTPUT must be in the key, not just the
@@ -642,6 +645,7 @@ def _make_build_zoom_layers_handler(facet_name: str):
                 route_max_zoom=route_max_zoom,
                 max_pairs=max_pairs,
                 chunk_votes=[read_storage_json(p) for p in chunk_vote_paths] or None,
+                detect_results=[read_storage_json(p) for p in detect_paths] or None,
             )
             if work_dir != output_dir:
                 ctx.heartbeat(progress_message=f"uploading layers to {output_dir}")
@@ -758,6 +762,7 @@ def _make_plan_zoom_routing_handler(facet_name: str):
             chunk_pairs=int(payload.get("chunk_pairs", 500) or 500),
             heartbeat=lambda msg: ctx.heartbeat(progress_message=msg),
             check_cancel=ctx.raise_if_cancelled,
+            detect_pairs=int(payload.get("detect_pairs", 1500) or 0),
         )
         routing_remote = output_dir.rstrip("/") + "/routing"
         if work_dir != output_dir:
@@ -767,12 +772,20 @@ def _make_plan_zoom_routing_handler(facet_name: str):
             if step_log:
                 step_log(f"{facet_name}: uploaded {n} file(s) to {routing_remote}")
         chunks = [output_dir.rstrip("/") + "/" + c for c in plan["chunks"]]
+        detect_chunks = [output_dir.rstrip("/") + "/" + c for c in plan["detect_chunks"]]
         if step_log:
             step_log(f"{facet_name}: {len(chunks)} routing chunks "
                      + ", ".join(f"z{z}: {v['pairs']} pairs/{v['chunks']}"
                                  for z, v in plan["zooms"].items()), level="success")
+            d = plan.get("detect") or {}
+            if d:
+                step_log(f"{facet_name}: {len(detect_chunks)} detection chunks: "
+                         f"{d['bypass']['pairs']:,} bypass pairs from {d['bypass']['items']:,} "
+                         f"settlements, {d['ring']['pairs']:,} ring pairs from "
+                         f"{d['ring']['items']:,} cities", level="success")
         return {"chunks": chunks, "routing_dir": routing_remote,
-                "chunk_count": len(chunks), "zooms": json.dumps(plan["zooms"])}
+                "chunk_count": len(chunks), "zooms": json.dumps(plan["zooms"]),
+                "detect_chunks": detect_chunks}
 
     return handler
 
@@ -813,6 +826,42 @@ def _make_route_zoom_chunk_handler(facet_name: str):
     return handler
 
 
+def _make_detect_zoom_chunk_handler(facet_name: str):
+    """DetectZoomChunk: bypass or ring detection for one chunk, on any host."""
+
+    def handler(payload: dict) -> dict:
+        chunk_path = payload["chunk"]
+        step_log = payload.get("_step_log")
+        ctx = HandlerContext.from_payload(payload)
+        _routing, index_dir, result_path = _routing_paths(chunk_path)
+        chunk = read_storage_json(chunk_path)
+        # Idempotent: a re-delivered task (at-least-once) finds its own result.
+        try:
+            prior = read_storage_json(result_path)
+            if prior.get("key") == chunk["key"] and prior.get("kind") == chunk["kind"]:
+                if step_log:
+                    step_log(f"{facet_name}: already detected ({len(prior['flags'])} flags)")
+                return {"result_path": result_path, "flags": len(prior["flags"])}
+        except Exception:  # noqa: BLE001 - absent or unreadable: detect it
+            pass
+        local = _local_index(index_dir, ctx)
+        doc = detect_zoom_chunk(
+            chunk, local,
+            heartbeat=lambda msg: ctx.heartbeat(progress_message=msg),
+            check_cancel=ctx.raise_if_cancelled,
+        )
+        ensure_dir(result_path)
+        with open_output(result_path, "w") as fh:
+            json.dump(doc, fh)
+        if step_log:
+            step_log(f"{facet_name}: {doc['kind']} chunk {doc['index'] + 1}/{doc['count']}: "
+                     f"{doc['items']} {'settlements' if doc['kind'] == 'bypass' else 'cities'}, "
+                     f"flags on {len(doc['flags'])} edges", level="success")
+        return {"result_path": result_path, "flags": len(doc["flags"])}
+
+    return handler
+
+
 # Event facet definitions for handler registration
 ZOOM_FACETS = [
     ("BuildLogicalGraph", _make_build_logical_graph_handler),
@@ -826,6 +875,7 @@ ZOOM_FACETS = [
     ("BuildZoomLayers", _make_build_zoom_layers_handler),
     ("PlanZoomRouting", _make_plan_zoom_routing_handler),
     ("RouteZoomChunk", _make_route_zoom_chunk_handler),
+    ("DetectZoomChunk", _make_detect_zoom_chunk_handler),
 ]
 
 

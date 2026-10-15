@@ -27,9 +27,16 @@ from ..shared._output import ensure_dir, open_output, read_storage_json
 
 _LOCAL_OUTPUT = get_output_base()
 
+from . import zoom_detection as _zd
 from .zoom_detection import (
     detect_bypasses,
     detect_rings,
+    evaluate_bypasses,
+    evaluate_rings,
+    large_cities,
+    log_bypass_result,
+    plan_bypasses,
+    plan_rings,
     save_bypass_flags,
     save_ring_flags,
 )
@@ -289,9 +296,12 @@ def plan_zoom_routing(
     chunk_pairs: int = 500,
     heartbeat: Callable[[str], None] | None = None,
     check_cancel: Callable[[], None] | None = None,
+    detect_pairs: int = 1500,
 ) -> dict:
-    """Write ``<output_dir>/routing/``: ``index/`` (snap arrays) and
-    ``chunks/z{z}_{i:03d}.json``. Returns {chunks: [relative paths], zooms}."""
+    """Write ``<output_dir>/routing/``: ``index/`` (snap arrays + road classes),
+    ``chunks/z{z}_{i:03d}.json`` (city pairs) and, unless ``detect_pairs`` is 0,
+    ``chunks/d{b|r}_{i:03d}.json`` (bypass / ring detection, see
+    ``plan_detection``). Returns {chunks, detect_chunks, zooms, detect}."""
     import uuid
 
     out = Path(output_dir)
@@ -299,7 +309,8 @@ def plan_zoom_routing(
     ctx = _prepare(cache, graph_config, min_population, out, heartbeat, check_cancel)
     routing = out / ROUTING_SUBDIR
     if ctx is None:
-        return {"chunks": [], "zooms": {}, "routing_dir": str(routing)}
+        return {"chunks": [], "detect_chunks": [], "zooms": {}, "detect": {},
+                "routing_dir": str(routing)}
     (routing / "chunks").mkdir(parents=True, exist_ok=True)
     if heartbeat is not None:
         heartbeat("plan: snap index")
@@ -330,7 +341,172 @@ def plan_zoom_routing(
             chunks.append(f"{ROUTING_SUBDIR}/{name}")
     log.info("Planned %d routing chunks of <= %d pairs: %s", len(chunks), chunk_pairs,
              ", ".join(f"z{z} {v['pairs']} pairs/{v['chunks']} chunks" for z, v in zooms.items()))
-    return {"chunks": chunks, "zooms": zooms, "routing_dir": str(routing)}
+    detect_chunks: list[str] = []
+    detect: dict = {}
+    if detect_pairs > 0 and HAS_REQUESTS and ctx.graph_dir:
+        np_save_edge_fc(index, ctx.road_graph, str(routing / "index"))
+        detect_chunks, detect = plan_detection(ctx, routing, detect_pairs, heartbeat, check_cancel)
+    return {"chunks": chunks, "detect_chunks": detect_chunks, "zooms": zooms,
+            "detect": detect, "routing_dir": str(routing)}
+
+
+# -- bypass / ring detection as separate tasks --------------------------------
+#
+# Step 4 was one loop in one task: three routes per entry/exit pair of every
+# settlement, then 200 per large city, one request after another. Measured
+# 2026-10-15 on the US build: 1.6 h of bypasses and over an hour of rings, and
+# 3.4x that when the router was across WiFi (27 ms a route against 8 ms).
+# Each settlement and each city is judged on its own, so the planner does the
+# geometry (which pairs to route; it needs the whole graph) and chunk tasks do
+# the routing (they need node coordinates, the snap index and road classes).
+# The finisher merges them in plan order -- bypass flags first-wins, ring flags
+# by union -- which is what the one loop produces.
+
+EDGE_FC_FILE = "edge_fc.npy"
+
+
+def np_save_edge_fc(index: SegmentIndex, graph, directory: str) -> None:
+    """Road-class score of each edge, in the snap index's row order."""
+    import numpy as np
+
+    fc = np.array([graph.edge_by_id[int(e)].fc_score for e in index._edge_ids], dtype=np.float32)
+    np.save(os.path.join(directory, EDGE_FC_FILE), fc)
+
+
+def _detect_key(ctx: SimpleNamespace, settlements: list) -> str:
+    """Identity of a detection plan: recipe, input, graph, settlements and the
+    detection tunables, so results from any other plan are never merged."""
+    # Every constant that shapes the result; not availability flags or the
+    # heartbeat cadence, which differ between hosts without changing it.
+    tunables = {k: getattr(_zd, k) for k in dir(_zd)
+                if k.isupper() and not k.startswith(("HAS_", "DETECT_HEARTBEAT"))
+                and isinstance(getattr(_zd, k), (int, float, dict))}
+    h = hashlib.sha256()
+    h.update(f"{recipe_fingerprint()}|{ctx.pbf_path}|{len(ctx.road_graph.edges)}|".encode())
+    h.update(json.dumps(tunables, sort_keys=True, default=str).encode())
+    h.update(json.dumps(settlements, sort_keys=True, default=str).encode())
+    return h.hexdigest()
+
+
+def _cut_by_pairs(items: list[dict], budget: int) -> list[list[dict]]:
+    """Consecutive runs of items holding about ``budget`` pairs each."""
+    out: list[list[dict]] = []
+    cur: list[dict] = []
+    n = 0
+    for it in items:
+        cur.append(it)
+        n += len(it["pairs"])
+        if n >= budget:
+            out.append(cur)
+            cur, n = [], 0
+    if cur:
+        out.append(cur)
+    return out
+
+
+def plan_detection(
+    ctx: SimpleNamespace,
+    routing: Path,
+    detect_pairs: int,
+    heartbeat: Callable[[str], None] | None = None,
+    check_cancel: Callable[[], None] | None = None,
+) -> tuple[list[str], dict]:
+    """Write the bypass (``chunks/db_*.json``) and ring (``chunks/dr_*.json``)
+    detection chunks. Returns (relative paths, summary)."""
+    settlements = _zd._load_settlements(ctx.cities_path)
+    key = _detect_key(ctx, settlements)
+    g = ctx.road_graph
+    bitems, bstats = plan_bypasses(g, settlements, heartbeat, check_cancel)
+    ritems = plan_rings(g, large_cities(settlements), heartbeat, check_cancel)
+    paths: list[str] = []
+    summary: dict = {"key": key, "settlements": len(settlements)}
+    for kind, items in (("bypass", bitems), ("ring", ritems)):
+        parts = _cut_by_pairs(items, detect_pairs)
+        summary[kind] = {"items": len(items), "pairs": sum(len(i["pairs"]) for i in items),
+                         "chunks": len(parts)}
+        for i, part in enumerate(parts):
+            nodes: set[int] = set()
+            for it in part:
+                for a, b in it["pairs"]:
+                    nodes.update((a, b))
+                if it.get("center") is not None:
+                    nodes.add(it["center"])
+            doc = {"kind": kind, "key": key, "index": i, "count": len(parts), "items": part,
+                   "coords": {str(n): list(g.node_coords[n]) for n in nodes if n in g.node_coords},
+                   "graph_dir": ctx.graph_dir, "profile": ctx.profile,
+                   # The planner's own rejections, counted once (chunk 0).
+                   "stats": bstats if (kind == "bypass" and i == 0) else {}}
+            name = f"chunks/d{kind[0]}_{i:03d}.json"
+            (routing / name).write_text(json.dumps(doc))
+            paths.append(f"{ROUTING_SUBDIR}/{name}")
+    log.info("Planned detection: %d settlements -> %s bypass pairs in %d chunks; "
+             "%d ring cities, %s pairs in %d chunks", len(settlements),
+             f"{summary['bypass']['pairs']:,}", summary["bypass"]["chunks"],
+             summary["ring"]["items"], f"{summary['ring']['pairs']:,}", summary["ring"]["chunks"])
+    return paths, summary
+
+
+def detect_zoom_chunk(
+    chunk: dict,
+    index_dir: str,
+    heartbeat: Callable[[str], None] | None = None,
+    check_cancel: Callable[[], None] | None = None,
+) -> dict:
+    """Route and judge one detection chunk. Returns {kind, key, index, count,
+    flags, stats}: bypass flags as an ordered [edge, type] list, ring flags as
+    a list of edges."""
+    import numpy as np
+
+    index = SegmentIndex.load(index_dir)
+    fc = np.load(os.path.join(index_dir, EDGE_FC_FILE), mmap_mode="r")
+    coords = {int(k): tuple(v) for k, v in chunk["coords"].items()}
+    graph_dir, profile = chunk.get("graph_dir", ""), chunk.get("profile", "car")
+
+    def fc_of(eid: int) -> float | None:
+        r = index.row_of(eid)
+        return float(fc[r]) if r >= 0 else None
+
+    stats: dict[str, int] = {}
+    if chunk["kind"] == "bypass":
+        flags = evaluate_bypasses(chunk["items"], coords, graph_dir, profile, index, fc_of,
+                                  stats, heartbeat, check_cancel)
+        out = [[e, t] for e, t in flags.items()]
+    else:
+        rings = evaluate_rings(chunk["items"], coords, graph_dir, profile, index,
+                               index.edge_coords, heartbeat, check_cancel)
+        out = list(rings)
+    return {"kind": chunk["kind"], "key": chunk["key"], "index": chunk["index"],
+            "count": chunk["count"], "items": len(chunk["items"]), "flags": out,
+            "stats": stats}
+
+
+def _merge_detection(docs: list[dict], kind: str, key: str):
+    """Merged flags for ``kind`` if EVERY chunk of it is present under ``key``,
+    else None (the caller detects it itself). Bypass: {edge: type}, first flag
+    in plan order wins; ring: {edge: True}. Also returns the merged stats."""
+    mine = {d["index"]: d for d in docs if d.get("kind") == kind and d.get("key") == key}
+    if not mine:
+        return None
+    count = next(iter(mine.values()))["count"]
+    if sorted(mine) != list(range(count)):
+        missing = sorted(set(range(count)) - set(mine))
+        log.warning("%s detection: %d of %d chunks missing (%s) -- detecting here",
+                    kind, len(missing), count, missing[:10])
+        return None
+    flags: dict = {}
+    stats: dict[str, int] = {}
+    for i in range(count):
+        d = mine[i]
+        for k, v in (d.get("stats") or {}).items():
+            stats[k] = stats.get(k, 0) + int(v)
+        if kind == "bypass":
+            for e, t in d["flags"]:
+                flags.setdefault(int(e), t)
+        else:
+            for e in d["flags"]:
+                flags[int(e)] = True
+    log.info("%s detection: merged %d chunks (flags on %d edges)", kind, count, len(flags))
+    return flags, stats
 
 
 def route_zoom_chunk(
@@ -406,6 +582,7 @@ def build_zoom_layers(
     route_max_zoom: int = 7,
     max_pairs: int = 0,
     chunk_votes: list[dict] | None = None,
+    detect_results: list[dict] | None = None,
 ) -> tuple[dict, dict]:
     """Orchestrate the full Low-Zoom roads pipeline.
 
@@ -542,20 +719,34 @@ def build_zoom_layers(
     if heartbeat is not None:
         heartbeat("step 4")
     if HAS_REQUESTS and graph_dir:
+        merged_b = merged_r = None
+        if detect_results:
+            settlements = _zd._load_settlements(cities_path)
+            dkey = _detect_key(ctx, settlements)
+            merged_b = _merge_detection(detect_results, "bypass", dkey)
+            merged_r = _merge_detection(detect_results, "ring", dkey)
+            if merged_b is not None:
+                log_bypass_result(merged_b[0], len(settlements), merged_b[1])
         # One index for steps 3 and 4; step 3's memo is useless here (other
         # routes) and is the bulk of its size.
         segment_index.clear_memo()
-        bypass_flags = detect_bypasses(
-            road_graph, cities_path, graph_dir, profile,
-            heartbeat=heartbeat, check_cancel=check_cancel,
-            segment_index=segment_index,
-        )
+        if merged_b is not None:
+            bypass_flags = merged_b[0]
+        else:
+            bypass_flags = detect_bypasses(
+                road_graph, cities_path, graph_dir, profile,
+                heartbeat=heartbeat, check_cancel=check_cancel,
+                segment_index=segment_index,
+            )
         segment_index.clear_memo()
-        ring_flags = detect_rings(
-            road_graph, cities_path, graph_dir, profile,
-            heartbeat=heartbeat, check_cancel=check_cancel,
-            segment_index=segment_index,
-        )
+        if merged_r is not None:
+            ring_flags = merged_r[0]
+        else:
+            ring_flags = detect_rings(
+                road_graph, cities_path, graph_dir, profile,
+                heartbeat=heartbeat, check_cancel=check_cancel,
+                segment_index=segment_index,
+            )
         segment_index.clear_memo()
     else:
         bypass_flags = {}

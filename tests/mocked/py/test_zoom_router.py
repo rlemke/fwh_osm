@@ -38,6 +38,8 @@ class FakeSlots:
 def _clean(monkeypatch):
     zr.forget()
     monkeypatch.setattr(zr, "reachable", lambda url: True)
+    monkeypatch.setattr(zr, "_info_bbox", lambda url: None)
+    monkeypatch.setattr(zr, "_this_host", lambda: "this-host")
     monkeypatch.setenv("GRAPHHOPPER_API_URL", "http://fleet-wide:8989")
     yield
     zr.forget()
@@ -131,3 +133,45 @@ def test_no_reachable_replica_falls_back(monkeypatch):
     _slots(monkeypatch, [_slot(url="http://mac:18990")])
     monkeypatch.setattr(zr, "reachable", lambda url: False)
     assert zr.router_url(GRAPH, "car") == "http://fleet-wide:8989"
+
+
+# -- nearest replica (2026-10-15: 27 ms over WiFi vs 8 ms on the same host) --
+
+def _times(monkeypatch, ms: dict):
+    monkeypatch.setattr(zr, "latency", lambda url: None if ms.get(url) is None else ms[url] / 1000)
+
+
+def test_the_nearest_replica_is_used(monkeypatch):
+    _slots(monkeypatch, [_slot(url="http://wifi:18990"), _slot(url="http://wired:18990")])
+    _times(monkeypatch, {"http://wifi:18990": 27, "http://wired:18990": 8})
+    assert {zr.router_url(GRAPH, "car") for _ in range(30)} == {"http://wired:18990"}
+
+
+def test_replicas_about_as_near_share_the_load(monkeypatch):
+    _slots(monkeypatch, [_slot(url="http://a:18990"), _slot(url="http://b:18990")])
+    _times(monkeypatch, {"http://a:18990": 8, "http://b:18990": 11})
+    assert {zr.router_url(GRAPH, "car") for _ in range(60)} == {"http://a:18990", "http://b:18990"}
+
+
+def test_a_replica_on_this_host_is_tried_through_host_docker_internal(monkeypatch):
+    """A Docker Desktop Mac cannot reach its own published port by LAN address."""
+    mine = {**_slot(url="http://192.0.2.5:18990"), "host": "this-host", "port": 18990}
+    _slots(monkeypatch, [mine, _slot(url="http://far:18990")])
+    _times(monkeypatch, {"http://host.docker.internal:18990": 1, "http://192.0.2.5:18990": None,
+                         "http://far:18990": 27})
+    assert zr.router_url(GRAPH, "car") == "http://host.docker.internal:18990"
+
+
+def test_the_fleet_wide_router_counts_when_it_serves_the_same_graph(monkeypatch):
+    box = [-124.7, 24.5, -66.9, 49.4]
+    _slots(monkeypatch, [{**_slot(url="http://far:18990"), "bbox": box}])
+    monkeypatch.setattr(zr, "_info_bbox", lambda url: box if url == "http://fleet-wide:8989" else None)
+    _times(monkeypatch, {"http://far:18990": 27, "http://fleet-wide:8989": 8})
+    assert zr.router_url(GRAPH, "car") == "http://fleet-wide:8989"
+
+
+def test_the_fleet_wide_router_on_another_graph_is_not_used(monkeypatch):
+    _slots(monkeypatch, [{**_slot(url="http://far:18990"), "bbox": [-124.7, 24.5, -66.9, 49.4]}])
+    monkeypatch.setattr(zr, "_info_bbox", lambda url: [5.8, 47.2, 15.0, 55.1])
+    _times(monkeypatch, {"http://far:18990": 27, "http://fleet-wide:8989": 1})
+    assert zr.router_url(GRAPH, "car") == "http://far:18990"

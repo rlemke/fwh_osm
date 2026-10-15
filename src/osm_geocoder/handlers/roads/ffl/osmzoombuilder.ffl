@@ -197,7 +197,11 @@ namespace osm.Roads.ZoomBuilder {
         // Vote files from RouteZoomChunk (via RouteZoomChunks). A zoom whose
         // chunks are all here under its checkpoint key is merged instead of
         // routed in this task; anything else is routed here as before.
-        chunk_votes: [String] = []
+        chunk_votes: [String] = [],
+        // Result files from DetectZoomChunk (via DetectZoomChunks): bypass and
+        // ring flags merged instead of detected here when every chunk of a
+        // kind is present under the plan's key.
+        detect_results: [String] = []
     ) => (
         result: ZoomBuilderResult,
         metrics: ZoomBuilderMetrics
@@ -215,13 +219,18 @@ namespace osm.Roads.ZoomBuilder {
         route_max_zoom: Long = 7,
         max_pairs: Long = 0,
         chunk_pairs: Long = 500,
+        // Bypass / ring detection pairs per DetectZoomChunk (3 routes per
+        // bypass pair, 1 per ring pair); 0 = no detection chunks, so
+        // BuildZoomLayers detects in its own task as before.
+        detect_pairs: Long = 1500,
         // Resource floor for the call site's Requires, as in BuildZoomLayers.
         memory_gb: Long = 0
     ) => (
         chunks: [String],
         routing_dir: String,
         chunk_count: Long,
-        zooms: String
+        zooms: String,
+        detect_chunks: [String]
     ) with Effect(kind = "pure") with Cost(tier = "moderate")
 
     /** Route and snap ONE chunk on whichever host claims it: through the
@@ -242,5 +251,22 @@ namespace osm.Roads.ZoomBuilder {
     ) andThen foreach c in $.chunks limit $.width {
         r = RouteZoomChunk(chunk = $.c)
         yield RouteZoomChunks(votes += r.votes_path)
+    }
+
+    /** Bypass or ring detection for ONE planned chunk of settlements / large
+        cities, on whichever host claims it. Idempotent like RouteZoomChunk. */
+    event facet DetectZoomChunk(
+        chunk: String
+    ) => (
+        result_path: String,
+        flags: Long
+    ) with Effect(kind = "pure") with Cost(tier = "moderate")
+
+    /** Every detection chunk of a plan, at most `width` at a time (0 = unbounded). */
+    facet DetectZoomChunks(chunks: [String], width: Int = 0) => (
+        results: [String]
+    ) andThen foreach c in $.chunks limit $.width {
+        d = DetectZoomChunk(chunk = $.c)
+        yield DetectZoomChunks(results += d.result_path)
     }
 }

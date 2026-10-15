@@ -73,31 +73,108 @@ def reachable(url: str) -> bool:
         return False
 
 
+def latency(url: str) -> float | None:
+    """Seconds for the faster of two /health round trips, or None if unreachable."""
+    best = None
+    for _ in range(2):
+        t = time.perf_counter()
+        if not reachable(url):
+            return None
+        d = time.perf_counter() - t
+        best = d if best is None else min(best, d)
+    return best
+
+
+def _info_bbox(url: str) -> list | None:
+    """The bbox a router reports on /info (identifies the graph it serves)."""
+    try:
+        import requests
+
+        r = requests.get(f"{url}/info", timeout=REACH_TIMEOUT_S)
+        return r.json().get("bbox") if r.status_code == 200 else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _same_bbox(a, b) -> bool:
+    return bool(a and b) and len(a) == len(b) and all(abs(x - y) < 1e-6 for x, y in zip(a, b))
+
+
+def _this_host() -> str:
+    import socket
+
+    return os.environ.get("HOSTNAME") or socket.gethostname()
+
+
+def _candidates(slots: list[dict]) -> list[str]:
+    """URLs that may serve these slots' region, nearest-first by construction.
+
+    * each ready replica's published URL;
+    * a replica on THIS host also through ``host.docker.internal``: a Docker
+      Desktop Mac cannot reach its own published port by its LAN address from
+      a container, so without this its runners always went to another host;
+    * the fleet-wide ``GRAPHHOPPER_API_URL`` when it serves the same graph
+      (same /info bbox) -- usually a router on this host's own container
+      network."""
+    out: list[str] = []
+    me = _this_host()
+    for s in slots:
+        if s.get("host") == me and s.get("port"):
+            out.append(f"http://host.docker.internal:{s['port']}")
+        out.append(s["url"])
+    boxes = [s.get("bbox") for s in slots if s.get("bbox")]
+    if boxes and any(_same_bbox(_info_bbox(default_url()), b) for b in boxes):
+        out.append(default_url())
+    return list(dict.fromkeys(out))
+
+
+# A replica counts as "near" when its round trip is within this of the
+# fastest; requests spread across the near ones and skip the far ones.
+NEAR_FACTOR = 2.0
+NEAR_SLACK_S = 0.005
+
+
 def ready_urls(region: str, profile: str) -> list[str]:
-    """URLs of the ready replicas for ``region``/``profile`` that this process
-    can reach (cached CACHE_S)."""
+    """The NEAREST routers this process can reach for ``region``/``profile``
+    (cached CACHE_S): every reachable candidate within NEAR_FACTOR of the
+    fastest round trip.
+
+    ⚠️ Nearest, not any. Bypass and ring detection route one request after
+    another, so latency is their whole cost: measured 2026-10-15 on the US
+    build, a replica over WiFi took 27 ms a route against 8 ms for the router
+    on the builder's own host, and detection ran 3.4x slower than the night
+    before."""
     key = (region, profile)
     now = time.time()
     with _lock:
         hit = _cache.get(key)
         if hit and now - hit[0] < CACHE_S:
             return hit[1]
-    urls: list[str] = []
+    slots: list[dict] = []
     try:
         coll = _slots_collection()
         if coll is not None:
-            urls = [s["url"] for s in coll.find(
+            slots = list(coll.find(
                 {"region": region, "profile": profile, "state": "ready",
-                 "lease_expires": {"$gt": now}, "url": {"$ne": None}}, {"url": 1})]
+                 "lease_expires": {"$gt": now}, "url": {"$ne": None}},
+                {"url": 1, "host": 1, "port": 1, "bbox": 1}))
     except Exception as exc:  # noqa: BLE001 - registry unreachable: use the fallback
         log.warning("router registry unreadable (%s); using %s", exc, default_url())
-    if urls:
-        ok = [u for u in urls if reachable(u)]
-        if len(ok) < len(urls):
+    urls: list[str] = []
+    if slots:
+        cands = _candidates(slots)
+        timed = {u: latency(u) for u in cands}
+        ok = {u: t for u, t in timed.items() if t is not None}
+        dead = [s["url"] for s in slots if s["url"] not in ok]
+        if dead:
             log.warning("router for %s/%s: %d of %d ready replica(s) unreachable from here: %s",
-                        region, profile, len(urls) - len(ok), len(urls),
-                        ", ".join(u for u in urls if u not in ok))
-        urls = ok
+                        region, profile, len(dead), len(slots), ", ".join(dead))
+        if ok:
+            best = min(ok.values())
+            limit = max(best * NEAR_FACTOR, best + NEAR_SLACK_S)
+            urls = [u for u in cands if u in ok and ok[u] <= limit]
+            log.info("router for %s/%s: using %s (fastest %.0f ms)", region, profile,
+                     ", ".join(urls), best * 1000)
     with _lock:
         _cache[key] = (now, urls)
     return urls
@@ -106,7 +183,7 @@ def ready_urls(region: str, profile: str) -> list[str]:
 def router_url(graph_dir: str = "", profile: str = "") -> str:
     """The router to send this graph's requests to.
 
-    A random ready replica (spreading load when there are several), else the
+    A random near replica (spreading load when there are several), else the
     fleet-wide ``GRAPHHOPPER_API_URL``."""
     rp = region_of(graph_dir)
     if rp:
