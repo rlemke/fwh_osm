@@ -51,6 +51,23 @@ def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s).strip("-")
 
 
+def _unit_slug(name_local: str | None, name_en: str | None, iso: str | None) -> str:
+    """Slug for a sub-region's key segment: the LOCAL name (Geofabrik's convention,
+    bayern not bavaria), falling back to the English name, then the ISO code.
+
+    A non-Latin local name slugs to "" (NFKD + ASCII drops every character).
+    Measured 2026-10-16: cutting six Russian federal districts at admin_level 4
+    keyed every oblast `russia/<district>/` -- the first one published as
+    `russia/<district>/-latest.osm.pbf` and the rest were dropped as duplicates
+    of that key. Returns "" only when no name yields a slug; the caller drops it.
+    """
+    for cand in (name_local, name_en, iso):
+        sl = _slug(cand or "")
+        if sl:
+            return sl
+    return ""
+
+
 # Trailing admin-type words to drop so a self-generated county slug matches Census
 # TIGER's BARE county name (OSM "Alachua County" → "Alachua"). Without this, the
 # TIGER county fallback can't dedupe and publishes BOTH "<x>-county" (self-gen from
@@ -121,8 +138,9 @@ def _geofabrik_key(name_local: str, name_en: str | None, iso: str | None,
         cont = _ISO_CONTINENT.get(country_iso)
         country = _ISO_COUNTRY_SLUG.get(country_iso)
         if cont and country:
-            return f"{cont}/{country}/{_slug(name_local)}"
-    return _slug(name_local)                             # flat fallback
+            unit = _unit_slug(name_local, name_en, iso)
+            return f"{cont}/{country}/{unit}" if unit else ""
+    return _unit_slug(name_local, name_en, iso)          # flat fallback
 
 
 def _run(cmd: list[str]) -> None:
@@ -180,6 +198,7 @@ def generate_polygons(source: str, admin_level: int, dest: str, *,
     seen: set[str] = set()
     dropped = 0  # sub-national relations mistagged at this level (islands/reserves) with no
                  # resolvable ISO 3166-2 → they'd pollute the bucket root with flat keys.
+    unnamed = 0  # units whose every name slugs to "" -- never published under an empty key
     with open(seq, encoding="utf-8") as f:
         for line in f:
             line = line.strip().lstrip("\x1e")  # RFC 8142 record separator
@@ -207,10 +226,14 @@ def generate_polygons(source: str, admin_level: int, dest: str, *,
                 if int(admin_level) <= 4 and not has_iso2:
                     dropped += 1
                     continue
-                unit = name_local or name
-                if int(admin_level) >= 6:
-                    unit = _strip_admin_type(unit)   # "Alachua County" → "Alachua" (match TIGER)
-                key = f"{country_prefix.strip('/')}/{_slug(unit)}"
+                strip = _strip_admin_type if int(admin_level) >= 6 else (lambda u: u)
+                # "Alachua County" → "Alachua" (match TIGER) at county levels.
+                unit = _unit_slug(strip(name_local) if name_local else None,
+                                  strip(name_en) if name_en else None, iso)
+                if not unit:
+                    unnamed += 1
+                    continue
+                key = f"{country_prefix.strip('/')}/{unit}"
             else:
                 # Standalone: derive the continent/country prefix from ISO 3166-2.
                 # A sub-national unit (level >= 4) that only produces a flat slug
@@ -226,6 +249,9 @@ def generate_polygons(source: str, admin_level: int, dest: str, *,
                 # `united-states-of-america-minor-outlying-islands-navassa-island-…`
                 # to the root. Drop it at every level rather than pollute that
                 # namespace; a unit worth having needs a continent.
+                if not key or key.endswith("/"):
+                    unnamed += 1
+                    continue
                 if "/" not in key:
                     dropped += 1
                     continue
@@ -241,6 +267,8 @@ def generate_polygons(source: str, admin_level: int, dest: str, *,
             regions.append(BoundaryRegion(key, str(gj.resolve()), name, int(admin_level), iso))
 
     suffix = f" (dropped {dropped} without a country ISO 3166-2)" if dropped else ""
+    if unnamed:
+        suffix += f" (dropped {unnamed} with no name that yields a key)"
     log(f"generated {len(regions)} admin_level={admin_level} polygons{suffix}")
 
     # Found candidates and kept NONE. That is a parameter/data mismatch, not an

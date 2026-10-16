@@ -140,3 +140,51 @@ def test_a_flat_key_never_reaches_the_bucket_root(tmp_path, monkeypatch):
     keys = [r.key for r in got]
     assert all("/" in k for k in keys), f"a flat key would land at the root: {keys}"
     assert "central-america/jamaica" in keys
+
+
+def _named(local, en, iso, level):
+    f = _feature(en or "x", iso, level)
+    f["properties"]["name"] = local
+    if en is None:
+        f["properties"].pop("name:en")
+    else:
+        f["properties"]["name:en"] = en
+    return f
+
+
+def test_a_non_latin_local_name_falls_back_to_english(tmp_path, monkeypatch):
+    """2026-10-16: Cyrillic oblast names slugged to "" and every oblast of a
+    federal district was keyed `russia/<district>/` -- one published, the rest
+    dropped as duplicates."""
+    feats = [
+        _named("Свердловская область", "Sverdlovsk Oblast", "RU-SVE", 4),
+        _named("Челябинская область", "Chelyabinsk Oblast", "RU-CHE", 4),
+        _named("Тюменская область", None, "RU-TYU", 4),  # no English name: the ISO code
+    ]
+    _fake_run(monkeypatch, tmp_path, feats, 4)
+    got = bg.generate_polygons("src.pbf", 4, str(tmp_path),
+                               country_prefix="russia/ural-federal-district")
+    assert sorted(r.key for r in got) == [
+        "russia/ural-federal-district/chelyabinsk-oblast",
+        "russia/ural-federal-district/ru-tyu",
+        "russia/ural-federal-district/sverdlovsk-oblast",
+    ]
+
+
+def test_a_latin_local_name_still_wins(tmp_path, monkeypatch):
+    """Keys of already-published Latin-script regions must not change."""
+    _fake_run(monkeypatch, tmp_path, [_named("Bayern", "Bavaria", "DE-BY", 4)], 4)
+    got = bg.generate_polygons("src.pbf", 4, str(tmp_path), country_prefix="europe/germany")
+    assert [r.key for r in got] == ["europe/germany/bayern"]
+
+
+def test_no_key_ever_ends_in_an_empty_segment(tmp_path, monkeypatch):
+    _fake_run(monkeypatch, tmp_path, [_named("東京都", None, "", 6)], 6)
+    got = bg.generate_polygons("src.pbf", 6, str(tmp_path), country_prefix="asia/japan/kanto")
+    assert got == []
+
+
+def test_standalone_keying_falls_back_too():
+    key = bg._geofabrik_key("Свердловская область", "Sverdlovsk Oblast", "RU-SVE", 4)
+    assert key.endswith("/sverdlovsk-oblast")
+    assert bg._geofabrik_key("東京都", None, None, 4) == ""
