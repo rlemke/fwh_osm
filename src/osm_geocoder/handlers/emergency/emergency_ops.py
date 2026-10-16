@@ -332,7 +332,7 @@ def render_atlas(layer_path: str, rankings: list, title: str) -> dict:
 <script>
 const FC={fc_js}, RANKS={rank_js};
 const map=new maplibregl.Map({{container:'map',style:{{version:8,
- sources:{{bm:{{type:'raster',tiles:['https://a.basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}.png'],tileSize:256,attribution:'&copy; OSM &copy; CARTO'}}}},
+ sources:{{bm:{{type:'raster',tiles:['https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png'],tileSize:256,attribution:'&copy; OSM'}}}},
  layers:[{{id:'bm',type:'raster',source:'bm'}}]}},center:[5.5,51.5],zoom:6}});
 map.addControl(new maplibregl.NavigationControl());
 map.on('load',()=>{{
