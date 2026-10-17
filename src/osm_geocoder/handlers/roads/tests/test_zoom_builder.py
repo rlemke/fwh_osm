@@ -884,7 +884,7 @@ class TestHandlerRegistration:
 
     def test_zoom_facets_count(self):
         """Expected number of zoom facets."""
-        assert len(ZOOM_FACETS) == 11
+        assert len(ZOOM_FACETS) == 12
 
     def test_zoom_facets_names(self):
         """All expected facet names are present."""
@@ -906,7 +906,7 @@ class TestHandlerRegistration:
         monkeypatch.setitem(register_zoom_handlers.__globals__, "HAS_OSMIUM", True)
         poller = MagicMock()
         register_zoom_handlers(poller)
-        assert poller.register.call_count == 11
+        assert poller.register.call_count == 12
 
         call_args = [call[0][0] for call in poller.register.call_args_list]
         assert f"{NAMESPACE}.BuildLogicalGraph" in call_args
@@ -1065,3 +1065,31 @@ class TestRouteGapBridging:
 
         g = self._graph({1: (1, 2, "motorway", "I 5"), 2: (2, 3, "trunk", "CA 99"), 3: (3, 4, "motorway", "I 5")})
         assert bridge_route_gaps(g, {1, 3}, "motorway", {"I 5": [1, 3], "CA 99": [2]}) == set()
+
+
+class TestPeakRss:
+    """Every build reports its peak memory, so the claim floor can be refit
+    on real runs instead of two measured points (Minas Gerais was OOM-killed
+    five times under a floor fitted to Washington and California)."""
+
+    def test_records_the_peak_and_logs_milestones(self, monkeypatch):
+        from osm_geocoder.handlers.roads import zoom_handlers as zh
+
+        readings = iter([1.0, 5.0, 7.5, 3.0, 2.0])
+        monkeypatch.setattr(zh, "_rss_gb", lambda: next(readings, 2.0))
+        logged = []
+        rss = zh._PeakRss(logged.append, interval_s=3600)  # no background samples
+        rss.__enter__()
+        for _ in range(3):
+            rss._sample()
+        rss.__exit__(None, None, None)
+        assert rss.start == 1.0 and rss.peak == 7.5
+        assert logged == ["BuildZoomLayers: memory reached 7.5 GB RSS"]
+
+    def test_inert_where_rss_cannot_be_read(self, monkeypatch):
+        from osm_geocoder.handlers.roads import zoom_handlers as zh
+
+        monkeypatch.setattr(zh, "_rss_gb", lambda: None)
+        with zh._PeakRss(None) as rss:
+            pass
+        assert rss.start is None

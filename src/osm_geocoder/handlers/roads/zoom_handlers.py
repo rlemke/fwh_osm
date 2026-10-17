@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import shutil
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -570,6 +571,66 @@ def _make_export_zoom_layers_handler(facet_name: str):
     return handler
 
 
+def _rss_gb() -> float | None:
+    """This process's resident set, GB (Linux /proc; None elsewhere)."""
+    try:
+        with open("/proc/self/status") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) / (1024 * 1024)
+    except OSError:
+        return None
+    return None
+
+
+class _PeakRss:
+    """Sample process RSS during a build; record the peak.
+
+    The zoom build's memory floor (``memory_gb``) was fitted to two measured
+    points and nothing recorded the peak of any other run, so a floor that was
+    too low showed up only as an OOM kill with no error text (Minas Gerais,
+    five times). This makes every build report its peak, and logs each new
+    2 GB milestone from 6 GB up so an OOM-killed run still leaves its last
+    reading in the step log. ⚠️ Process-wide: other tasks running in the same
+    runner process are included, which is also what the OOM killer counts.
+    """
+
+    def __init__(self, step_log=None, interval_s: float = 2.0) -> None:
+        self.start = _rss_gb()
+        self.peak = self.start or 0.0
+        self._step_log = step_log
+        self._interval = interval_s
+        self._next_mark = 6.0
+        self._stop = threading.Event()
+        self._t = threading.Thread(target=self._run, daemon=True, name="zoom-peak-rss")
+
+    def __enter__(self) -> "_PeakRss":
+        if self.start is not None:
+            self._t.start()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self._stop.set()
+        self._sample()
+
+    def _sample(self) -> None:
+        cur = _rss_gb()
+        if cur is None:
+            return
+        self.peak = max(self.peak, cur)
+        if self._step_log and self.peak >= self._next_mark:
+            try:
+                self._step_log(f"BuildZoomLayers: memory reached {self.peak:.1f} GB RSS")
+            except Exception:  # noqa: BLE001 - a log line must not fail the build
+                pass
+            while self._next_mark <= self.peak:
+                self._next_mark += 2.0
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            self._sample()
+
+
 def _make_build_zoom_layers_handler(facet_name: str):
     """Create handler for BuildZoomLayers event facet."""
     qualified = f"{NAMESPACE}.{facet_name}"
@@ -633,20 +694,22 @@ def _make_build_zoom_layers_handler(facet_name: str):
         # scratch (the pipeline writes with local file APIs), upload, and hand
         # back the remote paths, which BuildVectorTiles localizes anywhere.
         work_dir = _local_work_dir(output_dir) if _is_remote(output_dir) else output_dir
+        rss = _PeakRss(step_log)
         try:
-            result, metrics = build_zoom_layers(
-                cache=cache,
-                graph_config=gh_config,
-                min_population=min_population,
-                output_dir=work_dir,
-                max_concurrent=max_concurrent,
-                heartbeat=lambda msg: ctx.heartbeat(progress_message=msg),
-                check_cancel=ctx.raise_if_cancelled,
-                route_max_zoom=route_max_zoom,
-                max_pairs=max_pairs,
-                chunk_votes=[read_storage_json(p) for p in chunk_vote_paths] or None,
-                detect_results=[read_storage_json(p) for p in detect_paths] or None,
-            )
+            with rss:
+                result, metrics = build_zoom_layers(
+                    cache=cache,
+                    graph_config=gh_config,
+                    min_population=min_population,
+                    output_dir=work_dir,
+                    max_concurrent=max_concurrent,
+                    heartbeat=lambda msg: ctx.heartbeat(progress_message=msg),
+                    check_cancel=ctx.raise_if_cancelled,
+                    route_max_zoom=route_max_zoom,
+                    max_pairs=max_pairs,
+                    chunk_votes=[read_storage_json(p) for p in chunk_vote_paths] or None,
+                    detect_results=[read_storage_json(p) for p in detect_paths] or None,
+                )
             if work_dir != output_dir:
                 ctx.heartbeat(progress_message=f"uploading layers to {output_dir}")
                 n = _publish_dir(work_dir, output_dir)
@@ -671,6 +734,14 @@ def _make_build_zoom_layers_handler(facet_name: str):
                     f"selected, {metrics.get('city_count', 0)} cities)",
                     level="success",
                 )
+                if rss.start is not None:
+                    step_log(
+                        f"{facet_name}: peak memory {rss.peak:.1f} GB RSS "
+                        f"(started at {rss.start:.1f} GB; process-wide)"
+                    )
+            if rss.start is not None:
+                metrics = {**metrics, "peak_rss_gb": round(rss.peak, 2),
+                           "start_rss_gb": round(rss.start, 2)}
             rv = {"result": result, "metrics": metrics}
             save_result_meta(qualified, cache, cache_params, rv)
             return rv
